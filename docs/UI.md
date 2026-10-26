@@ -11,7 +11,7 @@ La distribution web utilise `index.html` et Trunk.
 | --- | --- |
 | `app.rs` | état racine, panneaux, barre d'outils, raccourcis, aide |
 | `document.rs` | schéma, historique, sélection, cache d'extraction |
-| `view.rs` | transformations grille/écran, zoom, ajustement |
+| `view.rs` | transformations grille/écran, zoom, ajustement, mini-carte |
 | `analysis.rs` | catalogue, préparation worker, traces, mesures, FFT, Bode, CSV |
 | `export.rs` | fichier natif et téléchargement navigateur |
 | `ui/canvas.rs` | entrées souris, placement, câblage et peinture |
@@ -22,14 +22,22 @@ La distribution web utilise `index.html` et Trunk.
 | `ui/instruments.rs` | panneau de simulation et graphiques |
 
 De haut en bas : barre d'outils (document, undo/redo, outils, transformations,
-alignement, Instruments, **Commandes**, aide), palette filtrable à gauche,
-canevas central, inspecteur/ERC à droite, instruments en bas (210–560 px), barre
-d'état. `Ctrl+K` ouvre la palette de commandes. Les onglets **Portée**,
+alignement, **Cadrer sél.**, **Vue**, **Commandes**, aide), palette filtrable à
+gauche, canevas central, inspecteur/ERC à droite, instruments en bas (210–560 px),
+barre d'état. `Ctrl+K` ouvre la palette de commandes. Les onglets **Portée**,
 **Spectre** et **Bode** conservent leurs résultats séparément. La démonstration
 présélectionne `V1`, `5 V` et `OUT`.
 
-Le canevas s'ajuste au contenu au démarrage et via **Ajuster**/`Home`. La grille
-est entière avec un pas visuel adaptatif.
+Le menu **Vue** masque chaque panneau, active la mini-carte et applique une
+disposition fiable : **Tout**, **Édition** (palette et inspecteur),
+**Simulation** (instruments et inspecteur) ou **Canevas** seul. Ces dispositions
+sont aussi accessibles par `Ctrl+1` à `Ctrl+4`. Les panneaux restent des zones
+fixes redimensionnables ; aucun dockage libre n'est proposé.
+
+Le canevas s'ajuste au contenu au démarrage et via **Ajuster**/`Home`. **Cadrer
+sél.**/`Ctrl+Home` cadre la sélection. La grille est entière avec un pas visuel
+adaptatif. La mini-carte du coin inférieur droit montre le contenu, la sélection
+et la fenêtre visible ; un clic y recentre la vue.
 
 ## 2. Interactions
 
@@ -42,7 +50,11 @@ est entière avec un pas visuel adaptatif.
 - `Ctrl+A` : tout sélectionner ; `Échap` : annuler l'outil, le collage ou la sélection.
 - `Ctrl+C`, `Ctrl+V`, `Ctrl+D` : copier, coller avec aperçu, dupliquer.
 - Molette : zoom centré sous le curseur (8–80 px/case).
+- `+`/`-` : zoom autour du centre ; `0` : zoom 100 %.
+- `Ctrl+0` : retour à l'origine et au zoom par défaut.
+- Flèches : déplacer la vue de deux cases ; `Maj` : huit cases.
 - Bouton milieu + glisser : déplacer la vue ; `Home` : ajuster.
+- Mini-carte : clic pour recentrer la vue sur le contenu.
 
 Priorité au clic : label, jonction, symbole, fil. Le survol d'un fil ou d'une
 broche met en évidence le net complet. Des guides apparaissent pendant le
@@ -124,8 +136,13 @@ les formats de fichiers sont dans [INSTRUMENTS.md](INSTRUMENTS.md).
 | `Ctrl+Z`, `Ctrl+Y` / `Ctrl+Maj+Z` | annuler, rétablir |
 | `Ctrl+A` | tout sélectionner |
 | `?` | aide et raccourcis |
+| `Home` | ajuster la vue au schéma |
+| `Ctrl+Home` | cadrer la sélection |
+| `+`, `-`, `0` | zoom avant, arrière, 100 % |
+| `Ctrl+0` | origine et zoom par défaut |
+| Flèches, `Maj`+flèches | déplacer la vue |
+| `Ctrl+1`…`Ctrl+4` | Tout, Édition, Simulation, Canevas |
 | `Échap` | annuler l'outil, le collage ou la sélection |
-| `Home` | ajuster la vue |
 
 Les raccourcis sont ignorés si un champ texte a le focus, à l’exception de
 `Ctrl+K` pour la palette de commandes. Aucun raccourci global ne lance une
@@ -141,12 +158,13 @@ d'identifiants. Collections et rendu sont ordonnés.
 Limites : worker dans le fil de l'interface, tests navigateur non automatisés,
 transitoire à pas fixe, FFT plafonnée, pas de curseurs/PNG/persistance de projet,
 opamp sans alimentation/pôle, pas de thème clair ni de mobile spécifique, fils
-non extensibles par extrémité, panneaux non dockables. Les valeurs simulées de
-l’inspecteur proviennent du dernier transitoire ; le câblage à double-clic et la
-persistance des favoris restent aux lots suivants.
+non extensibles par extrémité. Les panneaux sont masquables et redimensionnables,
+mais il n'y a pas de dockage libre ni de disposition persistée. Les valeurs
+simulées de l’inspecteur proviennent du dernier transitoire ; le câblage à
+double-clic et la persistance des favoris restent aux lots suivants.
 
-Tests : `cargo test -p circuitsim-app` couvre document, vue, édition, palette,
-propriétés, historique, presse-papiers, sélection rectangle, séries E, ERC,
-canevas headless, instruments, worker, FFT, Bode, CSV et export.
-Détails dans [TESTING.md](TESTING.md) ; recette web dans
-[DELIVERY.md](DELIVERY.md).
+Tests : `cargo test -p circuitsim-app` couvre document, vue, navigation,
+mini-carte, édition, palette, propriétés, historique, presse-papiers, sélection
+rectangle, séries E, ERC, canevas headless, dispositions, instruments, worker,
+FFT, Bode, CSV et export. Détails dans [TESTING.md](TESTING.md) ; recette web
+dans [DELIVERY.md](DELIVERY.md).

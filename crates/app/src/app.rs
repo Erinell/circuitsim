@@ -1,6 +1,6 @@
 //! Application shell, toolbar, shortcuts, and panel layout.
 
-use editor_core::ObjectRef;
+use editor_core::{GridPos, ObjectRef};
 use eframe::egui::{self, Align, Color32, Context, FontId, Key, Layout, RichText, Ui};
 
 use crate::document::{Alignment, DistributionAxis, Document};
@@ -11,7 +11,6 @@ use crate::ui::instruments::InstrumentsState;
 use crate::ui::palette::PaletteState;
 use crate::ui::properties::InspectorState;
 use crate::ui::{self, Status, Tool};
-use crate::view::DEFAULT_SCALE;
 
 /// Root application state.
 pub struct CircuitApp {
@@ -25,7 +24,44 @@ pub struct CircuitApp {
     palette: CommandPalette,
     status: Status,
     show_help: bool,
+    show_palette: bool,
+    show_inspector: bool,
     show_instruments: bool,
+}
+
+/// Reliable panel arrangement offered by the View menu.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum LayoutPreset {
+    /// Every panel visible.
+    All,
+    /// Palette and inspector, without instruments.
+    Editing,
+    /// Instruments and inspector, without the component palette.
+    Simulation,
+    /// Canvas only.
+    Canvas,
+}
+
+impl LayoutPreset {
+    const ALL: [Self; 4] = [Self::All, Self::Editing, Self::Simulation, Self::Canvas];
+
+    const fn label(self) -> &'static str {
+        match self {
+            Self::All => "Tout",
+            Self::Editing => "Édition",
+            Self::Simulation => "Simulation",
+            Self::Canvas => "Canevas",
+        }
+    }
+
+    const fn visibility(self) -> (bool, bool, bool) {
+        match self {
+            Self::All => (true, true, true),
+            Self::Editing => (true, true, false),
+            Self::Simulation => (false, true, true),
+            Self::Canvas => (false, false, false),
+        }
+    }
 }
 
 impl CircuitApp {
@@ -56,6 +92,8 @@ impl CircuitApp {
             palette: CommandPalette::default(),
             status,
             show_help: false,
+            show_palette: true,
+            show_inspector: true,
             show_instruments: true,
         }
     }
@@ -65,6 +103,22 @@ impl CircuitApp {
             self.canvas.cancel_interaction();
             self.tool = tool;
         }
+    }
+
+    fn apply_layout(&mut self, layout: LayoutPreset) {
+        let (palette, inspector, instruments) = layout.visibility();
+        self.show_palette = palette;
+        self.show_inspector = inspector;
+        self.show_instruments = instruments;
+    }
+
+    fn fit_selection(&mut self) {
+        let Some(bounds) = self.document.selection_bounds() else {
+            self.status.info("Sélectionnez au moins un objet à cadrer.");
+            return;
+        };
+        self.canvas.request_fit_bounds(bounds);
+        self.status.success("Vue cadrée sur la sélection.");
     }
 
     fn toolbar(&mut self, ui: &mut Ui) {
@@ -216,17 +270,74 @@ impl CircuitApp {
                     }
                 });
             });
-            if ui.button("Ajuster").on_hover_text("Home").clicked() {
-                self.canvas.request_fit();
-            }
-            ui.separator();
             if ui
-                .selectable_label(self.show_instruments, "Instruments")
-                .on_hover_text("Afficher ou masquer la simulation, les portées et le Bode")
+                .button("Ajuster")
+                .on_hover_text("Home : cadrer tout le schéma")
                 .clicked()
             {
-                self.show_instruments = !self.show_instruments;
+                self.canvas.request_fit();
             }
+            ui.add_enabled_ui(!self.document.selection().is_empty(), |ui| {
+                if ui
+                    .button("Cadrer sél.")
+                    .on_hover_text("Ctrl+Home : cadrer la sélection")
+                    .clicked()
+                {
+                    self.fit_selection();
+                }
+            });
+            ui.menu_button("Vue", |ui| {
+                ui.checkbox(&mut self.show_palette, "Palette");
+                ui.checkbox(&mut self.show_inspector, "Inspecteur");
+                ui.checkbox(&mut self.show_instruments, "Instruments");
+                let mut minimap = self.canvas.minimap_visible();
+                if ui.checkbox(&mut minimap, "Mini-carte").changed() {
+                    self.canvas.set_minimap_visible(minimap);
+                }
+                ui.separator();
+                ui.label(RichText::new("Disposition").small().color(ui::MUTED));
+                for layout in LayoutPreset::ALL {
+                    if ui.button(layout.label()).clicked() {
+                        self.apply_layout(layout);
+                        ui.close();
+                    }
+                }
+                ui.separator();
+                ui.horizontal(|ui| {
+                    if ui
+                        .small_button("−")
+                        .on_hover_text("Zoom arrière (-)")
+                        .clicked()
+                    {
+                        self.canvas.zoom_out();
+                    }
+                    ui.label(format!("{:.0} %", self.canvas.viewport().zoom_percent()));
+                    if ui
+                        .small_button("+")
+                        .on_hover_text("Zoom avant (+)")
+                        .clicked()
+                    {
+                        self.canvas.zoom_in();
+                    }
+                });
+                if ui
+                    .button("Zoom 100 %")
+                    .on_hover_text("0 : zoom par défaut")
+                    .clicked()
+                {
+                    self.canvas.reset_zoom();
+                    ui.close();
+                }
+                if ui
+                    .button("Origine")
+                    .on_hover_text("Centrer la grille sur l'origine")
+                    .clicked()
+                {
+                    self.canvas.reset_view();
+                    ui.close();
+                }
+            });
+            ui.separator();
             if ui
                 .button("Commandes")
                 .on_hover_text("Palette de commandes (Ctrl+K)")
@@ -236,7 +347,7 @@ impl CircuitApp {
             }
             if ui
                 .button("Aide")
-                .on_hover_text("Raccourcis et fonctionnement")
+                .on_hover_text("Raccourcis et fonctionnement (?)")
                 .clicked()
             {
                 self.show_help = !self.show_help;
@@ -254,14 +365,18 @@ impl CircuitApp {
             });
             ui.label(
                 RichText::new(format!(
-                    "{nets} net(s) · {components} composant(s) · {} sélectionné(s)",
-                    self.document.selection().len()
+                    "{nets} net(s) · {components} composant(s) · {} sélectionné(s) · curseur {}",
+                    self.document.selection().len(),
+                    self.canvas.last_pointer_grid().map_or_else(
+                        || "—".to_owned(),
+                        |point| format!("({}, {})", point.x, point.y)
+                    )
                 ))
                 .small()
                 .color(ui::MUTED),
             );
             ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                let zoom = self.canvas.viewport().scale() / DEFAULT_SCALE * 100.0;
+                let zoom = self.canvas.viewport().zoom_percent();
                 ui.label(
                     RichText::new(format!("Zoom {zoom:.0} % · grille entière"))
                         .small()
@@ -530,6 +645,72 @@ impl CircuitApp {
             self.duplicate();
             return;
         }
+        for (key, layout) in [
+            (Key::Num1, LayoutPreset::All),
+            (Key::Num2, LayoutPreset::Editing),
+            (Key::Num3, LayoutPreset::Simulation),
+            (Key::Num4, LayoutPreset::Canvas),
+        ] {
+            if command && context.input(|input| input.key_pressed(key)) {
+                self.apply_layout(layout);
+                self.status
+                    .info(format!("Disposition : {}.", layout.label()));
+                return;
+            }
+        }
+        if command && context.input(|input| input.key_pressed(Key::Home)) {
+            self.fit_selection();
+            return;
+        }
+        if command && context.input(|input| input.key_pressed(Key::Num0)) {
+            self.canvas.reset_view();
+            self.status.info("Vue ramenée à l'origine.");
+            return;
+        }
+        if !command
+            && context.input(|input| input.key_pressed(Key::Plus) || input.key_pressed(Key::Equals))
+        {
+            self.canvas.zoom_in();
+            return;
+        }
+        if !command && context.input(|input| input.key_pressed(Key::Minus)) {
+            self.canvas.zoom_out();
+            return;
+        }
+        if !command && context.input(|input| input.key_pressed(Key::Num0)) {
+            self.canvas.reset_zoom();
+            return;
+        }
+        let (pan_left, pan_right, pan_up, pan_down, alt) = context.input(|input| {
+            (
+                input.key_pressed(Key::ArrowLeft),
+                input.key_pressed(Key::ArrowRight),
+                input.key_pressed(Key::ArrowUp),
+                input.key_pressed(Key::ArrowDown),
+                input.modifiers.alt,
+            )
+        });
+        if (pan_left || pan_right || pan_up || pan_down) && !command && !alt {
+            let step = if shift { 8 } else { 2 };
+            let delta = GridPos::new(
+                if pan_left {
+                    step
+                } else if pan_right {
+                    -step
+                } else {
+                    0
+                },
+                if pan_up {
+                    step
+                } else if pan_down {
+                    -step
+                } else {
+                    0
+                },
+            );
+            self.canvas.pan_by_grid(delta);
+            return;
+        }
         if context.input(|input| {
             input.key_pressed(Key::Questionmark)
                 || (input.modifiers.shift && input.key_pressed(Key::Slash))
@@ -559,7 +740,6 @@ impl CircuitApp {
             self.canvas.request_fit();
             return;
         }
-
         if context.input(|input| input.key_pressed(Key::V)) {
             self.set_tool(Tool::Select);
         } else if context.input(|input| input.key_pressed(Key::W)) {
@@ -614,6 +794,7 @@ impl CircuitApp {
                 ui.label("• Rectangle droite→gauche : objets touchés.");
                 ui.label("• Clic milieu + glisser : déplacer la vue.");
                 ui.label("• Molette : zoom autour du curseur.");
+                ui.label("• Mini-carte en bas à droite : cliquer pour recentrer la vue.");
                 ui.add_space(6.0);
                 ui.label(RichText::new("Clavier").strong());
                 egui::Grid::new("help_shortcuts")
@@ -637,6 +818,11 @@ impl CircuitApp {
                         shortcut(ui, "Échap", "annuler l'outil, le collage ou la sélection");
                         shortcut(ui, "?", "ouvrir ou fermer cette aide");
                         shortcut(ui, "Home", "ajuster la vue au schéma");
+                        shortcut(ui, "Ctrl+Home", "cadrer la sélection");
+                        shortcut(ui, "+ / -", "zoom avant / arrière");
+                        shortcut(ui, "0", "zoom 100 %");
+                        shortcut(ui, "Flèches", "déplacer la vue (Maj : pas rapide)");
+                        shortcut(ui, "Ctrl+1…4", "Tout, Édition, Simulation, Canevas");
                     });
                 ui.add_space(6.0);
                 ui.label(RichText::new("Simulation").strong());
@@ -658,6 +844,10 @@ impl CircuitApp {
                 ui.label(
                     "Le panneau Historique, dans l’inspecteur, ramène le schéma à un état \
                      nommé. Un clic droit sur le canevas propose les actions de l’objet.",
+                );
+                ui.label(
+                    "Le menu Vue masque les panneaux, choisit une disposition et règle le \
+                     zoom. La mini-carte et les flèches déplacent la vue sans toucher au schéma.",
                 );
                 ui.label(
                     "Les résultats restent affichés après une modification du schéma et sont \
@@ -697,16 +887,20 @@ impl eframe::App for CircuitApp {
                     self.instruments.show(ui, &self.document, &mut self.status);
                 });
         }
-        egui::Panel::left("palette_panel")
-            .resizable(true)
-            .default_size(248.0)
-            .size_range(220.0..=330.0)
-            .show(ui, |ui| self.palette(ui));
-        egui::Panel::right("inspector_panel")
-            .resizable(true)
-            .default_size(335.0)
-            .size_range(280.0..=470.0)
-            .show(ui, |ui| self.inspector(ui));
+        if self.show_palette {
+            egui::Panel::left("palette_panel")
+                .resizable(true)
+                .default_size(248.0)
+                .size_range(220.0..=330.0)
+                .show(ui, |ui| self.palette(ui));
+        }
+        if self.show_inspector {
+            egui::Panel::right("inspector_panel")
+                .resizable(true)
+                .default_size(335.0)
+                .size_range(280.0..=470.0)
+                .show(ui, |ui| self.inspector(ui));
+        }
         egui::CentralPanel::no_frame().show(ui, |ui| self.canvas(ui));
 
         self.canvas
@@ -780,5 +974,14 @@ mod tests {
         let id = document.schematic().symbols().next().unwrap().id;
         document.select_only(Some(ObjectRef::Symbol(id)));
         assert!(selection_has_symbols(&document));
+    }
+
+    #[test]
+    fn layout_presets_cover_every_panel_combination() {
+        assert_eq!(LayoutPreset::All.visibility(), (true, true, true));
+        assert_eq!(LayoutPreset::Editing.visibility(), (true, true, false));
+        assert_eq!(LayoutPreset::Simulation.visibility(), (false, true, true));
+        assert_eq!(LayoutPreset::Canvas.visibility(), (false, false, false));
+        assert_eq!(LayoutPreset::ALL.len(), 4);
     }
 }

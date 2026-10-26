@@ -448,7 +448,7 @@ impl Document {
         let max = GridPos::new(a.x.max(b.x), a.y.max(b.y));
         let mut hits = BTreeSet::new();
         for object in self.schematic.object_refs() {
-            let Some((object_min, object_max)) = self.selection_bounds(object) else {
+            let Some((object_min, object_max)) = self.object_selection_bounds(object) else {
                 continue;
             };
             let matched = match mode {
@@ -630,7 +630,7 @@ impl Document {
         }
     }
 
-    fn selection_bounds(&self, object: ObjectRef) -> Option<(GridPos, GridPos)> {
+    fn object_selection_bounds(&self, object: ObjectRef) -> Option<(GridPos, GridPos)> {
         let (min, max) = self.object_bounds(object)?;
         if matches!(object, ObjectRef::Symbol(_)) {
             Some((
@@ -900,7 +900,7 @@ impl Document {
         if self.selected.is_empty() {
             return Err(ActionError::EmptySelection);
         }
-        let (min, max) = self.group_bounds().ok_or(ActionError::EmptySelection)?;
+        let (min, max) = self.selection_bounds().ok_or(ActionError::EmptySelection)?;
         let center = GridPos::new((min.x + max.x).div_euclid(2), (min.y + max.y).div_euclid(2));
         let mut commands = Vec::new();
         for object in &self.selected {
@@ -969,7 +969,8 @@ impl Document {
         Ok(commands)
     }
 
-    fn group_bounds(&self) -> Option<(GridPos, GridPos)> {
+    /// Returns the bounds of the current selection.
+    pub fn selection_bounds(&self) -> Option<(GridPos, GridPos)> {
         let mut min: Option<GridPos> = None;
         let mut max: Option<GridPos> = None;
         for object in &self.selected {
@@ -2207,6 +2208,10 @@ mod tests {
             .add_symbol(SymbolKind::Resistor, GridPos::new(10, 0))
             .unwrap();
         document.select_all();
+        assert_eq!(
+            document.selection_bounds(),
+            Some((GridPos::new(-2, 0), GridPos::new(12, 0)))
+        );
         document.rotate_selection().unwrap();
         assert_eq!(document.symbol(first).unwrap().at, GridPos::new(5, -5));
         assert_eq!(document.symbol(second).unwrap().at, GridPos::new(5, 5));

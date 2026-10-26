@@ -73,6 +73,35 @@ impl Viewport {
         self.pan = anchor - rect.center() - world * self.scale;
     }
 
+    /// Zooms around the canvas centre.
+    pub fn zoom_center(&mut self, rect: Rect, factor: f32) {
+        self.zoom_at(rect, rect.center(), factor);
+    }
+
+    /// Sets a zoom level while keeping the world point under the centre fixed.
+    pub fn set_scale(&mut self, rect: Rect, scale: f32) {
+        let target = scale.clamp(MIN_SCALE, MAX_SCALE);
+        if (target - self.scale).abs() <= f32::EPSILON {
+            return;
+        }
+        self.zoom_at(rect, rect.center(), target / self.scale);
+    }
+
+    /// Centers the world origin at the requested grid position.
+    pub fn center_on(&mut self, position: GridPos) {
+        self.pan = -Vec2::new(position.x as f32, position.y as f32) * self.scale;
+    }
+
+    /// Pans by a whole number of grid cells.
+    pub fn pan_grid(&mut self, delta: GridPos) {
+        self.pan += Vec2::new(delta.x as f32, delta.y as f32) * self.scale;
+    }
+
+    /// Returns the current zoom as a percentage of the default scale.
+    pub fn zoom_percent(&self) -> f32 {
+        self.scale / DEFAULT_SCALE * 100.0
+    }
+
     /// Pans by a screen-space delta.
     pub fn pan_by(&mut self, delta: Vec2) {
         if delta.x.is_finite() && delta.y.is_finite() {
@@ -134,6 +163,66 @@ impl Viewport {
     }
 }
 
+/// Uniform projection from schematic grid coordinates to a minimap area.
+#[derive(Clone, Copy, Debug)]
+pub struct MinimapTransform {
+    origin: Pos2,
+    scale: f32,
+    min: GridPos,
+}
+
+impl MinimapTransform {
+    /// Builds a centered, aspect-preserving projection with a small margin.
+    pub fn new(area: Rect, bounds: (GridPos, GridPos)) -> Option<Self> {
+        if area.width() <= 0.0 || area.height() <= 0.0 {
+            return None;
+        }
+        let (min, max) = bounds;
+        let width = max.x.saturating_sub(min.x).max(1) as f32;
+        let height = max.y.saturating_sub(min.y).max(1) as f32;
+        let available = area.shrink(6.0);
+        if available.width() <= 0.0 || available.height() <= 0.0 {
+            return None;
+        }
+        let scale = (available.width() / width).min(available.height() / height);
+        if !scale.is_finite() || scale <= 0.0 {
+            return None;
+        }
+        let used = Vec2::new(width * scale, height * scale);
+        let origin = available.center() - used * 0.5;
+        Some(Self { origin, scale, min })
+    }
+
+    /// Projects a grid position into the minimap.
+    pub fn point(&self, position: GridPos) -> Pos2 {
+        self.origin
+            + Vec2::new(
+                (position.x - self.min.x) as f32,
+                (position.y - self.min.y) as f32,
+            ) * self.scale
+    }
+
+    /// Projects a grid rectangle into the minimap.
+    pub fn rect(&self, min: GridPos, max: GridPos) -> Rect {
+        Rect::from_two_pos(self.point(min), self.point(max))
+    }
+
+    /// Converts a minimap point back to the nearest grid position.
+    pub fn grid_at(&self, position: Pos2) -> GridPos {
+        let x = ((position.x - self.origin.x) / self.scale).round() + self.min.x as f32;
+        let y = ((position.y - self.origin.y) / self.scale).round() + self.min.y as f32;
+        GridPos::new(
+            x.clamp(GRID_MIN as f32, GRID_MAX as f32) as i32,
+            y.clamp(GRID_MIN as f32, GRID_MAX as f32) as i32,
+        )
+    }
+
+    /// Returns the minimap scale in pixels per grid cell.
+    pub const fn scale(&self) -> f32 {
+        self.scale
+    }
+}
+
 impl Default for Viewport {
     fn default() -> Self {
         Self::new()
@@ -143,6 +232,7 @@ impl Default for Viewport {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use proptest::prelude::*;
 
     fn rect() -> Rect {
         Rect::from_min_size(Pos2::new(20.0, 30.0), Vec2::new(900.0, 600.0))
@@ -215,5 +305,64 @@ mod tests {
         assert!(max.x > 0 && max.y > 0);
         assert!(min.x >= GRID_MIN && max.x <= GRID_MAX);
         assert!(min.y >= GRID_MIN && max.y <= GRID_MAX);
+    }
+
+    #[test]
+    fn navigation_centers_and_pans_by_grid_cells() {
+        let mut viewport = Viewport::new();
+        viewport.center_on(GridPos::new(12, -8));
+        let center = viewport.grid_to_screen(rect(), GridPos::new(12, -8));
+        assert!((center - rect().center()).length() < 1e-4);
+        viewport.pan_grid(GridPos::new(-3, 2));
+        let moved = viewport.grid_to_screen(rect(), GridPos::new(12, -8));
+        let expected = rect().center() + Vec2::new(-3.0, 2.0) * viewport.scale();
+        assert!((moved - expected).length() < 1e-4);
+    }
+
+    #[test]
+    fn zoom_presets_preserve_the_world_centre() {
+        let mut viewport = Viewport::new();
+        viewport.center_on(GridPos::new(4, 6));
+        viewport.zoom_center(rect(), 2.0);
+        assert!((viewport.zoom_percent() - 200.0).abs() < 1e-3);
+        let center = viewport.grid_to_screen(rect(), GridPos::new(4, 6));
+        assert!((center - rect().center()).length() < 1e-3);
+        viewport.set_scale(rect(), DEFAULT_SCALE);
+        assert!((viewport.zoom_percent() - 100.0).abs() < 1e-3);
+    }
+
+    #[test]
+    fn minimap_projects_bounds_and_round_trips_points() {
+        let area = Rect::from_min_size(Pos2::new(100.0, 50.0), Vec2::new(160.0, 110.0));
+        let bounds = (GridPos::new(-20, -10), GridPos::new(40, 30));
+        let transform = MinimapTransform::new(area, bounds).unwrap();
+        assert!(transform.scale() > 0.0);
+        for point in [bounds.0, bounds.1, GridPos::new(0, 0), GridPos::new(15, 12)] {
+            let projected = transform.point(point);
+            assert!(area.contains(projected));
+            assert_eq!(transform.grid_at(projected), point);
+        }
+        let painted = transform.rect(bounds.0, bounds.1);
+        assert!(painted.width() <= area.width());
+        assert!(painted.height() <= area.height());
+    }
+
+    proptest! {
+        #![proptest_config(ProptestConfig::with_cases(64))]
+
+        #[test]
+        fn minimap_round_trips_integer_points(
+            x in -500_i32..500,
+            y in -500_i32..500,
+            width in 1_i32..400,
+            height in 1_i32..400,
+        ) {
+            let min = GridPos::new(x, y);
+            let max = GridPos::new(x + width, y + height);
+            let area = Rect::from_min_size(Pos2::new(10.0, 20.0), Vec2::new(180.0, 120.0));
+            let transform = MinimapTransform::new(area, (min, max)).unwrap();
+            let point = GridPos::new(x + width / 2, y + height / 2);
+            prop_assert_eq!(transform.grid_at(transform.point(point)), point);
+        }
     }
 }

@@ -60,14 +60,20 @@ documents spécialisés.
     ajoutée, le contenu est déterministe et les identifiants sont régénérés au
     collage. L’historique conserve un libellé par commande et permet un saut
     bidirectionnel sans réécrire le schéma. Voir [EDITOR.md](EDITOR.md).
+12. **Dispositions fiables plutôt qu’un dockage libre.** Les panneaux restent
+    des zones fixes, redimensionnables et masquables, avec quatre presets
+    testables. Aucune bibliothèque de dockage n’est ajoutée : le gain ne
+    justifie pas le risque d’états incohérents, et le canevas garde toujours la
+    priorité. La mini-carte est une projection pure testée dans `view.rs`. Voir
+    [UI.md](UI.md).
 
 ## Tests et périmètre
 
-12. **Composants personnalisés représentés, pas simulés.** Le registre,
+13. **Composants personnalisés représentés, pas simulés.** Le registre,
     l'extraction, le JSON et la netlist acceptent `Custom`; les solveurs le
     refusent avec `MnaError::UnsupportedComponent` jusqu'à l'ajout d'un modèle
     dans `sim-core`. Voir [COMPONENTS.md](COMPONENTS.md).
-13. **Tests natifs, benchmarks et CI.** Les tests ne demandent ni navigateur ni
+14. **Tests natifs, benchmarks et CI.** Les tests ne demandent ni navigateur ni
     ngspice ; les propriétés proptest affichent leur graine. La CI vérifie
     format, clippy, tests, WASM, benchmarks rapides, exemples et builds
     natif/web. Les budgets Criterion sont des seuils de revue, non bloquants sur
