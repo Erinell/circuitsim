@@ -950,6 +950,11 @@ impl CircuitApp {
                      une modification et superpose les tensions des nets sur le canevas.",
                 );
                 ui.label(
+                    "Dans la portée, deux clics placent les curseurs A et B ; les écarts et \
+                     mesures d’intervalle s’affichent à gauche. Un clic sur le Bode pose un \
+                     marqueur de fréquence.",
+                );
+                ui.label(
                     "Sur le canevas, Ctrl+K ouvre la palette de commandes. R et F orientent \
                      l’aperçu de placement ; Maj change le coude d’un fil. Alt+clic sélectionne \
                      le net complet et un composant déposé sur un fil s’insère en série.",

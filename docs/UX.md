@@ -135,7 +135,21 @@ Les raccourcis sont ignorés lorsqu’un champ texte a le focus, à l’exceptio
 - Le calcul reste synchrone dans le fil de l’interface ; le worker dédié et
   `SharedArrayBuffer` restent hors périmètre.
 
-## 9. Inspecteur, valeurs et historique
+## 9. Curseurs et lecture
+
+- La portée place le premier clic sur A, le deuxième sur B, puis déplace le
+  curseur actif. Les boutons **A**/**B** choisissent la cible ; un clic droit ou
+  `Maj` force B.
+- Les curseurs s’alignent sur l’échantillon temporel le plus proche. Une bande
+  colorée marque l’intervalle et les lignes A/B restent visibles sur la courbe.
+- Le panneau affiche tA, tB, Δt, 1/Δt, puis pour chaque signal les valeurs en A
+  et B, leur écart, et min/max/RMS sur l’intervalle.
+- **Effacer** retire les deux curseurs. Une nouvelle simulation conserve les
+  temps et les recolle à l’échantillon le plus proche.
+- Sur le Bode, un clic pose un marqueur de fréquence commun au gain et à la
+  phase ; le panneau affiche fréquence, gain en dB et phase en degrés.
+
+## 10. Inspecteur, valeurs et historique
 
 - L’inspecteur affiche la référence, l’orientation, le miroir et les paramètres.
 - Les valeurs s’écrivent directement en notation d’ingénieur : `4k7`, `100n`,
@@ -157,13 +171,13 @@ Les raccourcis sont ignorés lorsqu’un champ texte a le focus, à l’exceptio
   puis copier, dupliquer, supprimer. Sur le vide, il propose coller, tout
   sélectionner, ajuster, annuler et rétablir.
 
-## 10. Résultats et erreurs
+## 11. Résultats et erreurs
 
 Une opération refusée affiche un message français dans la barre d’état et ne
 modifie ni le schéma, ni la révision, ni `next_id`. Les erreurs techniques
 restent typées dans les crates.
 
-## 11. Critères d’acceptation
+## 12. Critères d’acceptation
 
 - Construire un RC, le câbler et lancer la simulation en six actions maximum.
 - Aucune interaction de survol, glisser, rectangle ou câblage ne dépasse 16 ms
@@ -176,13 +190,15 @@ restent typées dans les crates.
   superposé ; la mini-carte reste cohérente après zoom et déplacement.
 - Après une simulation, les tensions restent lisibles et le résultat antérieur
   est identifiable sans ambiguïté.
+- Deux curseurs donnent un Δt et des mesures d’intervalle reproductibles, sans
+  modifier le résultat ni le schéma.
 
-## 12. Périmètre de cette version
+## 13. Périmètre de cette version
 
 La sélection rectangle, le presse-papiers, la duplication, la rotation et le
 miroir de groupe, l’édition directe E12/E24/E96, l’inspecteur avec valeurs
 simulées, les menus contextuels, l’historique nommé, les dispositions fiables,
-la mini-carte, le calcul rapide et le rafraîchissement automatique sont livrés.
-Le dockage libre, les thèmes, le scope avancé et l’onboarding restent dans les
-lots G6 et G7. Voir [UI.md](UI.md), [INSTRUMENTS.md](INSTRUMENTS.md) et
-[EDITOR.md](EDITOR.md).
+la mini-carte, le calcul rapide, le rafraîchissement automatique, les curseurs de
+portée et le marqueur Bode sont livrés. Le dockage libre, les thèmes et
+l’onboarding restent dans le lot G7. Voir [UI.md](UI.md),
+[INSTRUMENTS.md](INSTRUMENTS.md) et [EDITOR.md](EDITOR.md).
