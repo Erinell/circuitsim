@@ -13,13 +13,18 @@ use crate::ui::glyph::{paint_symbol, GlyphColors};
 use crate::ui::{
     symbol_kind_name, Status, ACCENT, CANVAS_BACKGROUND, HOVER, LABEL, MUTED, PIN, SYMBOL, WIRE,
 };
-use crate::view::Viewport;
+use crate::view::{MinimapTransform, Viewport, DEFAULT_SCALE};
 
 const MINOR_GRID: Color32 = Color32::from_rgb(24, 32, 46);
 const MAJOR_GRID: Color32 = Color32::from_rgb(34, 45, 64);
 const AXIS: Color32 = Color32::from_rgb(58, 78, 108);
 const PANEL_BADGE: Color32 = Color32::from_rgba_premultiplied(24, 34, 48, 220);
 const SELECTION_FILL: Color32 = Color32::from_rgba_premultiplied(112, 82, 24, 120);
+const MINIMAP_BACKGROUND: Color32 = Color32::from_rgba_premultiplied(12, 18, 28, 230);
+const MINIMAP_WIDTH: f32 = 152.0;
+const MINIMAP_HEIGHT: f32 = 112.0;
+const MINIMAP_MARGIN: f32 = 12.0;
+const ZOOM_STEP: f32 = 1.25;
 
 /// Canvas interaction state that survives between frames.
 pub struct CanvasState {
@@ -35,6 +40,9 @@ pub struct CanvasState {
     last_pointer_grid: Option<GridPos>,
     paste_preview: bool,
     fit_requested: bool,
+    pending_fit: Option<(GridPos, GridPos)>,
+    last_rect: Option<Rect>,
+    minimap_visible: bool,
     label_dialog: Option<LabelDialog>,
 }
 
@@ -80,6 +88,9 @@ impl CanvasState {
             last_pointer_grid: None,
             paste_preview: false,
             fit_requested: true,
+            pending_fit: None,
+            last_rect: None,
+            minimap_visible: true,
             label_dialog: None,
         }
     }
@@ -141,6 +152,52 @@ impl CanvasState {
         self.placement_mirrored
     }
 
+    /// Zooms in around the canvas centre.
+    pub fn zoom_in(&mut self) {
+        if let Some(rect) = self.last_rect {
+            self.viewport.zoom_center(rect, ZOOM_STEP);
+        }
+    }
+
+    /// Zooms out around the canvas centre.
+    pub fn zoom_out(&mut self) {
+        if let Some(rect) = self.last_rect {
+            self.viewport.zoom_center(rect, 1.0 / ZOOM_STEP);
+        }
+    }
+
+    /// Restores the default zoom without moving the world centre.
+    pub fn reset_zoom(&mut self) {
+        if let Some(rect) = self.last_rect {
+            self.viewport.set_scale(rect, DEFAULT_SCALE);
+        }
+    }
+
+    /// Restores the default zoom and centers the grid origin.
+    pub fn reset_view(&mut self) {
+        self.viewport.reset();
+    }
+
+    /// Pans by a whole number of grid cells.
+    pub fn pan_by_grid(&mut self, delta: GridPos) {
+        self.viewport.pan_grid(delta);
+    }
+
+    /// Requests a fit around explicit grid bounds on the next frame.
+    pub fn request_fit_bounds(&mut self, bounds: (GridPos, GridPos)) {
+        self.pending_fit = Some(bounds);
+    }
+
+    /// Returns whether the minimap is drawn.
+    pub const fn minimap_visible(&self) -> bool {
+        self.minimap_visible
+    }
+
+    /// Shows or hides the minimap.
+    pub fn set_minimap_visible(&mut self, visible: bool) {
+        self.minimap_visible = visible;
+    }
+
     /// Returns true while the label name dialog is open.
     pub const fn has_dialog(&self) -> bool {
         self.label_dialog.is_some()
@@ -166,9 +223,13 @@ impl CanvasState {
         }
         let (response, painter) = ui.allocate_painter(available, Sense::click_and_drag());
         let rect = response.rect;
+        self.last_rect = Some(rect);
         painter.rect_filled(rect, 0.0, CANVAS_BACKGROUND);
 
-        if self.fit_requested {
+        if let Some(bounds) = self.pending_fit.take() {
+            self.viewport.fit(rect, bounds);
+            self.fit_requested = false;
+        } else if self.fit_requested {
             if let Some(bounds) = document.content_bounds() {
                 self.viewport.fit(rect, bounds);
             } else {
@@ -226,6 +287,7 @@ impl CanvasState {
         self.paint_snap(&painter, rect);
         self.paint_empty_state(&painter, rect, document);
         self.paint_tool_badge(&painter, rect, tool);
+        self.paint_minimap(&painter, rect, document);
         self.set_cursor(ui, &response, tool);
         if interactive {
             self.context_menu(&response, document, status);
@@ -384,6 +446,16 @@ impl CanvasState {
         let latest_point = latest_pos
             .and_then(|position| self.viewport.screen_to_grid(rect, position))
             .or(hovered_point);
+
+        if let Some((map_rect, transform)) = self.minimap_geometry(rect, document) {
+            if let Some(position) = latest_pos.filter(|position| map_rect.contains(*position)) {
+                if primary_pressed {
+                    self.viewport.center_on(transform.grid_at(position));
+                }
+                self.drag = None;
+                return;
+            }
+        }
 
         if self.paste_preview {
             if primary_pressed {
@@ -1341,6 +1413,82 @@ impl CanvasState {
         );
     }
 
+    fn minimap_geometry(
+        &self,
+        rect: Rect,
+        document: &Document,
+    ) -> Option<(Rect, MinimapTransform)> {
+        if !self.minimap_visible || rect.width() < 300.0 || rect.height() < 220.0 {
+            return None;
+        }
+        let content = document.content_bounds()?;
+        let area = Rect::from_min_size(
+            Pos2::new(
+                rect.right() - MINIMAP_WIDTH - MINIMAP_MARGIN,
+                rect.bottom() - MINIMAP_HEIGHT - MINIMAP_MARGIN,
+            ),
+            Vec2::new(MINIMAP_WIDTH, MINIMAP_HEIGHT),
+        );
+        let transform = MinimapTransform::new(area, content)?;
+        Some((area, transform))
+    }
+
+    fn paint_minimap(&self, painter: &Painter, rect: Rect, document: &Document) {
+        let Some((area, transform)) = self.minimap_geometry(rect, document) else {
+            return;
+        };
+        painter.rect_filled(area, 4.0, MINIMAP_BACKGROUND);
+        painter.rect_stroke(area, 4.0, Stroke::new(1.0, MAJOR_GRID), StrokeKind::Inside);
+        let painter = painter.with_clip_rect(area.shrink(2.0));
+        for wire in document.schematic().wires() {
+            let selected = document.selection().contains(&ObjectRef::Wire(wire.id));
+            painter.line_segment(
+                [transform.point(wire.a), transform.point(wire.b)],
+                Stroke::new(
+                    if selected { 1.6 } else { 1.0 },
+                    if selected {
+                        ACCENT
+                    } else {
+                        WIRE.gamma_multiply(0.8)
+                    },
+                ),
+            );
+        }
+        for symbol in document.schematic().symbols() {
+            let selected = document.selection().contains(&ObjectRef::Symbol(symbol.id));
+            painter.circle_filled(
+                transform.point(symbol.at),
+                if selected { 2.6 } else { 1.9 },
+                if selected { ACCENT } else { SYMBOL },
+            );
+        }
+        for junction in document.schematic().junctions() {
+            let selected = document
+                .selection()
+                .contains(&ObjectRef::Junction(junction.id));
+            painter.circle_filled(
+                transform.point(junction.at),
+                if selected { 2.2 } else { 1.5 },
+                if selected { ACCENT } else { WIRE },
+            );
+        }
+        for label in document.schematic().labels() {
+            let selected = document.selection().contains(&ObjectRef::Label(label.id));
+            painter.circle_filled(
+                transform.point(label.at),
+                if selected { 2.0 } else { 1.3 },
+                if selected { ACCENT } else { LABEL },
+            );
+        }
+        let visible = self.viewport.visible_bounds(rect);
+        painter.rect_stroke(
+            transform.rect(visible.0, visible.1),
+            0.0,
+            Stroke::new(1.2, HOVER),
+            StrokeKind::Inside,
+        );
+    }
+
     fn paint_empty_state(&self, painter: &Painter, rect: Rect, document: &Document) {
         if !document.schematic().is_empty() {
             return;
@@ -1402,9 +1550,9 @@ impl CanvasState {
             MUTED,
         );
         painter.text(
-            rect.right_bottom() - Vec2::new(10.0, 10.0),
-            Align2::RIGHT_BOTTOM,
-            "Molette : zoom · bouton milieu : déplacer",
+            rect.left_bottom() + Vec2::new(10.0, -10.0),
+            Align2::LEFT_BOTTOM,
+            "Molette : zoom · bouton milieu : déplacer · mini-carte : cliquer",
             FontId::proportional(10.0),
             MUTED.gamma_multiply(0.7),
         );
@@ -1752,6 +1900,42 @@ mod tests {
         assert!(canvas.is_pasting());
         canvas.cancel_interaction();
         assert!(!canvas.is_pasting());
+    }
+
+    #[test]
+    fn canvas_minimap_click_recenters_the_view() {
+        let context = egui::Context::default();
+        let mut canvas = CanvasState::new();
+        let mut document = Document::demo().unwrap();
+        let mut status = Status::new_info("");
+        let tool = crate::ui::Tool::Select;
+        frame(
+            &context,
+            &mut canvas,
+            &mut document,
+            &mut status,
+            &tool,
+            Vec::new(),
+        );
+        let (area, transform) = canvas
+            .minimap_geometry(screen(), &document)
+            .expect("demo content has a minimap");
+        let target = transform.grid_at(area.center());
+        click(
+            &context,
+            &mut canvas,
+            &mut document,
+            &mut status,
+            &tool,
+            area.center(),
+        );
+        let center = canvas
+            .viewport()
+            .screen_to_grid(screen(), screen().center())
+            .unwrap();
+        assert_eq!(center, target);
+        canvas.set_minimap_visible(false);
+        assert!(canvas.minimap_geometry(screen(), &document).is_none());
     }
 
     #[test]
