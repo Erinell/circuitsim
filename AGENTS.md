@@ -39,7 +39,7 @@ cargo deny check licenses
 - `crates/*/benches`, `examples/` : benchmarks Criterion et exemples.
 - `tests/`, `src/lib.rs` : intégration et proptest.
 - `.github/workflows/ci.yml`, `xtask/` : CI et automatisation.
-- `docs/` : architecture, décisions, éditeur, simulation, protocole, tests,
+- `docs/` : architecture, décisions, éditeur, UX, simulation, protocole, tests,
   performances, livraison, Git et licences.
 
 ## Contrats de données
@@ -109,7 +109,7 @@ Le MOSFET reste un exemple d'extension (`examples/custom_mosfet.rs`) ; les types
 | Sujet | Documents |
 | --- | --- |
 | Architecture et dépendances | `ARCHITECTURE.md`, `DECISIONS.md` |
-| Éditeur et interactions | `EDITOR.md`, `UI.md` |
+| Éditeur et interactions | `EDITOR.md`, `UX.md`, `UI.md` |
 | Netlist, unités, composants | `NETLIST.md`, `COMPONENTS.md` |
 | Simulation et numérique | `SIMULATION.md`, `NUMERICS.md` |
 | Protocole worker | `PROTOCOL.md` |
@@ -133,7 +133,7 @@ Le MOSFET reste un exemple d'extension (`examples/custom_mosfet.rs`) ; les types
 | --- | --- |
 | Étapes 1–10, tag `v0.1.0` | terminé |
 | G1 Git, licence, gouvernance | terminé |
-| G2 placement et câblage | à faire |
+| G2 placement et câblage | terminé |
 | G3 sélection et édition | à faire |
 | G4 navigation et disposition | à faire |
 | G5 simulation interactive | à faire |

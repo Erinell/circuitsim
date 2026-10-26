@@ -104,7 +104,32 @@ remplace l'état ; un échec laisse tout inchangé. L'historique est illimité, 
 nouvelle commande vide le redo, et les identifiants annulés ne sont jamais
 réutilisés.
 
-## 7. ERC
+## 7. Opérations de placement et de câblage
+
+Ces opérations restent des compositions de commandes, donc atomiques et
+annulables en une action.
+
+- **Insertion en série** : un composant à deux broches déposé sur un fil
+  horizontal ou vertical remplace ce fil par le composant et les tronçons
+  restants. Le fil doit mesurer au moins quatre cases et le composant est orienté
+  selon l’axe. Une connexion (label ou jonction) située entre ses broches bloque
+  l’insertion.
+- **Chemin de fil** : un chemin orthogonal peut contenir plusieurs segments. Les
+  segments nuls ou déjà présents sont ignorés ; un chemin sans nouveau segment
+  est refusé.
+- **Déplacement de segment** : un segment se déplace perpendiculairement. Les
+  fils perpendiculaires partageant ses extrémités suivent ; un fil colinéaire,
+  une jonction ou un label sur le segment est refusé.
+- **Alignement et distribution** : les objets sélectionnés sont alignés sur une
+  arête ou un centre ; la distribution conserve les extrêmes et espace les
+  centres.
+- **Accroche et routage** : `editor-core::interaction` fournit l’accroche aux
+  broches/fils et le routage orthogonal évitant les rectangles de symboles. Ces
+  fonctions pures sont testées sans egui.
+- **Net** : l’extraction fournit les fils, labels et broches d’un net. La
+  sélection de net est déterministe et ne modifie pas la topologie.
+
+## 8. ERC
 
 Les diagnostics sont triés par sévérité, code, position, sujet et message. Une
 erreur ERC n'empêche pas forcément l'extraction ; seule une `ExtractError` la
@@ -128,7 +153,7 @@ bloque. Le contrat de simulation reste séparé.
 | `MultipleLabelsOnNet` | avertissement | plusieurs labels sur un net |
 | `GroundLabelIgnored` | information | label ignoré sur la masse |
 
-## 8. JSON et interface
+## 9. JSON et interface
 
 Format versionné :
 

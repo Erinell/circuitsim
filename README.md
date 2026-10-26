@@ -7,7 +7,7 @@ sont séparés, testables sans navigateur et compilables pour
 
 ## État
 
-Les dix étapes du projet sont livrées : 187 tests natifs, clippy strict, cible
+Les dix étapes du projet sont livrées : 202 tests natifs, clippy strict, cible
 WASM, benchmarks, exemples, CI et distribution web.
 
 - **Cœur** : unités SI, netlist validée, MNA dense, DC, transitoire à pas fixe,
@@ -90,6 +90,7 @@ cargo clippy --workspace --all-targets -- -D warnings
 | [Numérique](docs/NUMERICS.md) | équations MNA, Newton, LU, AC |
 | [Protocole](docs/PROTOCOL.md) | trames, worker, WASM, transports |
 | [Interface](docs/UI.md) | disposition, interactions, raccourcis |
+| [Ergonomie](docs/UX.md) | principes, gestes, palettes et critères |
 | [Instruments](docs/INSTRUMENTS.md) | portée, mesures, FFT, Bode, CSV |
 | [Tests](docs/TESTING.md) | commandes, couverture, CI, reproductibilité |
 | [Performances](docs/PERFORMANCE.md) | charges, mesures, budgets |

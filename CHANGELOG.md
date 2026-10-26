@@ -10,7 +10,13 @@ sémantique.
 
 - Gouvernance Git, workflow de branches et conventions de commits.
 - Licence `MIT OR Apache-2.0`, vérification `cargo-deny` et licences tierces.
-- Préparation de la mise à jour ergonomie et interaction.
+- Palette de commandes `Ctrl+K` avec recherche floue et actions clavier.
+- Palette de composants avec catégories, favoris et récents.
+- Aperçu de placement orientable, placement répété et insertion en série.
+- Accroche magnétique, routage orthogonal évitant les symboles et câblage fluide.
+- Déplacement de segments avec reroutage des voisins.
+- Surbrillance et sélection complète des nets, autocomplétion des labels.
+- Alignement et distribution de la sélection avec guides visuels.
 
 ### Changed
 
