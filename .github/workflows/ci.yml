@@ -70,7 +70,17 @@ jobs:
         run: cargo build --release -p circuitsim-app
 
       - name: Build web distribution
-        run: cargo xtask web-build
+        # Trunk downloads wasm-bindgen on demand; GitHub releases can answer 504.
+        run: |
+          for attempt in 1 2 3; do
+            if cargo xtask web-build; then
+              exit 0
+            fi
+            if [ "$attempt" -eq 3 ]; then
+              exit 1
+            fi
+            sleep 10
+          done
 
       - name: Upload web distribution
         uses: actions/upload-artifact@v4
