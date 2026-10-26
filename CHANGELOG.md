@@ -27,6 +27,10 @@ sémantique.
   transitoire, avec signalement d’un résultat antérieur.
 - Menus contextuels spécifiques aux symboles, labels, fils, jonctions et au vide.
 - Aide `?` et infobulles des actions principales.
+- Zoom et déplacement clavier, cadrage de la sélection et coordonnées du curseur.
+- Mini-carte navigable montrant contenu, sélection et fenêtre visible.
+- Menu **Vue**, panneaux masquables et dispositions Tout, Édition, Simulation et
+  Canevas, sans dockage libre.
 
 ### Changed
 

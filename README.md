@@ -7,7 +7,7 @@ sont séparés, testables sans navigateur et compilables pour
 
 ## État
 
-Les dix étapes du projet sont livrées : 218 tests natifs, clippy strict, cible
+Les dix étapes du projet sont livrées : 224 tests natifs, clippy strict, cible
 WASM, benchmarks, exemples, CI et distribution web.
 
 - **Cœur** : unités SI, netlist validée, MNA dense, DC, transitoire à pas fixe,
@@ -16,8 +16,8 @@ WASM, benchmarks, exemples, CI et distribution web.
   undo/redo nommé, sélection rectangle, presse-papiers, ERC, extraction
   déterministe, séries E, JSON versionné.
 - **Interface** : egui native et WASM, palette, canevas, inspecteur avec valeurs
-  simulées, menus contextuels, portée, mesures, FFT de Hann, Bode, export CSV,
-  échelon de source.
+  simulées, menus contextuels, mini-carte, dispositions fiables, portée, mesures,
+  FFT de Hann, Bode, export CSV, échelon de source.
 - **Transport** : protocole binaire `CSIM`, worker borné à un job, coalescence
   à 60 Hz, révisions croissantes, pont WASM.
 

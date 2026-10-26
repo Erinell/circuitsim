@@ -135,7 +135,7 @@ Le MOSFET reste un exemple d'extension (`examples/custom_mosfet.rs`) ; les types
 | G1 Git, licence, gouvernance | terminé |
 | G2 placement et câblage | terminé |
 | G3 sélection et édition | terminé |
-| G4 navigation et disposition | à faire |
+| G4 navigation et disposition | terminé |
 | G5 simulation interactive | à faire |
 | G6 ergonomie du scope | à faire |
 | G7 onboarding et accessibilité | à faire |

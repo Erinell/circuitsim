@@ -34,7 +34,7 @@ l'installe séparément.
 
 ## 3. Suite et couverture
 
-Au 26 octobre 2026, `cargo test --workspace` exécute **218 tests** :
+Au 26 octobre 2026, `cargo test --workspace` exécute **224 tests** :
 
 | Groupe | Tests | Points clés |
 | --- | ---: | --- |
@@ -43,7 +43,7 @@ Au 26 octobre 2026, `cargo test --workspace` exécute **218 tests** :
 | `sim-core` transitoire | 16 | RC/RL, événements, diode, opamp, énergie, limites |
 | `sim-core` AC | 15 | RC/RL/RLC, phase, diode, opamp, balayages, erreurs |
 | `editor-core` | 47 | grille, symboles, schéma, historique, ERC, extraction, JSON, séries E, snap/routage |
-| `circuitsim-app` | 79 | document, UI, inspecteur, historique, presse-papiers, instruments, worker, FFT, Bode, CSV |
+| `circuitsim-app` | 85 | document, vue, navigation, mini-carte, UI, inspecteur, historique, presse-papiers, instruments, worker, FFT, Bode, CSV |
 | `worker-protocol` | 11 | trames, version, netlist, erreurs, transports |
 | `worker` | 13 | coalescence, cadence, révisions, DC/transitoire/AC |
 | `editor_invariants` | 2 | proptest undo/redo et extraction |
@@ -59,14 +59,15 @@ révisions obsolètes, rafale bornée, horloge non monotone ; catalogue, échelo
 limites UI, mesures, pic FFT, trois CSV et export UTF-8 ; insertion en série,
 déplacement de segment, alignement/distribution, sélection de net et rectangle,
 presse-papiers, duplication, rotation/miroir de groupe, valeurs simulées,
-recherche floue et placement sur canevas.
+recherche floue, placement sur canevas, zoom/pan, cadrage de sélection,
+mini-carte et dispositions.
 
 Deux propriétés proptest utilisent 64 cas dans les invariants : undo/redo
 restaure exactement les contenus et l’historique final ; deux extractions du même
 schéma sont égales, valides, indexées et nommées de façon unique. Une propriété
-`editor-core` de 64 cas vérifie l’aller-retour des séries E. Deux propriétés app
-de 32 cas vérifient l’insertion en série et la géométrie relative après collage,
-avec retour exact après undo.
+`editor-core` de 64 cas vérifie l’aller-retour des séries E. Trois propriétés app
+de 32 à 64 cas vérifient l’insertion en série, la géométrie relative après
+collage et l’aller-retour de la mini-carte.
 
 ## 4. Reproductibilité
 
