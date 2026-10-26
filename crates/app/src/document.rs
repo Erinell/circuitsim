@@ -66,6 +66,9 @@ pub enum ActionError {
     /// The endpoint is connected and cannot be resized independently.
     #[error("cette extrémité est connectée")]
     CannotResizeWire,
+    /// The selected symbol is not a switch.
+    #[error("le symbole n'est pas un interrupteur")]
+    NotASwitch,
 }
 
 impl ActionError {
@@ -126,6 +129,7 @@ impl ActionError {
                 "Cette extrémité est connectée ; déplacez le segment ou retirez la connexion."
                     .to_owned()
             }
+            Self::NotASwitch => "Ce composant n'est pas un interrupteur.".to_owned(),
         }
     }
 }
@@ -894,6 +898,24 @@ impl Document {
         self.execute(Command::ReplaceSymbol { old, new })
     }
 
+    /// Toggles a switch and returns its new closed state.
+    pub fn toggle_switch(&mut self, id: SymbolId) -> Result<bool, ActionError> {
+        let old = self.symbol(id).ok_or(ActionError::MissingObject)?.clone();
+        if old.kind != SymbolKind::Switch {
+            return Err(ActionError::NotASwitch);
+        }
+        let closed = old
+            .params
+            .get("closed")
+            .and_then(ParamValue::as_bool)
+            .unwrap_or(false);
+        let mut new = old.clone();
+        new.params
+            .insert("closed".to_owned(), ParamValue::Bool(!closed));
+        self.update_symbol(new)?;
+        Ok(!closed)
+    }
+
     /// Rotates every selected object clockwise around the selection centre.
     pub fn rotate_selection(&mut self) -> Result<(), ActionError> {
         let commands = self.group_transform(GroupTransform::Rotate)?;
@@ -983,6 +1005,29 @@ impl Document {
             }
         }
         Ok(commands)
+    }
+
+    /// Returns wires carrying at least one non-information ERC finding.
+    pub fn problem_wires(&self) -> BTreeSet<WireId> {
+        let mut wires = BTreeSet::new();
+        let Some(report) = self.erc() else {
+            return wires;
+        };
+        for issue in report.issues() {
+            if issue.severity == editor_core::ErcSeverity::Info {
+                continue;
+            }
+            if let Some(ObjectRef::Wire(id)) = issue.subject {
+                wires.insert(id);
+            } else if let Some(at) = issue.at {
+                for wire in self.schematic.wires() {
+                    if wire.contains(at) {
+                        wires.insert(wire.id);
+                    }
+                }
+            }
+        }
+        wires
     }
 
     /// Returns the bounds of the current selection.
@@ -1371,37 +1416,14 @@ impl Document {
             .checked_add(delta)
             .ok_or(ActionError::CannotMoveWire)?;
         let moved = Wire::new(old.id, new_a, new_b).map_err(|_| ActionError::CannotMoveWire)?;
-        let mut allocator = self.schematic.clone();
-        let mut existing = self
+        let duplicate = self
             .schematic
             .wires()
-            .filter(|wire| wire.id != old.id)
-            .map(|wire| (wire.a, wire.b))
-            .collect::<BTreeSet<_>>();
-        if existing.contains(&(moved.a, moved.b)) {
+            .any(|wire| wire.id != old.id && wire.a == moved.a && wire.b == moved.b);
+        if duplicate {
             return Err(ActionError::CannotMoveWire);
         }
-        let mut commands = vec![Command::ReplaceWire {
-            old: old.clone(),
-            new: moved,
-        }];
-        for point in self.wire_connection_points(&old) {
-            let target = point
-                .checked_add(delta)
-                .ok_or(ActionError::CannotMoveWire)?;
-            let stub =
-                Wire::new(WireId(0), point, target).map_err(|_| ActionError::CannotMoveWire)?;
-            if !existing.insert((stub.a, stub.b)) {
-                continue;
-            }
-            let id = WireId(
-                allocator
-                    .allocate_id()
-                    .map_err(|_| ActionError::IdSpaceExhausted)?,
-            );
-            commands.push(Command::AddWire(Wire::new(id, stub.a, stub.b)?));
-        }
-        self.execute(single_or_composite(commands))
+        self.execute(Command::ReplaceWire { old, new: moved })
     }
 
     /// Returns free wire endpoints that can be extended or shortened.
@@ -1482,58 +1504,6 @@ impl Document {
                     return false;
                 }
                 true
-            })
-    }
-
-    fn wire_connection_points(&self, wire: &Wire) -> BTreeSet<GridPos> {
-        let mut points = BTreeSet::new();
-        for point in [wire.a, wire.b] {
-            if self.wire_point_connects(wire, point) {
-                points.insert(point);
-            }
-        }
-        for label in self.schematic.labels() {
-            if wire.contains(label.at) {
-                points.insert(label.at);
-            }
-        }
-        for junction in self.schematic.junctions() {
-            if wire.contains(junction.at) {
-                points.insert(junction.at);
-            }
-        }
-        for (_, position) in self.pin_positions() {
-            if wire.contains(position) {
-                points.insert(position);
-            }
-        }
-        for other in self.schematic.wires().filter(|other| other.id != wire.id) {
-            for point in [other.a, other.b] {
-                if wire.contains(point) {
-                    points.insert(point);
-                }
-            }
-        }
-        points
-    }
-
-    fn wire_point_connects(&self, wire: &Wire, point: GridPos) -> bool {
-        if self.pin_at(point).is_some()
-            || self.schematic.labels().any(|label| label.at == point)
-            || self
-                .schematic
-                .junctions()
-                .any(|junction| junction.at == point)
-        {
-            return true;
-        }
-        self.schematic
-            .wires()
-            .filter(|other| other.id != wire.id)
-            .any(|other| {
-                other.a == point
-                    || other.b == point
-                    || (other.contains(point) && other.is_horizontal() == wire.is_horizontal())
             })
     }
 
@@ -2268,7 +2238,41 @@ mod tests {
     }
 
     #[test]
-    fn moves_a_segment_with_its_perpendicular_neighbours() {
+    fn toggles_a_switch_atomically() {
+        let mut document = Document::new();
+        let id = document
+            .add_symbol(SymbolKind::Switch, GridPos::new(0, 0))
+            .unwrap();
+        assert!(document.toggle_switch(id).unwrap());
+        assert_eq!(
+            document
+                .symbol(id)
+                .and_then(|symbol| symbol.params.get("closed"))
+                .and_then(ParamValue::as_bool),
+            Some(true)
+        );
+        document.undo().unwrap();
+        assert_eq!(
+            document
+                .symbol(id)
+                .and_then(|symbol| symbol.params.get("closed"))
+                .and_then(ParamValue::as_bool),
+            Some(false)
+        );
+    }
+
+    #[test]
+    fn wires_with_erc_problems_are_reported() {
+        let mut document = Document::new();
+        let wire = document
+            .add_wire(GridPos::new(0, 0), GridPos::new(6, 0))
+            .unwrap()[0];
+        let problems = document.problem_wires();
+        assert!(problems.contains(&wire));
+    }
+
+    #[test]
+    fn moves_a_segment_without_reconnecting_it() {
         let mut document = Document::new();
         let horizontal = document
             .add_wire(GridPos::new(0, 0), GridPos::new(4, 0))
@@ -2287,19 +2291,16 @@ mod tests {
             .wires()
             .filter(|wire| !wire.is_horizontal())
             .collect::<Vec<_>>();
-        assert_eq!(verticals.len(), 2);
-        assert!(verticals
-            .iter()
-            .any(|wire| { wire.a == GridPos::new(4, 0) && wire.b == GridPos::new(4, 4) }));
-        assert!(verticals
-            .iter()
-            .any(|wire| { wire.a == GridPos::new(4, 0) && wire.b == GridPos::new(4, 2) }));
+        assert_eq!(verticals.len(), 1);
+        assert_eq!(verticals[0].a, GridPos::new(4, 0));
+        assert_eq!(verticals[0].b, GridPos::new(4, 4));
+        assert_eq!(document.schematic().wires().count(), 2);
         document.undo().unwrap();
         assert_eq!(document.wire(horizontal).unwrap().a, GridPos::new(0, 0));
     }
 
     #[test]
-    fn moving_a_segment_keeps_labels_connected_with_a_stub() {
+    fn moving_a_segment_leaves_labels_in_place() {
         let mut document = Document::new();
         let horizontal = document
             .add_wire(GridPos::new(0, 0), GridPos::new(8, 0))
@@ -2313,9 +2314,7 @@ mod tests {
             .schematic()
             .labels()
             .any(|label| label.text == "MID" && label.at == GridPos::new(4, 0)));
-        assert!(document.schematic().wires().any(|wire| {
-            !wire.is_horizontal() && wire.a == GridPos::new(4, 0) && wire.b == GridPos::new(4, 2)
-        }));
+        assert_eq!(document.schematic().wires().count(), 1);
     }
 
     #[test]

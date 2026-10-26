@@ -24,12 +24,15 @@ const MAJOR_GRID: Color32 = Color32::from_rgb(34, 45, 64);
 const AXIS: Color32 = Color32::from_rgb(58, 78, 108);
 const PANEL_BADGE: Color32 = Color32::from_rgba_premultiplied(24, 34, 48, 220);
 const SELECTION_FILL: Color32 = Color32::from_rgba_premultiplied(112, 82, 24, 120);
+const WIRE_ERROR: Color32 = Color32::from_rgb(255, 92, 92);
 const MINIMAP_BACKGROUND: Color32 = Color32::from_rgba_premultiplied(12, 18, 28, 230);
 const MINIMAP_WIDTH: f32 = 152.0;
 const MINIMAP_HEIGHT: f32 = 112.0;
 const MINIMAP_MARGIN: f32 = 12.0;
 const ZOOM_STEP: f32 = 1.25;
 const ENDPOINT_RADIUS: f32 = 11.0;
+const FLOW_COLOR: Color32 = Color32::from_rgb(255, 236, 140);
+const FLOW_HALO: Color32 = Color32::from_rgba_premultiplied(20, 24, 12, 210);
 const LIVE_BADGE: Color32 = Color32::from_rgba_premultiplied(20, 30, 44, 228);
 
 /// Canvas interaction state that survives between frames.
@@ -50,6 +53,7 @@ pub struct CanvasState {
     last_rect: Option<Rect>,
     minimap_visible: bool,
     current_flow: bool,
+    property_request: Option<SymbolId>,
     label_dialog: Option<LabelDialog>,
 }
 
@@ -105,6 +109,7 @@ impl CanvasState {
             last_rect: None,
             minimap_visible: true,
             current_flow: true,
+            property_request: None,
             label_dialog: None,
         }
     }
@@ -222,6 +227,11 @@ impl CanvasState {
         self.current_flow = visible;
     }
 
+    /// Takes one pending double-click property request.
+    pub fn take_property_request(&mut self) -> Option<SymbolId> {
+        self.property_request.take()
+    }
+
     /// Returns true while the label name dialog is open.
     pub const fn has_dialog(&self) -> bool {
         self.label_dialog.is_some()
@@ -304,7 +314,7 @@ impl CanvasState {
         });
 
         self.paint_grid(&painter, rect);
-        self.paint_document(&painter, rect, document);
+        self.paint_document(&painter, rect, document, live);
         if self.current_flow {
             self.paint_current_flow(&painter, rect, document, live, flow_time);
         }
@@ -481,6 +491,16 @@ impl CanvasState {
         let latest_point = latest_pos
             .and_then(|position| self.viewport.screen_to_grid(rect, position))
             .or(hovered_point);
+
+        if response.double_clicked_by(PointerButton::Primary) {
+            if let Some(point) = hovered_point {
+                if let Some(ObjectRef::Symbol(id)) = document.object_at(point) {
+                    self.property_request = Some(id);
+                    self.drag = None;
+                    return;
+                }
+            }
+        }
 
         if let Some((map_rect, transform)) = self.minimap_geometry(rect, document) {
             if let Some(position) = latest_pos.filter(|position| map_rect.contains(*position)) {
@@ -817,7 +837,23 @@ impl CanvasState {
         shift: bool,
     ) {
         match tool {
-            crate::ui::Tool::Select => {}
+            crate::ui::Tool::Select => {
+                if let Some(ObjectRef::Symbol(id)) = document.object_at(point) {
+                    if document
+                        .symbol(id)
+                        .is_some_and(|symbol| symbol.kind == editor_core::SymbolKind::Switch)
+                    {
+                        match document.toggle_switch(id) {
+                            Ok(closed) => status.success(if closed {
+                                "Interrupteur fermé."
+                            } else {
+                                "Interrupteur ouvert."
+                            }),
+                            Err(error) => status.error(error.user_message()),
+                        }
+                    }
+                }
+            }
             crate::ui::Tool::Place(kind) => {
                 let insertable = document
                     .registry()
@@ -960,11 +996,28 @@ impl CanvasState {
         }
     }
 
-    fn paint_document(&self, painter: &Painter, rect: Rect, document: &Document) {
+    fn paint_document(
+        &self,
+        painter: &Painter,
+        rect: Rect,
+        document: &Document,
+        live: &LiveValues,
+    ) {
+        let problem_wires = document.problem_wires();
         for wire in document.schematic().wires() {
             let selected = document.selection().contains(&ObjectRef::Wire(wire.id));
             let hovered = self.hover == Some(ObjectRef::Wire(wire.id));
             let net_hovered = self.hover_net.contains(&ObjectRef::Wire(wire.id));
+            let problem = problem_wires.contains(&wire.id);
+            if problem {
+                painter.line_segment(
+                    [
+                        self.viewport.grid_to_screen(rect, wire.a),
+                        self.viewport.grid_to_screen(rect, wire.b),
+                    ],
+                    Stroke::new(9.0, WIRE_ERROR.gamma_multiply(0.18)),
+                );
+            }
             if (hovered || net_hovered) && !selected {
                 painter.line_segment(
                     [
@@ -987,7 +1040,9 @@ impl CanvasState {
                     } else {
                         3.2
                     },
-                    if selected {
+                    if problem {
+                        WIRE_ERROR
+                    } else if selected {
                         ACCENT
                     } else if hovered || net_hovered {
                         HOVER
@@ -1028,6 +1083,9 @@ impl CanvasState {
                 colors,
                 true,
             );
+            if symbol.kind == editor_core::SymbolKind::Led {
+                self.paint_led_glow(painter, rect, document, symbol, live);
+            }
             if selected {
                 paint_symbol_outline(painter, document, symbol, &self.viewport, rect, ACCENT, 1.7);
             } else if hovered || net_hovered {
@@ -1124,6 +1182,40 @@ impl CanvasState {
         painter.galley(badge.min + Vec2::new(8.0, 4.0), galley, color);
     }
 
+    fn paint_led_glow(
+        &self,
+        painter: &Painter,
+        rect: Rect,
+        document: &Document,
+        symbol: &Symbol,
+        live: &LiveValues,
+    ) {
+        let observed = live.symbol(document, symbol);
+        let voltage = match (observed.pins.first(), observed.pins.get(1)) {
+            (Some(first), Some(second)) => first.voltage.zip(second.voltage),
+            _ => None,
+        }
+        .map(|(a, b)| a - b);
+        let Some(voltage) = voltage else {
+            return;
+        };
+        let brightness = ((voltage - 0.8) / 1.2).clamp(0.0, 1.0) as f32;
+        if brightness <= 0.0 {
+            return;
+        }
+        let center = self.viewport.grid_to_screen(rect, symbol.at);
+        painter.circle_filled(
+            center,
+            (self.viewport.scale() * 2.2).clamp(10.0, 42.0),
+            Color32::from_rgba_premultiplied(255, 220, 60, (90.0 * brightness) as u8),
+        );
+        painter.circle_filled(
+            center,
+            (self.viewport.scale() * 1.3).clamp(6.0, 26.0),
+            Color32::from_rgba_premultiplied(255, 245, 170, (150.0 * brightness) as u8),
+        );
+    }
+
     fn paint_current_flow(
         &self,
         painter: &Painter,
@@ -1149,13 +1241,12 @@ impl CanvasState {
             };
             let speed = 2.0 + (flow.strength * 1_000.0).ln_1p().clamp(0.0, 6.0) * 0.6;
             let phase = (now * speed).rem_euclid(f64::from(spacing)) as f32;
+            let directions = wire_directions(document, net, flow.source);
             for id in &net.wires {
                 let Some(wire) = document.wire(*id) else {
                     continue;
                 };
-                let distance_a = wire.a.manhattan_distance(flow.source);
-                let distance_b = wire.b.manhattan_distance(flow.source);
-                let forward = (distance_a <= distance_b) == flow.away;
+                let forward = directions.get(id).copied().unwrap_or(true) == flow.away;
                 let (start, end) = if forward {
                     (wire.a, wire.b)
                 } else {
@@ -1171,7 +1262,8 @@ impl CanvasState {
                 while traveled < length {
                     let ratio = traveled / length;
                     let position = start_screen + (end_screen - start_screen) * ratio;
-                    painter.circle_filled(position, 2.2, HOVER.gamma_multiply(0.92));
+                    painter.circle_filled(position, 3.8, FLOW_HALO);
+                    painter.circle_filled(position, 2.4, FLOW_COLOR);
                     traveled += spacing;
                 }
             }
@@ -1899,15 +1991,58 @@ fn net_flows(document: &Document, live: &LiveValues) -> BTreeMap<String, NetFlow
                 away: injection > 0.0,
                 strength,
             };
-            match flows.get(net) {
-                Some(existing) if existing.strength >= strength => {}
-                _ => {
-                    flows.insert(net.to_owned(), candidate);
+            let replace = match flows.get(net) {
+                None => true,
+                Some(existing) => {
+                    strength > existing.strength
+                        || (strength == existing.strength && candidate.away && !existing.away)
                 }
+            };
+            if replace {
+                flows.insert(net.to_owned(), candidate);
             }
         }
     }
     flows
+}
+
+fn wire_directions(
+    document: &Document,
+    net: &editor_core::ExtractedNet,
+    source: GridPos,
+) -> BTreeMap<WireId, bool> {
+    let mut adjacency: BTreeMap<GridPos, Vec<(WireId, bool)>> = BTreeMap::new();
+    for id in &net.wires {
+        let Some(wire) = document.wire(*id) else {
+            continue;
+        };
+        adjacency.entry(wire.a).or_default().push((*id, true));
+        adjacency.entry(wire.b).or_default().push((*id, false));
+    }
+    let Some(root) = adjacency
+        .keys()
+        .copied()
+        .min_by_key(|point| point.manhattan_distance(source))
+    else {
+        return BTreeMap::new();
+    };
+    let mut directions = BTreeMap::new();
+    let mut visited = BTreeSet::new();
+    let mut queue = std::collections::VecDeque::from([root]);
+    visited.insert(root);
+    while let Some(point) = queue.pop_front() {
+        for (id, forward) in adjacency.get(&point).into_iter().flatten() {
+            let Some(wire) = document.wire(*id) else {
+                continue;
+            };
+            let next = if *forward { wire.b } else { wire.a };
+            directions.entry(*id).or_insert(*forward);
+            if visited.insert(next) {
+                queue.push_back(next);
+            }
+        }
+    }
+    directions
 }
 
 fn report(status: &mut Status, result: Result<(), ActionError>, success: &str) {
@@ -2259,6 +2394,29 @@ mod tests {
         assert!(document
             .symbol(resistor.id)
             .is_some_and(|symbol| symbol.kind == editor_core::SymbolKind::Resistor));
+    }
+
+    #[test]
+    fn flow_directions_follow_the_wire_chain_from_the_source() {
+        let mut document = Document::new();
+        let first = document
+            .add_wire(GridPos::new(0, 0), GridPos::new(4, 0))
+            .unwrap()[0];
+        let second = document
+            .add_wire(GridPos::new(4, 0), GridPos::new(4, 4))
+            .unwrap()[0];
+        document
+            .add_symbol(editor_core::SymbolKind::Ground, GridPos::new(4, 0))
+            .unwrap();
+        let net = document
+            .nets()
+            .iter()
+            .find(|net| net.wires.contains(&first))
+            .expect("grounded wires form a net");
+        assert!(net.wires.contains(&second));
+        let directions = wire_directions(&document, net, GridPos::new(0, 0));
+        assert_eq!(directions.get(&first), Some(&true));
+        assert_eq!(directions.get(&second), Some(&true));
     }
 
     #[test]

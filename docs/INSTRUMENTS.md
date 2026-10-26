@@ -27,7 +27,9 @@ d'outils, `Ctrl+Entrée` ou `F5`. La portée utilise maintenant une **session
 temps réel** : aucun arrêt n'est demandé, le pas fixe est conservé, la vitesse
 de lecture et la pause sont réglables. Une modification du schéma peut relancer
 automatiquement la session si l'option **Auto** est active. Le dernier
-échantillon alimente l'inspecteur, les sondes et la superposition des courants.
+échantillon alimente l'inspecteur, les sondes et la superposition des courants :
+des points jaunes à halo sombre parcourent chaque net dans le sens des injections
+positives, et les LED rayonnent selon leur tension directe.
 
 ## 2. Catalogue et sélection
 

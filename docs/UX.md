@@ -110,14 +110,20 @@ Les raccourcis sont ignorés lorsqu’un champ texte a le focus, à l’exceptio
   premier coude (horizontal ou vertical).
 - `Échap` annule le fil courant. Un second clic sur la même position l’annule
   aussi.
-- Un fil sélectionné peut être glissé perpendiculairement. Toutes les
-  connexions du segment sont conservées : les fils perpendiculaires restent en
-  place et de courts embouts relient leurs anciennes positions au segment
-  déplacé. Aucune connexion n’est perdue silencieusement.
+- Un fil sélectionné peut être glissé perpendiculairement. Le segment est
+  simplement remplacé à sa nouvelle position : ses anciennes extrémités sont
+  libérées, aucun embout ni fil supplémentaire n'est créé. Les objets qui
+  touchaient le segment restent à leur place et peuvent devenir non connectés.
 - Une extrémité libre peut être tirée le long de l’axe pour allonger ou
   raccourcir le fil. Une extrémité connectée est refusée avec un message.
-- Les fils sont plus épais ; après simulation, des points animés montrent le
-  courant estimé. `Vue → Courant animé` masque ce flux.
+- Les fils sont plus épais ; après simulation, des points jaunes à halo sombre
+  suivent le sens réel du courant estimé. `Vue → Courant animé` masque ce flux.
+- Un fil signalé par l’ERC (erreur ou avertissement) est tracé en rouge.
+- Une LED montre son allumage par un halo proportionnel à sa tension directe.
+  Un clic sur un interrupteur le ferme ou l’ouvre directement sur le canevas ;
+  l’action est annulable.
+- Un double-clic sur un symbole ouvre une fenêtre centrée d’édition de ses
+  propriétés, avec les mêmes validations que l’inspecteur.
 - Un clic sur une broche ou un fil met en évidence le net complet. `Alt` + clic
   sélectionne tous ses objets.
 
@@ -175,6 +181,9 @@ Les raccourcis sont ignorés lorsqu’un champ texte a le focus, à l’exceptio
 ## 11. Inspecteur, valeurs et historique
 
 - L’inspecteur affiche la référence, l’orientation, le miroir et les paramètres.
+  Un double-clic sur un symbole ouvre la même édition dans une fenêtre centrée.
+- Les aides de saisie sont dans les infobulles des champs ; le panneau privilégie
+  les valeurs, les sections et les actions.
 - Les valeurs s’écrivent directement en notation d’ingénieur : `4k7`, `100n`,
   `2.2u`, `1e-6`, avec unité optionnelle. `Entrée` applique la saisie.
 - La série préférée E12, E24 ou E96 se choisit dans l’inspecteur. La molette,
@@ -198,7 +207,8 @@ Les raccourcis sont ignorés lorsqu’un champ texte a le focus, à l’exceptio
 
 Une opération refusée affiche un message français dans la barre d’état et ne
 modifie ni le schéma, ni la révision, ni `next_id`. Les erreurs techniques
-restent typées dans les crates.
+restent typées dans les crates. Les fils concernés par un diagnostic ERC non
+informatif sont dessinés en rouge sur le canevas.
 
 ## 13. Critères d’acceptation
 

@@ -3,7 +3,7 @@
 use editor_core::{
     GridPos, Junction, ObjectRef, Orientation, Series, Symbol, SymbolId, SymbolKind, Wire,
 };
-use eframe::egui::{self, Color32, Grid, Key, RichText, TextEdit, Ui};
+use eframe::egui::{self, Align2, Color32, Grid, Key, RichText, TextEdit, Ui, Vec2};
 use sim_core::netlist::ParamValue;
 use sim_core::units::{format_si_precision, Unit};
 
@@ -12,7 +12,7 @@ use crate::document::{
     format_parameter, parameter_error_message, parameter_label, parameter_unit, parse_parameter,
     Document,
 };
-use crate::ui::{symbol_kind_name, Status, ACCENT, MUTED};
+use crate::ui::{symbol_kind_name, Status, ACCENT};
 
 const ERROR: Color32 = Color32::from_rgb(240, 128, 128);
 
@@ -58,6 +58,114 @@ enum ParamDraftValue {
 #[derive(Clone, Debug)]
 struct LabelDraft {
     text: String,
+}
+
+/// Floating editor opened by double-clicking a component.
+pub struct SymbolDialog {
+    id: SymbolId,
+    draft: SymbolDraft,
+    series: Series,
+    error: Option<String>,
+}
+
+impl SymbolDialog {
+    /// Captures the current symbol into a dialog draft.
+    pub fn new(document: &Document, id: SymbolId) -> Option<Self> {
+        let symbol = document.symbol(id)?;
+        Some(Self {
+            id,
+            draft: SymbolDraft::from_symbol(symbol),
+            series: Series::default(),
+            error: None,
+        })
+    }
+
+    /// Returns the edited symbol.
+    pub const fn id(&self) -> SymbolId {
+        self.id
+    }
+
+    /// Draws the dialog. Returns false when it should close.
+    pub fn show(
+        &mut self,
+        context: &egui::Context,
+        document: &mut Document,
+        status: &mut Status,
+        live: &LiveValues,
+    ) -> bool {
+        let mut open = true;
+        let mut close = false;
+        let live_info = document
+            .symbol(self.id)
+            .filter(|symbol| !symbol.kind.is_measurement())
+            .map(|symbol| live.symbol(document, symbol));
+        let probe_info = probe_readings(document, live)
+            .into_iter()
+            .find(|probe| probe.id == self.id);
+        egui::Window::new("Propriétés du composant")
+            .open(&mut open)
+            .anchor(Align2::CENTER_CENTER, Vec2::ZERO)
+            .collapsible(false)
+            .resizable(true)
+            .default_width(390.0)
+            .show(context, |ui| {
+                if let Some(error) = &self.error {
+                    ui.colored_label(ERROR, error);
+                }
+                let action = show_symbol(
+                    ui,
+                    &mut self.draft,
+                    live_info.as_ref(),
+                    probe_info.as_ref(),
+                    live,
+                    document.revision(),
+                    &mut self.series,
+                );
+                match action {
+                    EditorAction::None => {}
+                    EditorAction::Reset => {
+                        if let Some(symbol) = document.symbol(self.id) {
+                            self.draft = SymbolDraft::from_symbol(symbol);
+                            self.error = None;
+                            status.info("Modifications annulées.");
+                        }
+                    }
+                    EditorAction::Apply => {
+                        let Some(current) = document.symbol(self.id) else {
+                            self.error = Some("Le symbole n'existe plus.".to_owned());
+                            return;
+                        };
+                        let new = match self.draft.to_symbol(current) {
+                            Ok(new) => new,
+                            Err(error) => {
+                                self.error = Some(error);
+                                return;
+                            }
+                        };
+                        if new == *current {
+                            status.info("Aucune modification à appliquer.");
+                            return;
+                        }
+                        match document.update_symbol(new) {
+                            Ok(()) => {
+                                self.error = None;
+                                status.success("Symbole mis à jour.");
+                                close = true;
+                            }
+                            Err(error) => {
+                                let message = error.user_message();
+                                self.error = Some(message.clone());
+                                status.error(message);
+                            }
+                        }
+                    }
+                }
+            });
+        if close || context.input(|input| input.key_pressed(Key::Escape)) {
+            open = false;
+        }
+        open
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -176,16 +284,8 @@ pub fn show(
     state.sync(document);
     ui.add_space(4.0);
     ui.heading("Propriétés");
-    ui.label(
-        RichText::new(format!(
-            "{} objet(s) sélectionné(s)",
-            document.selection().len()
-        ))
-        .small()
-        .color(MUTED),
-    );
     if let Some(error) = &state.error {
-        ui.colored_label(Color32::from_rgb(240, 128, 128), error);
+        ui.colored_label(ERROR, error);
     }
     ui.separator();
 
@@ -301,21 +401,8 @@ pub fn show(
 }
 
 fn show_empty(ui: &mut Ui) {
-    ui.label("Aucun objet sélectionné.");
-    ui.add_space(6.0);
-    ui.label(
-        RichText::new(
-            "Cliquez sur un symbole, un fil, une jonction ou un label pour afficher ses propriétés.",
-        )
-        .color(MUTED),
-    );
-    ui.add_space(10.0);
-    ui.label(RichText::new("Sélection multiple").strong());
-    ui.label(
-        RichText::new("Maj + clic ajoute ou retire un objet de la sélection.")
-            .small()
-            .color(MUTED),
-    );
+    ui.label(RichText::new("Aucun objet sélectionné.").strong());
+    ui.label("Cliquez un objet ou utilisez Ctrl+A.");
 }
 
 fn show_multiple(ui: &mut Ui, document: &mut Document, status: &mut Status) {
@@ -358,14 +445,6 @@ fn show_multiple(ui: &mut Ui, document: &mut Document, status: &mut Status) {
             }
         }
     });
-    ui.add_space(8.0);
-    ui.label(
-        RichText::new(
-            "La suppression et les transformations sont atomiques et annulables avec Ctrl+Z.",
-        )
-        .small()
-        .color(MUTED),
-    );
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -386,20 +465,17 @@ fn show_symbol(
         ))
         .strong()
         .color(ACCENT),
-    );
-    ui.label(
-        RichText::new(format!("Identifiant : {}", draft.id.0))
-            .small()
-            .color(MUTED),
-    );
+    )
+    .on_hover_text(format!("Identifiant : {}", draft.id.0));
     ui.add_space(6.0);
 
     Grid::new("symbol_properties")
         .num_columns(2)
-        .spacing([10.0, 6.0])
+        .spacing([12.0, 8.0])
         .show(ui, |ui| {
             ui.label("Référence");
-            ui.add(TextEdit::singleline(&mut draft.label).desired_width(170.0));
+            ui.add(TextEdit::singleline(&mut draft.label).desired_width(180.0))
+                .on_hover_text("Référence unique du composant");
             ui.end_row();
 
             ui.label("Orientation");
@@ -422,7 +498,8 @@ fn show_symbol(
             ui.end_row();
 
             ui.label("Miroir");
-            ui.checkbox(&mut draft.mirrored, "Horizontal");
+            ui.checkbox(&mut draft.mirrored, "Horizontal")
+                .on_hover_text("Miroir horizontal du symbole");
             ui.end_row();
         });
 
@@ -430,27 +507,24 @@ fn show_symbol(
     ui.label(RichText::new("Paramètres").strong());
     let mut commit = false;
     if draft.params.is_empty() {
-        ui.label(RichText::new("Aucun paramètre.").small().color(MUTED));
+        ui.label("Aucun paramètre.");
     } else {
         ui.horizontal(|ui| {
-            ui.label("Série préférée");
+            ui.label("Série");
             egui::ComboBox::from_id_salt("parameter_series")
                 .selected_text(series.label())
                 .show_ui(ui, |ui| {
                     for candidate in Series::ALL {
                         ui.selectable_value(series, candidate, candidate.label());
                     }
-                });
-            ui.label(
-                RichText::new("Molette ou boutons −/+ sur une valeur")
-                    .small()
-                    .color(MUTED),
-            );
+                })
+                .response
+                .on_hover_text("Série E utilisée par la molette et les boutons −/+");
         });
         let kind = draft.kind.clone();
         Grid::new("symbol_parameters")
             .num_columns(2)
-            .spacing([10.0, 6.0])
+            .spacing([12.0, 8.0])
             .show(ui, |ui| {
                 for param in &mut draft.params {
                     let unit = parameter_unit(&kind, &param.key);
@@ -458,82 +532,69 @@ fn show_symbol(
                         .on_hover_text(format!("Clé : {}", param.key));
                     match &mut param.value {
                         ParamDraftValue::Number(text) => {
-                            ui.vertical(|ui| {
-                                ui.horizontal(|ui| {
-                                    let response = ui.add(
-                                        TextEdit::singleline(text)
-                                            .desired_width(150.0)
-                                            .hint_text("4k7, 2.2u, 1e-6"),
-                                    );
-                                    let response = response.on_hover_text(
-                                        "Molette ou Alt+↑/↓ : valeur E série suivante/précédente",
-                                    );
-                                    if ui
-                                        .small_button("−")
-                                        .on_hover_text("Valeur E série précédente")
-                                        .clicked()
-                                    {
-                                        cycle_number(text, *series, unit, -1);
-                                    }
-                                    if ui
-                                        .small_button("+")
-                                        .on_hover_text("Valeur E série suivante")
-                                        .clicked()
-                                    {
-                                        cycle_number(text, *series, unit, 1);
-                                    }
-                                    if response.hovered() {
-                                        let scroll = ui.input(|input| input.smooth_scroll_delta.y);
-                                        if scroll.abs() > 0.1 {
-                                            cycle_number(
-                                                text,
-                                                *series,
-                                                unit,
-                                                if scroll > 0.0 { 1 } else { -1 },
-                                            );
-                                        }
-                                    }
-                                    if response.has_focus() {
-                                        let (up, down) = ui.input(|input| {
-                                            (
-                                                input.modifiers.alt
-                                                    && input.key_pressed(Key::ArrowUp),
-                                                input.modifiers.alt
-                                                    && input.key_pressed(Key::ArrowDown),
-                                            )
-                                        });
-                                        if up {
-                                            cycle_number(text, *series, unit, 1);
-                                        } else if down {
-                                            cycle_number(text, *series, unit, -1);
-                                        }
-                                    }
-                                    if response.lost_focus()
-                                        && ui.input(|input| input.key_pressed(Key::Enter))
-                                    {
-                                        commit = true;
-                                    }
+                            ui.horizontal(|ui| {
+                                let response = ui.add(
+                                    TextEdit::singleline(text)
+                                        .desired_width(145.0)
+                                        .hint_text("4k7, 2.2u, 1e-6"),
+                                );
+                                let normalized = parse_parameter(text)
+                                    .ok()
+                                    .map(|value| format_parameter(value, unit));
+                                let response = response.on_hover_text(match &normalized {
+                                    Some(value) => format!(
+                                        "Valeur normalisée : {value}\nMolette ou Alt+↑/↓ : série E"
+                                    ),
+                                    None => "Saisie : 4k7, 100n, 1e-6".to_owned(),
                                 });
-                                match parse_parameter(text) {
-                                    Ok(value) => {
-                                        ui.label(
-                                            RichText::new(format!(
-                                                "= {}",
-                                                format_parameter(value, unit)
-                                            ))
-                                            .small()
-                                            .color(MUTED),
-                                        );
-                                    }
-                                    Err(error) => {
-                                        ui.label(
-                                            RichText::new(parameter_error_message(&error))
-                                                .small()
-                                                .color(ERROR),
+                                if ui
+                                    .small_button("−")
+                                    .on_hover_text("Valeur E série précédente")
+                                    .clicked()
+                                {
+                                    cycle_number(text, *series, unit, -1);
+                                }
+                                if ui
+                                    .small_button("+")
+                                    .on_hover_text("Valeur E série suivante")
+                                    .clicked()
+                                {
+                                    cycle_number(text, *series, unit, 1);
+                                }
+                                if response.hovered() {
+                                    let scroll = ui.input(|input| input.smooth_scroll_delta.y);
+                                    if scroll.abs() > 0.1 {
+                                        cycle_number(
+                                            text,
+                                            *series,
+                                            unit,
+                                            if scroll > 0.0 { 1 } else { -1 },
                                         );
                                     }
                                 }
+                                if response.has_focus() {
+                                    let (up, down) = ui.input(|input| {
+                                        (
+                                            input.modifiers.alt && input.key_pressed(Key::ArrowUp),
+                                            input.modifiers.alt
+                                                && input.key_pressed(Key::ArrowDown),
+                                        )
+                                    });
+                                    if up {
+                                        cycle_number(text, *series, unit, 1);
+                                    } else if down {
+                                        cycle_number(text, *series, unit, -1);
+                                    }
+                                }
+                                if response.lost_focus()
+                                    && ui.input(|input| input.key_pressed(Key::Enter))
+                                {
+                                    commit = true;
+                                }
                             });
+                            if let Err(error) = parse_parameter(text) {
+                                ui.colored_label(ERROR, parameter_error_message(&error));
+                            }
                         }
                         ParamDraftValue::Bool(flag) => {
                             ui.checkbox(flag, "");
@@ -541,21 +602,15 @@ fn show_symbol(
                         ParamDraftValue::Text(text) => {
                             ui.add(
                                 TextEdit::singleline(text)
-                                    .desired_width(170.0)
+                                    .desired_width(180.0)
                                     .hint_text("texte"),
-                            );
+                            )
+                            .on_hover_text("Paramètre texte");
                         }
                     }
                     ui.end_row();
                 }
             });
-        ui.label(
-            RichText::new(
-                "Notation acceptée : 1k, 4k7, 2.2u, 10m, 1e-6 ; Entrée applique la saisie.",
-            )
-            .small()
-            .color(MUTED),
-        );
     }
 
     if let Some(probe) = probe_info {
@@ -572,14 +627,10 @@ fn show_symbol(
         );
         ui.label(format!("Valeur : {value}"));
         if let Some(net) = &probe.net {
-            ui.label(RichText::new(format!("Net : {net}")).small().color(MUTED));
+            ui.label(format!("Net : {net}"));
         }
         if let Some(target) = &probe.target {
-            ui.label(
-                RichText::new(format!("Composant : {target}"))
-                    .small()
-                    .color(MUTED),
-            );
+            ui.label(format!("Composant : {target}"));
         }
     }
 
@@ -615,31 +666,19 @@ fn cycle_number(text: &mut String, series: Series, unit: Option<Unit>, steps: i3
 
 fn show_symbol_live(ui: &mut Ui, info: &SymbolLive, live: &LiveValues, revision: u64) {
     ui.add_space(10.0);
-    ui.label(RichText::new("Grandeurs simulées").strong());
+    ui.label(RichText::new("Grandeurs simulées").strong())
+        .on_hover_text("Lancez une simulation transitoire pour actualiser V, I et P.");
     if live.is_empty() {
-        ui.label(
-            RichText::new("Lancez une simulation transitoire pour afficher V, I et P.")
-                .small()
-                .color(MUTED),
-        );
         return;
     }
     if live.document_revision != revision {
-        ui.label(
-            RichText::new("Résultat antérieur aux dernières modifications.")
-                .small()
-                .color(ACCENT),
-        );
+        ui.label(RichText::new("Résultat antérieur aux dernières modifications.").color(ACCENT));
     }
     if let Some(time) = live.time {
-        ui.label(
-            RichText::new(format!(
-                "Dernier échantillon : t = {}",
-                format_si_precision(time, Unit::Second, 4)
-            ))
-            .small()
-            .color(MUTED),
-        );
+        ui.label(format!(
+            "t = {}",
+            format_si_precision(time, Unit::Second, 4)
+        ));
     }
     for pin in &info.pins {
         let net = pin.net.as_deref().unwrap_or("—");
@@ -665,28 +704,16 @@ fn show_symbol_live(ui: &mut Ui, info: &SymbolLive, live: &LiveValues, revision:
 
 fn show_net_live(ui: &mut Ui, document: &Document, live: &LiveValues, at: GridPos) {
     ui.add_space(10.0);
-    ui.label(RichText::new("Grandeurs simulées").strong());
+    ui.label(RichText::new("Grandeurs simulées").strong())
+        .on_hover_text("Lancez une simulation transitoire pour actualiser la tension.");
     if live.is_empty() {
-        ui.label(
-            RichText::new("Lancez une simulation transitoire pour afficher la tension.")
-                .small()
-                .color(MUTED),
-        );
         return;
     }
     if live.document_revision != document.revision() {
-        ui.label(
-            RichText::new("Résultat antérieur aux dernières modifications.")
-                .small()
-                .color(ACCENT),
-        );
+        ui.label(RichText::new("Résultat antérieur aux dernières modifications.").color(ACCENT));
     }
     let Some(name) = document.net_name_at(at) else {
-        ui.label(
-            RichText::new("Aucun net à cette position.")
-                .small()
-                .color(MUTED),
-        );
+        ui.label("Aucun net à cette position.");
         return;
     };
     let voltage = live.voltage(&name).map_or_else(
@@ -697,25 +724,22 @@ fn show_net_live(ui: &mut Ui, document: &Document, live: &LiveValues, at: GridPo
 }
 
 fn show_label(ui: &mut Ui, draft: &mut LabelDraft, document: &Document) -> EditorAction {
-    ui.label(RichText::new("Label de net").strong().color(ACCENT));
+    let heading = ui.label(RichText::new("Label de net").strong().color(ACCENT));
     if let Some(label) = document.selected_label() {
-        ui.label(
-            RichText::new(format!(
-                "Position : ({}, {}) · id {}",
-                label.at.x, label.at.y, label.id.0
-            ))
-            .small()
-            .color(MUTED),
-        );
+        heading.on_hover_text(format!(
+            "Position : ({}, {}) · id {}",
+            label.at.x, label.at.y, label.id.0
+        ));
     }
     ui.add_space(6.0);
     let mut action = EditorAction::None;
     Grid::new("label_properties")
         .num_columns(2)
-        .spacing([10.0, 6.0])
+        .spacing([12.0, 8.0])
         .show(ui, |ui| {
             ui.label("Nom");
-            ui.add(TextEdit::singleline(&mut draft.text).desired_width(170.0));
+            ui.add(TextEdit::singleline(&mut draft.text).desired_width(180.0))
+                .on_hover_text("Nom du net ; la masse doit s'appeler 0");
             ui.end_row();
         });
     ui.add_space(10.0);
@@ -731,16 +755,12 @@ fn show_label(ui: &mut Ui, draft: &mut LabelDraft, document: &Document) -> Edito
 }
 
 fn show_wire(ui: &mut Ui, wire: &Wire) {
-    ui.label(RichText::new("Fil").strong().color(ACCENT));
-    ui.label(
-        RichText::new(format!("Identifiant : {}", wire.id.0))
-            .small()
-            .color(MUTED),
-    );
+    ui.label(RichText::new("Fil").strong().color(ACCENT))
+        .on_hover_text(format!("Identifiant : {}", wire.id.0));
     ui.add_space(6.0);
     Grid::new("wire_properties")
         .num_columns(2)
-        .spacing([10.0, 6.0])
+        .spacing([12.0, 8.0])
         .show(ui, |ui| {
             ui.label("Départ");
             ui.monospace(format!("({}, {})", wire.a.x, wire.a.y));
@@ -762,36 +782,20 @@ fn show_wire(ui: &mut Ui, wire: &Wire) {
             });
             ui.end_row();
         });
-    ui.add_space(8.0);
-    ui.label(
-        RichText::new("La géométrie d'un fil se modifie en le déplaçant avec la sélection.")
-            .small()
-            .color(MUTED),
-    );
 }
 
 fn show_junction(ui: &mut Ui, junction: &Junction) {
-    ui.label(RichText::new("Jonction").strong().color(ACCENT));
-    ui.label(
-        RichText::new(format!("Identifiant : {}", junction.id.0))
-            .small()
-            .color(MUTED),
-    );
+    ui.label(RichText::new("Jonction").strong().color(ACCENT))
+        .on_hover_text(format!("Identifiant : {}", junction.id.0));
     ui.add_space(6.0);
     Grid::new("junction_properties")
         .num_columns(2)
-        .spacing([10.0, 6.0])
+        .spacing([12.0, 8.0])
         .show(ui, |ui| {
             ui.label("Position");
             ui.monospace(format!("({}, {})", junction.at.x, junction.at.y));
             ui.end_row();
         });
-    ui.add_space(8.0);
-    ui.label(
-        RichText::new("La jonction se déplace avec la sélection.")
-            .small()
-            .color(MUTED),
-    );
 }
 
 fn orientation_name(orientation: Orientation) -> &'static str {
