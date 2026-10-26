@@ -1,0 +1,959 @@
+//! Modified nodal analysis assembly used by the simulation analyses.
+
+use std::collections::BTreeMap;
+
+use nalgebra::{Complex, DMatrix, DVector};
+use thiserror::Error;
+
+use crate::netlist::{
+    ComponentId, ComponentKind, ComponentSpec, Netlist, NetlistError, NodeId, ParamValue,
+};
+
+const BOLTZMANN: f64 = 1.380_649e-23;
+const ELEMENTARY_CHARGE: f64 = 1.602_176_634e-19;
+const NOMINAL_TEMPERATURE: f64 = 300.15;
+const THERMAL_VOLTAGE: f64 = BOLTZMANN * NOMINAL_TEMPERATURE / ELEMENTARY_CHARGE;
+const MAX_EXPONENT: f64 = 80.0;
+
+/// Error raised while compiling a validated netlist into MNA equations.
+#[derive(Clone, Debug, Error, PartialEq)]
+pub enum MnaError {
+    #[error(transparent)]
+    Netlist(#[from] NetlistError),
+    #[error("component {component:?} ({kind}) is not supported by the solver")]
+    UnsupportedComponent {
+        component: ComponentId,
+        kind: ComponentKind,
+    },
+    #[error("component {component:?} is missing required parameter '{key}'")]
+    MissingParameter {
+        component: ComponentId,
+        key: &'static str,
+    },
+    #[error("component {component:?} parameter '{key}' must be {expected}")]
+    InvalidParameterType {
+        component: ComponentId,
+        key: &'static str,
+        expected: &'static str,
+    },
+    #[error("component {component:?} parameter '{key}' must be {requirement}, got {value}")]
+    InvalidParameterValue {
+        component: ComponentId,
+        key: &'static str,
+        value: f64,
+        requirement: &'static str,
+    },
+    #[error("component {component:?} cannot define a branch between the same node")]
+    DegenerateBranch { component: ComponentId },
+    #[error("component {component:?} requires v_sat_pos > v_sat_neg (got {positive}, {negative})")]
+    InvalidSaturation {
+        component: ComponentId,
+        positive: f64,
+        negative: f64,
+    },
+}
+
+/// Time mode used while assembling the MNA system.
+#[derive(Clone, Copy)]
+pub(crate) enum AssemblyMode<'a> {
+    /// DC operating point: capacitors open and inductors shorted.
+    Dc,
+    /// Backward-Euler step from a previous solution.
+    Transient {
+        previous: &'a DVector<f64>,
+        step: f64,
+    },
+}
+
+pub(crate) struct MnaCircuit {
+    node_map: Vec<Option<usize>>,
+    node_count: usize,
+    branch_components: Vec<ComponentId>,
+    branches: Vec<BranchElement>,
+    resistors: Vec<ResistorElement>,
+    capacitors: Vec<CapacitorElement>,
+    current_sources: Vec<CurrentSourceElement>,
+    nonlinear: Vec<DiodeDevice>,
+    grounds: Vec<ComponentId>,
+}
+
+impl MnaCircuit {
+    pub(crate) fn from_netlist(netlist: &Netlist) -> Result<Self, MnaError> {
+        netlist.validate_for_simulation()?;
+
+        let mut node_map = Vec::with_capacity(netlist.nodes.len());
+        let mut node_count = 0;
+        for node in &netlist.nodes {
+            if node.kind.is_ground() {
+                node_map.push(None);
+            } else {
+                node_map.push(Some(node_count));
+                node_count += 1;
+            }
+        }
+
+        let mut circuit = Self {
+            node_map,
+            node_count,
+            branch_components: Vec::new(),
+            branches: Vec::new(),
+            resistors: Vec::new(),
+            capacitors: Vec::new(),
+            current_sources: Vec::new(),
+            nonlinear: Vec::new(),
+            grounds: Vec::new(),
+        };
+
+        for component in &netlist.components {
+            circuit.add_component(component)?;
+        }
+        Ok(circuit)
+    }
+
+    pub(crate) fn size(&self) -> usize {
+        self.node_count + self.branch_components.len()
+    }
+
+    pub(crate) fn node_count(&self) -> usize {
+        self.node_count
+    }
+
+    pub(crate) fn branch_components(&self) -> &[ComponentId] {
+        &self.branch_components
+    }
+
+    pub(crate) fn has_nonlinear_devices(&self) -> bool {
+        !self.nonlinear.is_empty()
+            || self
+                .branches
+                .iter()
+                .any(|branch| matches!(branch.kind, BranchKind::OpAmp { .. }))
+    }
+
+    pub(crate) fn nonlinear_count(&self) -> usize {
+        self.nonlinear.len()
+    }
+
+    pub(crate) fn node_voltage(&self, solution: &DVector<f64>, node: NodeId) -> Option<f64> {
+        self.node_map
+            .get(usize::try_from(node.0).ok()?)
+            .map(|index| index.map_or(0.0, |index| solution[index]))
+    }
+
+    pub(crate) fn node_phasor(
+        &self,
+        solution: &DVector<Complex<f64>>,
+        node: NodeId,
+    ) -> Option<Complex<f64>> {
+        self.node_map
+            .get(usize::try_from(node.0).ok()?)
+            .map(|index| index.map_or_else(|| Complex::new(0.0, 0.0), |index| solution[index]))
+    }
+
+    pub(crate) fn junction_voltages(&self, solution: &DVector<f64>) -> Vec<f64> {
+        self.nonlinear
+            .iter()
+            .map(|device| device.junction_voltage(solution))
+            .collect()
+    }
+
+    pub(crate) fn limit_junction_voltages(
+        &self,
+        solution: &DVector<f64>,
+        junction_voltages: &mut [f64],
+    ) {
+        for (device, state) in self.nonlinear.iter().zip(junction_voltages.iter_mut()) {
+            let target = device.junction_voltage(solution);
+            *state = limit_junction(*state, target, device.limiting_voltage());
+        }
+    }
+
+    pub(crate) fn assemble(
+        &self,
+        solution: &DVector<f64>,
+        junction_voltages: &[f64],
+        mode: AssemblyMode<'_>,
+        gmin: f64,
+        source_scale: f64,
+    ) -> (DMatrix<f64>, DVector<f64>) {
+        let size = self.size();
+        let mut conductance = DMatrix::zeros(size, size);
+        let mut sources = DVector::zeros(size);
+
+        for resistor in &self.resistors {
+            stamp_conductance(
+                &mut conductance,
+                resistor.a,
+                resistor.b,
+                1.0 / resistor.resistance,
+            );
+        }
+
+        for source in &self.current_sources {
+            stamp_current_source(
+                &mut sources,
+                source.a,
+                source.b,
+                source.current * source_scale,
+            );
+        }
+
+        if let AssemblyMode::Transient { previous, step } = mode {
+            for capacitor in &self.capacitors {
+                let conductance_value = capacitor.capacitance / step;
+                let previous_voltage =
+                    node_voltage(previous, capacitor.a) - node_voltage(previous, capacitor.b);
+                stamp_conductance(
+                    &mut conductance,
+                    capacitor.a,
+                    capacitor.b,
+                    conductance_value,
+                );
+                stamp_current_source(
+                    &mut sources,
+                    capacitor.a,
+                    capacitor.b,
+                    -conductance_value * previous_voltage,
+                );
+            }
+        }
+
+        for branch in &self.branches {
+            if let Some(a) = branch.a {
+                conductance[(a, branch.index)] += 1.0;
+            }
+            if let Some(b) = branch.b {
+                conductance[(b, branch.index)] -= 1.0;
+            }
+
+            match branch.kind {
+                BranchKind::VoltageSource { voltage } => {
+                    if let Some(a) = branch.a {
+                        conductance[(branch.index, a)] += 1.0;
+                    }
+                    if let Some(b) = branch.b {
+                        conductance[(branch.index, b)] -= 1.0;
+                    }
+                    sources[branch.index] += voltage * source_scale;
+                }
+                BranchKind::Inductor { inductance } => {
+                    if let Some(a) = branch.a {
+                        conductance[(branch.index, a)] += 1.0;
+                    }
+                    if let Some(b) = branch.b {
+                        conductance[(branch.index, b)] -= 1.0;
+                    }
+                    if let AssemblyMode::Transient { previous, step } = mode {
+                        let ratio = inductance / step;
+                        conductance[(branch.index, branch.index)] -= ratio;
+                        sources[branch.index] -= ratio * previous[branch.index];
+                    }
+                }
+                BranchKind::OpAmp {
+                    in_plus,
+                    in_minus,
+                    gain,
+                    saturation_positive,
+                    saturation_negative,
+                } => {
+                    if let Some(a) = branch.a {
+                        conductance[(branch.index, a)] += 1.0;
+                    }
+                    let differential =
+                        node_voltage(solution, in_plus) - node_voltage(solution, in_minus);
+                    let (value, slope) = opamp_operating_point(
+                        differential,
+                        gain,
+                        saturation_positive,
+                        saturation_negative,
+                    );
+                    if let Some(in_plus) = in_plus {
+                        conductance[(branch.index, in_plus)] -= slope;
+                    }
+                    if let Some(in_minus) = in_minus {
+                        conductance[(branch.index, in_minus)] += slope;
+                    }
+                    sources[branch.index] += value - slope * differential;
+                }
+            }
+        }
+
+        for (device, voltage) in self.nonlinear.iter().zip(junction_voltages) {
+            device.stamp_at(*voltage, &mut conductance, &mut sources);
+        }
+
+        if gmin != 0.0 {
+            for node in 0..self.node_count {
+                conductance[(node, node)] += gmin;
+            }
+        }
+
+        (conductance, sources)
+    }
+
+    pub(crate) fn assemble_ac(
+        &self,
+        dc_solution: &DVector<f64>,
+        frequency: f64,
+        source_phasors: &BTreeMap<ComponentId, Complex<f64>>,
+    ) -> (DMatrix<Complex<f64>>, DVector<Complex<f64>>) {
+        let size = self.size();
+        let mut conductance = DMatrix::zeros(size, size);
+        let mut sources = DVector::zeros(size);
+        let omega = std::f64::consts::TAU * frequency;
+
+        for resistor in &self.resistors {
+            stamp_complex_conductance(
+                &mut conductance,
+                resistor.a,
+                resistor.b,
+                Complex::new(1.0 / resistor.resistance, 0.0),
+            );
+        }
+
+        for capacitor in &self.capacitors {
+            stamp_complex_conductance(
+                &mut conductance,
+                capacitor.a,
+                capacitor.b,
+                Complex::new(0.0, omega * capacitor.capacitance),
+            );
+        }
+
+        for source in &self.current_sources {
+            let current = source_phasors
+                .get(&source.component)
+                .copied()
+                .unwrap_or_else(|| Complex::new(0.0, 0.0));
+            stamp_complex_current_source(&mut sources, source.a, source.b, current);
+        }
+
+        for branch in &self.branches {
+            if let Some(a) = branch.a {
+                conductance[(a, branch.index)] += Complex::new(1.0, 0.0);
+            }
+            if let Some(b) = branch.b {
+                conductance[(b, branch.index)] -= Complex::new(1.0, 0.0);
+            }
+
+            match branch.kind {
+                BranchKind::VoltageSource { .. } => {
+                    if let Some(a) = branch.a {
+                        conductance[(branch.index, a)] += Complex::new(1.0, 0.0);
+                    }
+                    if let Some(b) = branch.b {
+                        conductance[(branch.index, b)] -= Complex::new(1.0, 0.0);
+                    }
+                    sources[branch.index] += source_phasors
+                        .get(&branch.component)
+                        .copied()
+                        .unwrap_or_else(|| Complex::new(0.0, 0.0));
+                }
+                BranchKind::Inductor { inductance } => {
+                    if let Some(a) = branch.a {
+                        conductance[(branch.index, a)] += Complex::new(1.0, 0.0);
+                    }
+                    if let Some(b) = branch.b {
+                        conductance[(branch.index, b)] -= Complex::new(1.0, 0.0);
+                    }
+                    conductance[(branch.index, branch.index)] -=
+                        Complex::new(0.0, omega * inductance);
+                }
+                BranchKind::OpAmp {
+                    in_plus,
+                    in_minus,
+                    gain,
+                    saturation_positive,
+                    saturation_negative,
+                } => {
+                    if let Some(a) = branch.a {
+                        conductance[(branch.index, a)] += Complex::new(1.0, 0.0);
+                    }
+                    let differential =
+                        node_voltage(dc_solution, in_plus) - node_voltage(dc_solution, in_minus);
+                    let slope = opamp_operating_point(
+                        differential,
+                        gain,
+                        saturation_positive,
+                        saturation_negative,
+                    )
+                    .1;
+                    if let Some(in_plus) = in_plus {
+                        conductance[(branch.index, in_plus)] -= Complex::new(slope, 0.0);
+                    }
+                    if let Some(in_minus) = in_minus {
+                        conductance[(branch.index, in_minus)] += Complex::new(slope, 0.0);
+                    }
+                }
+            }
+        }
+
+        for device in &self.nonlinear {
+            let voltage = device.junction_voltage(dc_solution);
+            stamp_complex_conductance(
+                &mut conductance,
+                device.a,
+                device.b,
+                Complex::new(device.conductance_at(voltage), 0.0),
+            );
+        }
+
+        (conductance, sources)
+    }
+
+    pub(crate) fn residual(
+        &self,
+        solution: &DVector<f64>,
+        mode: AssemblyMode<'_>,
+        gmin: f64,
+        source_scale: f64,
+    ) -> f64 {
+        let junction_voltages = self.junction_voltages(solution);
+        let (conductance, sources) =
+            self.assemble(solution, &junction_voltages, mode, gmin, source_scale);
+        max_abs(&(conductance * solution - sources))
+    }
+
+    /// Returns the voltage used for a component's branch convention.
+    pub(crate) fn component_voltage(
+        &self,
+        component: ComponentId,
+        solution: &DVector<f64>,
+    ) -> Option<f64> {
+        if self.grounds.contains(&component) {
+            return Some(0.0);
+        }
+        if let Some(resistor) = self
+            .resistors
+            .iter()
+            .find(|element| element.component == component)
+        {
+            return Some(node_voltage(solution, resistor.a) - node_voltage(solution, resistor.b));
+        }
+        if let Some(capacitor) = self
+            .capacitors
+            .iter()
+            .find(|element| element.component == component)
+        {
+            return Some(node_voltage(solution, capacitor.a) - node_voltage(solution, capacitor.b));
+        }
+        if let Some(source) = self
+            .current_sources
+            .iter()
+            .find(|element| element.component == component)
+        {
+            return Some(node_voltage(solution, source.a) - node_voltage(solution, source.b));
+        }
+        if let Some(device) = self
+            .nonlinear
+            .iter()
+            .find(|element| element.component == component)
+        {
+            return Some(device.junction_voltage(solution));
+        }
+        if let Some(branch) = self
+            .branches
+            .iter()
+            .find(|element| element.component == component)
+        {
+            return Some(node_voltage(solution, branch.a) - node_voltage(solution, branch.b));
+        }
+        None
+    }
+
+    /// Returns the current using the component's `a -> b` convention.
+    pub(crate) fn component_current(
+        &self,
+        component: ComponentId,
+        solution: &DVector<f64>,
+        mode: AssemblyMode<'_>,
+    ) -> Option<f64> {
+        if self.grounds.contains(&component) {
+            return Some(0.0);
+        }
+        if let Some(resistor) = self
+            .resistors
+            .iter()
+            .find(|element| element.component == component)
+        {
+            let voltage = node_voltage(solution, resistor.a) - node_voltage(solution, resistor.b);
+            return Some(voltage / resistor.resistance);
+        }
+        if let Some(capacitor) = self
+            .capacitors
+            .iter()
+            .find(|element| element.component == component)
+        {
+            return match mode {
+                AssemblyMode::Dc => Some(0.0),
+                AssemblyMode::Transient { previous, step } => {
+                    let voltage =
+                        node_voltage(solution, capacitor.a) - node_voltage(solution, capacitor.b);
+                    let previous_voltage =
+                        node_voltage(previous, capacitor.a) - node_voltage(previous, capacitor.b);
+                    Some(capacitor.capacitance / step * (voltage - previous_voltage))
+                }
+            };
+        }
+        if let Some(source) = self
+            .current_sources
+            .iter()
+            .find(|element| element.component == component)
+        {
+            return Some(source.current);
+        }
+        if let Some(device) = self
+            .nonlinear
+            .iter()
+            .find(|element| element.component == component)
+        {
+            return Some(device.current_at(device.junction_voltage(solution)));
+        }
+        if let Some(branch) = self
+            .branches
+            .iter()
+            .find(|element| element.component == component)
+        {
+            return Some(solution[branch.index]);
+        }
+        None
+    }
+
+    fn add_component(&mut self, component: &ComponentSpec) -> Result<(), MnaError> {
+        let a = self.pin_unknown(component, 0);
+        let b = self.pin_unknown(component, 1);
+
+        match component.kind {
+            ComponentKind::Resistor => {
+                let resistance = positive_parameter(component, "resistance")?;
+                self.resistors.push(ResistorElement {
+                    component: component.id,
+                    a,
+                    b,
+                    resistance,
+                });
+            }
+            ComponentKind::Capacitor => {
+                let capacitance = positive_parameter(component, "capacitance")?;
+                self.capacitors.push(CapacitorElement {
+                    component: component.id,
+                    a,
+                    b,
+                    capacitance,
+                });
+            }
+            ComponentKind::Inductor => {
+                let inductance = positive_parameter(component, "inductance")?;
+                self.add_branch(component, a, b, BranchKind::Inductor { inductance })?;
+            }
+            ComponentKind::VoltageSource => {
+                let voltage = number_parameter(component, "dc")?;
+                self.add_branch(component, a, b, BranchKind::VoltageSource { voltage })?;
+            }
+            ComponentKind::CurrentSource => {
+                let current = number_parameter(component, "dc")?;
+                self.current_sources.push(CurrentSourceElement {
+                    component: component.id,
+                    a,
+                    b,
+                    current,
+                });
+            }
+            ComponentKind::Ground => self.grounds.push(component.id),
+            ComponentKind::Switch => {
+                let resistance_on = positive_parameter(component, "ron")?;
+                let resistance_off = positive_parameter(component, "roff")?;
+                let closed = bool_parameter(component, "closed")?;
+                let resistance = if closed {
+                    resistance_on
+                } else {
+                    resistance_off
+                };
+                self.resistors.push(ResistorElement {
+                    component: component.id,
+                    a,
+                    b,
+                    resistance,
+                });
+            }
+            ComponentKind::Diode | ComponentKind::Led => {
+                self.nonlinear.push(DiodeDevice {
+                    component: component.id,
+                    a,
+                    b,
+                    saturation_current: positive_parameter(component, "is")?,
+                    emission_coefficient: positive_parameter(component, "n")?,
+                    breakdown: None,
+                });
+            }
+            ComponentKind::Zener => {
+                let breakdown_voltage = positive_parameter(component, "bv")?;
+                let breakdown_saturation = positive_parameter(component, "ibv")?;
+                let breakdown_emission = positive_parameter(component, "nbv")?;
+                self.nonlinear.push(DiodeDevice {
+                    component: component.id,
+                    a,
+                    b,
+                    saturation_current: positive_parameter(component, "is")?,
+                    emission_coefficient: positive_parameter(component, "n")?,
+                    breakdown: Some(Breakdown {
+                        voltage: breakdown_voltage,
+                        saturation_current: breakdown_saturation,
+                        emission_coefficient: breakdown_emission,
+                    }),
+                });
+            }
+            ComponentKind::OpAmp => {
+                let output = self.pin_unknown(component, 2);
+                let in_plus = self.pin_unknown(component, 0);
+                let in_minus = self.pin_unknown(component, 1);
+                let gain = positive_parameter(component, "gain")?;
+                let saturation_positive = number_parameter(component, "v_sat_pos")?;
+                let saturation_negative = number_parameter(component, "v_sat_neg")?;
+                if saturation_positive <= saturation_negative {
+                    return Err(MnaError::InvalidSaturation {
+                        component: component.id,
+                        positive: saturation_positive,
+                        negative: saturation_negative,
+                    });
+                }
+                self.add_branch(
+                    component,
+                    output,
+                    None,
+                    BranchKind::OpAmp {
+                        in_plus,
+                        in_minus,
+                        gain,
+                        saturation_positive,
+                        saturation_negative,
+                    },
+                )?;
+            }
+            ComponentKind::Custom(_) => {
+                return Err(MnaError::UnsupportedComponent {
+                    component: component.id,
+                    kind: component.kind.clone(),
+                });
+            }
+        }
+        Ok(())
+    }
+
+    fn add_branch(
+        &mut self,
+        component: &ComponentSpec,
+        a: Option<usize>,
+        b: Option<usize>,
+        kind: BranchKind,
+    ) -> Result<(), MnaError> {
+        if a == b {
+            return Err(MnaError::DegenerateBranch {
+                component: component.id,
+            });
+        }
+        let index = self.node_count + self.branch_components.len();
+        self.branch_components.push(component.id);
+        self.branches.push(BranchElement {
+            component: component.id,
+            a,
+            b,
+            index,
+            kind,
+        });
+        Ok(())
+    }
+
+    fn pin_unknown(&self, component: &ComponentSpec, pin: usize) -> Option<usize> {
+        component
+            .pins
+            .get(pin)
+            .and_then(|node| self.node_map.get(usize::try_from(node.0).ok()?))
+            .copied()
+            .flatten()
+    }
+}
+
+fn opamp_operating_point(
+    differential: f64,
+    gain: f64,
+    saturation_positive: f64,
+    saturation_negative: f64,
+) -> (f64, f64) {
+    let raw = gain * differential;
+    if raw <= saturation_negative {
+        (saturation_negative, 0.0)
+    } else if raw >= saturation_positive {
+        (saturation_positive, 0.0)
+    } else {
+        (raw, gain)
+    }
+}
+
+struct BranchElement {
+    component: ComponentId,
+    a: Option<usize>,
+    b: Option<usize>,
+    index: usize,
+    kind: BranchKind,
+}
+
+enum BranchKind {
+    VoltageSource {
+        voltage: f64,
+    },
+    Inductor {
+        inductance: f64,
+    },
+    OpAmp {
+        in_plus: Option<usize>,
+        in_minus: Option<usize>,
+        gain: f64,
+        saturation_positive: f64,
+        saturation_negative: f64,
+    },
+}
+
+struct ResistorElement {
+    component: ComponentId,
+    a: Option<usize>,
+    b: Option<usize>,
+    resistance: f64,
+}
+
+struct CapacitorElement {
+    component: ComponentId,
+    a: Option<usize>,
+    b: Option<usize>,
+    capacitance: f64,
+}
+
+struct CurrentSourceElement {
+    component: ComponentId,
+    a: Option<usize>,
+    b: Option<usize>,
+    current: f64,
+}
+
+struct DiodeDevice {
+    component: ComponentId,
+    a: Option<usize>,
+    b: Option<usize>,
+    saturation_current: f64,
+    emission_coefficient: f64,
+    breakdown: Option<Breakdown>,
+}
+
+impl DiodeDevice {
+    fn junction_voltage(&self, solution: &DVector<f64>) -> f64 {
+        node_voltage(solution, self.a) - node_voltage(solution, self.b)
+    }
+
+    fn limiting_voltage(&self) -> f64 {
+        let emission = self
+            .breakdown
+            .as_ref()
+            .map_or(self.emission_coefficient, |breakdown| {
+                self.emission_coefficient
+                    .max(breakdown.emission_coefficient)
+            });
+        emission * THERMAL_VOLTAGE
+    }
+
+    fn stamp_at(&self, voltage: f64, conductance: &mut DMatrix<f64>, sources: &mut DVector<f64>) {
+        let (current, slope) = self.current_and_conductance(voltage);
+        let equivalent = current - slope * voltage;
+        stamp_conductance(conductance, self.a, self.b, slope);
+        stamp_current_source(sources, self.a, self.b, equivalent);
+    }
+
+    fn current_at(&self, voltage: f64) -> f64 {
+        self.current_and_conductance(voltage).0
+    }
+
+    fn conductance_at(&self, voltage: f64) -> f64 {
+        self.current_and_conductance(voltage).1
+    }
+
+    fn current_and_conductance(&self, voltage: f64) -> (f64, f64) {
+        let thermal = self.emission_coefficient * THERMAL_VOLTAGE;
+        let exponent = (voltage / thermal).min(MAX_EXPONENT);
+        let exponential = exponent.exp();
+        let mut current = self.saturation_current * (exponential - 1.0);
+        let mut slope = self.saturation_current / thermal * exponential;
+
+        if let Some(breakdown) = self
+            .breakdown
+            .as_ref()
+            .filter(|breakdown| voltage < -breakdown.voltage)
+        {
+            let reverse_thermal = breakdown.emission_coefficient * THERMAL_VOLTAGE;
+            let reverse_exponent =
+                (-(voltage + breakdown.voltage) / reverse_thermal).min(MAX_EXPONENT);
+            let reverse_exponential = reverse_exponent.exp();
+            current -= breakdown.saturation_current * (reverse_exponential - 1.0);
+            slope += breakdown.saturation_current / reverse_thermal * reverse_exponential;
+        }
+
+        (current, slope)
+    }
+}
+
+struct Breakdown {
+    voltage: f64,
+    saturation_current: f64,
+    emission_coefficient: f64,
+}
+
+fn node_voltage(solution: &DVector<f64>, node: Option<usize>) -> f64 {
+    node.map_or(0.0, |index| solution[index])
+}
+
+fn limit_junction(previous: f64, target: f64, thermal_voltage: f64) -> f64 {
+    let difference = target - previous;
+    if difference > 0.0 {
+        previous + thermal_voltage * (1.0 + difference / thermal_voltage).ln()
+    } else if difference < 0.0 {
+        previous - thermal_voltage * (1.0 - difference / thermal_voltage).ln()
+    } else {
+        previous
+    }
+}
+
+fn stamp_conductance(
+    conductance: &mut DMatrix<f64>,
+    a: Option<usize>,
+    b: Option<usize>,
+    value: f64,
+) {
+    if let Some(a) = a {
+        conductance[(a, a)] += value;
+        if let Some(b) = b {
+            conductance[(a, b)] -= value;
+        }
+    }
+    if let Some(b) = b {
+        conductance[(b, b)] += value;
+        if let Some(a) = a {
+            conductance[(b, a)] -= value;
+        }
+    }
+}
+
+fn stamp_current_source(
+    sources: &mut DVector<f64>,
+    a: Option<usize>,
+    b: Option<usize>,
+    current: f64,
+) {
+    if let Some(a) = a {
+        sources[a] -= current;
+    }
+    if let Some(b) = b {
+        sources[b] += current;
+    }
+}
+
+fn stamp_complex_conductance(
+    conductance: &mut DMatrix<Complex<f64>>,
+    a: Option<usize>,
+    b: Option<usize>,
+    value: Complex<f64>,
+) {
+    if let Some(a) = a {
+        conductance[(a, a)] += value;
+        if let Some(b) = b {
+            conductance[(a, b)] -= value;
+        }
+    }
+    if let Some(b) = b {
+        conductance[(b, b)] += value;
+        if let Some(a) = a {
+            conductance[(b, a)] -= value;
+        }
+    }
+}
+
+fn stamp_complex_current_source(
+    sources: &mut DVector<Complex<f64>>,
+    a: Option<usize>,
+    b: Option<usize>,
+    current: Complex<f64>,
+) {
+    if let Some(a) = a {
+        sources[a] -= current;
+    }
+    if let Some(b) = b {
+        sources[b] += current;
+    }
+}
+
+pub(crate) fn max_abs(vector: &DVector<f64>) -> f64 {
+    vector.iter().fold(0.0_f64, |maximum, value| {
+        if maximum.is_nan() || value.is_nan() {
+            f64::NAN
+        } else {
+            maximum.max(value.abs())
+        }
+    })
+}
+
+fn number_parameter(component: &ComponentSpec, key: &'static str) -> Result<f64, MnaError> {
+    match component.params.get(key) {
+        Some(ParamValue::Number(value)) if value.is_finite() => Ok(*value),
+        Some(ParamValue::Number(value)) => Err(MnaError::InvalidParameterValue {
+            component: component.id,
+            key,
+            value: *value,
+            requirement: "finite",
+        }),
+        Some(ParamValue::Bool(_) | ParamValue::Text(_)) => Err(MnaError::InvalidParameterType {
+            component: component.id,
+            key,
+            expected: "a number",
+        }),
+        None => Err(MnaError::MissingParameter {
+            component: component.id,
+            key,
+        }),
+    }
+}
+
+fn positive_parameter(component: &ComponentSpec, key: &'static str) -> Result<f64, MnaError> {
+    let value = number_parameter(component, key)?;
+    if value <= 0.0 {
+        return Err(MnaError::InvalidParameterValue {
+            component: component.id,
+            key,
+            value,
+            requirement: "strictly positive",
+        });
+    }
+    Ok(value)
+}
+
+fn bool_parameter(component: &ComponentSpec, key: &'static str) -> Result<bool, MnaError> {
+    match component.params.get(key) {
+        Some(ParamValue::Bool(value)) => Ok(*value),
+        Some(ParamValue::Number(_) | ParamValue::Text(_)) => Err(MnaError::InvalidParameterType {
+            component: component.id,
+            key,
+            expected: "a boolean",
+        }),
+        None => Err(MnaError::MissingParameter {
+            component: component.id,
+            key,
+        }),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::max_abs;
+
+    #[test]
+    fn max_abs_propagates_nan() {
+        let vector = nalgebra::DVector::from_vec(vec![1.0, f64::NAN, 3.0]);
+        assert!(max_abs(&vector).is_nan());
+    }
+}

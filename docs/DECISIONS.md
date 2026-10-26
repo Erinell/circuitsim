@@ -1,0 +1,79 @@
+# Décisions d'architecture
+
+Chaque décision est révisable, mais une révision doit mettre à jour le code, les
+tests et les documents liés. Les détails d'implémentation restent dans les
+documents spécialisés.
+
+## Structure
+
+1. **Séparer cœur, éditeur et interface.** `sim-core`, `editor-core`, le worker
+   et `circuitsim-app` forment des couches à dépendances descendantes. Les
+   solveurs et l'éditeur restent testables sans fenêtre ni navigateur ;
+   `egui_plot` et `rustfft` restent dans l'application. Voir
+   [ARCHITECTURE.md](ARCHITECTURE.md).
+2. **Stocker en SI et valider aux frontières.** Les calculs utilisent des types
+   SI et des paramètres finis ; le parsing et le formatage d'ingénierie sont des
+   opérations de présentation. Une valeur invalide produit une erreur typée sans
+   modifier l'état. Voir [NETLIST.md](NETLIST.md).
+3. **Identifiants indexés et monotones.** `NodeId` et `ComponentId` égalent
+   l'indice du vecteur validé ; le schéma utilise un compteur partagé que
+   l'undo ne rembobine pas. Les résultats et les noms restent stables et
+   reproductibles. Voir [EDITOR.md](EDITOR.md).
+
+## Modèle et simulation
+
+4. **Connectivité géométrique explicite.** Fils orthogonaux, contacts et T
+   connectent ; un croisement X ne connecte qu'avec une jonction ; un label ne
+   connecte que les conducteurs à sa position. L'ERC explique les ambiguïtés.
+   Voir [EDITOR.md](EDITOR.md).
+5. **MNA dense et LU déterministe.** `nalgebra` suffit aux schémas
+   pédagogiques, reste portable en WASM et donne des résultats reproductibles.
+   La complexité cubique limite la taille ; `faer` reste une option future.
+   Voir [NUMERICS.md](NUMERICS.md).
+6. **Transitoire à pas fixe, Euler arrière.** Le schéma est simple à tester et
+   stable pour les circuits usuels. Les événements sont appliqués après
+   l'échantillon exact ; pas adaptatif, erreur locale et formes d'onde continues
+   restent hors périmètre. Voir [SIMULATION.md](SIMULATION.md).
+7. **AC petits signaux autour du DC.** Diode, LED, Zener et opamp sont
+   linéarisés au point de fonctionnement ; l'excitation vient d'`AcExcitation`,
+   jamais du paramètre `dc`. Pas de capacité de jonction ni de modèle grand
+   signal AC. Voir [COMPONENTS.md](COMPONENTS.md).
+
+## Interface et transport
+
+8. **Protocole binaire versionné.** Trames `CSIM` + postcard, un job en attente,
+   coalescence à 60 Hz, révisions croissantes et résultats complets ou erreurs
+   typées. L'interface ne voit jamais les matrices. Le service tourne encore
+   dans le fil de l'interface ; worker dédié et `SharedArrayBuffer` restent à
+   brancher. Voir [PROTOCOL.md](PROTOCOL.md).
+9. **Instruments dans l'application.** Le catalogue, les traces, les mesures, la
+   FFT de Hann, le Bode et le CSV sont des traitements de présentation dans
+   `circuitsim-app`. Les graphiques sont décimés à 4 096 points ; mesures et
+   exports gardent toutes les valeurs. Voir [INSTRUMENTS.md](INSTRUMENTS.md).
+10. **Formats versionnés et interface bornée.** `SCHEMA_VERSION = 1`,
+    `PROTOCOL_VERSION = 1`, 100 000 pas transitoires, 10 000 points AC et
+    16 384 points FFT. Un format incompatible est refusé, jamais interprété
+    approximativement. Voir [PROTOCOL.md](PROTOCOL.md) et
+    [INSTRUMENTS.md](INSTRUMENTS.md).
+
+## Tests et périmètre
+
+11. **Composants personnalisés représentés, pas simulés.** Le registre,
+    l'extraction, le JSON et la netlist acceptent `Custom`; les solveurs le
+    refusent avec `MnaError::UnsupportedComponent` jusqu'à l'ajout d'un modèle
+    dans `sim-core`. Voir [COMPONENTS.md](COMPONENTS.md).
+12. **Tests natifs, benchmarks et CI.** Les tests ne demandent ni navigateur ni
+    ngspice ; les propriétés proptest affichent leur graine. La CI vérifie
+    format, clippy, tests, WASM, benchmarks rapides, exemples et builds
+    natif/web. Les budgets Criterion sont des seuils de revue, non bloquants sur
+    un runner partagé. Voir [TESTING.md](TESTING.md) et
+    [PERFORMANCE.md](PERFORMANCE.md).
+
+## Décisions différées
+
+- Web Worker dédié et transport `SharedArrayBuffer`.
+- Pas adaptatif et estimation d'erreur locale.
+- Excitations continues paramétrées et sources dépendantes du temps.
+- Capacités de jonction et modèles AC non linéaires.
+- Persistance de projet, chargement de schéma, PNG et curseurs de mesure.
+- Factorisation creuse et profils de performance pour de grands schémas.

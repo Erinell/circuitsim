@@ -1,0 +1,12 @@
+[build]
+target = "index.html"
+dist = "dist"
+create_dist = true
+filehash = true
+
+[watch]
+ignore = ["target", "dist"]
+
+[serve]
+port = 8080
+open = false

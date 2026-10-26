@@ -1,0 +1,1526 @@
+//! Simulation preparation, worker execution, traces, measurements, and FFT.
+
+use std::collections::BTreeMap;
+
+use editor_core::Extraction;
+use rustfft::num_complex::Complex;
+use rustfft::FftPlanner;
+use sim_core::netlist::{
+    ComponentId, ComponentKind, ComponentSpec, Netlist, NetlistError, NodeId, ParamValue,
+};
+use sim_core::units::{format_si_precision, parse_si, Unit};
+use sim_core::{
+    AcExcitation, AcOptions, AcResult, AcSweep, DcOptions, TransientAction, TransientEvent,
+    TransientOptions, TransientResult,
+};
+use thiserror::Error;
+use worker::protocol::{
+    decode_response, encode_request, Analysis, AnalysisFailureKind, AnalysisKind, AnalysisResult,
+    ClientMessage, Job, RejectionReason, ServerMessage,
+};
+use worker::{WorkerConfig, WorkerService};
+
+/// Maximum number of transient intervals accepted by the interface.
+pub const MAX_TRANSIENT_STEPS: usize = 100_000;
+/// Maximum number of AC sweep points accepted by the interface.
+pub const MAX_AC_POINTS: usize = 10_000;
+/// Maximum power-of-two spectrum size computed by the interface.
+pub const MAX_FFT_POINTS: usize = 16_384;
+
+/// Voltage or current displayed by an instrument.
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
+pub enum SignalId {
+    /// Voltage of a named net.
+    Voltage(String),
+    /// Branch current of a named component.
+    Current(String),
+}
+
+impl SignalId {
+    /// Returns the plot label, such as `V(OUT)` or `I(V1)`.
+    pub fn label(&self) -> String {
+        match self {
+            Self::Voltage(name) => format!("V({name})"),
+            Self::Current(name) => format!("I({name})"),
+        }
+    }
+
+    /// Returns the physical unit of this signal.
+    pub const fn unit(&self) -> SignalUnit {
+        match self {
+            Self::Voltage(_) => SignalUnit::Volt,
+            Self::Current(_) => SignalUnit::Ampere,
+        }
+    }
+}
+
+/// Unit carried by a trace.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum SignalUnit {
+    /// Volts.
+    Volt,
+    /// Amperes.
+    Ampere,
+}
+
+impl SignalUnit {
+    /// Returns the SI display unit.
+    pub const fn unit(self) -> Unit {
+        match self {
+            Self::Volt => Unit::Volt,
+            Self::Ampere => Unit::Ampere,
+        }
+    }
+
+    /// Returns the short display symbol.
+    pub const fn symbol(self) -> &'static str {
+        match self {
+            Self::Volt => "V",
+            Self::Ampere => "A",
+        }
+    }
+}
+
+/// Independent source offered by the simulation controls.
+#[derive(Clone, Debug, PartialEq)]
+pub struct SourceChoice {
+    /// Component label used to identify the source.
+    pub label: String,
+    /// Current DC value in SI units.
+    pub dc: f64,
+    /// Unit of the source value.
+    pub unit: Unit,
+}
+
+impl SourceChoice {
+    /// Formats the DC value with its engineering prefix.
+    pub fn formatted_dc(&self) -> String {
+        format_si_precision(self.dc, self.unit, 4)
+    }
+}
+
+/// Signals and independent sources extracted from the current schematic.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct SignalCatalog {
+    /// Named electrical nets, sorted by name and excluding ground.
+    pub voltages: Vec<String>,
+    /// Branch-current components, sorted by label.
+    pub currents: Vec<String>,
+    /// Independent voltage and current sources, sorted by label.
+    pub sources: Vec<SourceChoice>,
+}
+
+impl SignalCatalog {
+    /// Builds a deterministic catalog from a validated extraction.
+    pub fn from_extraction(extraction: &Extraction) -> Self {
+        let mut voltages = extraction
+            .nets
+            .iter()
+            .filter(|net| net.name.as_str() != "0")
+            .map(|net| net.name.as_str().to_owned())
+            .collect::<Vec<_>>();
+        voltages.sort();
+        voltages.dedup();
+
+        let mut currents = extraction
+            .netlist
+            .components
+            .iter()
+            .filter(|component| has_branch_current(component))
+            .map(|component| component.label.clone())
+            .collect::<Vec<_>>();
+        currents.sort();
+        currents.dedup();
+
+        let mut sources = extraction
+            .netlist
+            .components
+            .iter()
+            .filter_map(|component| match component.kind {
+                ComponentKind::VoltageSource | ComponentKind::CurrentSource => {
+                    let unit = if component.kind == ComponentKind::VoltageSource {
+                        Unit::Volt
+                    } else {
+                        Unit::Ampere
+                    };
+                    let dc = component
+                        .params
+                        .get("dc")
+                        .and_then(ParamValue::as_number)
+                        .unwrap_or(0.0);
+                    Some(SourceChoice {
+                        label: component.label.clone(),
+                        dc,
+                        unit,
+                    })
+                }
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        sources.sort_by(|left, right| left.label.cmp(&right.label));
+
+        Self {
+            voltages,
+            currents,
+            sources,
+        }
+    }
+
+    /// Returns true when the catalog contains the signal.
+    pub fn contains(&self, signal: &SignalId) -> bool {
+        match signal {
+            SignalId::Voltage(name) => self.voltages.contains(name),
+            SignalId::Current(name) => self.currents.contains(name),
+        }
+    }
+
+    /// Returns all available signals with voltages first.
+    pub fn signals(&self) -> Vec<SignalId> {
+        self.voltages
+            .iter()
+            .cloned()
+            .map(SignalId::Voltage)
+            .chain(self.currents.iter().cloned().map(SignalId::Current))
+            .collect()
+    }
+
+    /// Returns the preferred voltage display, favouring the net named `OUT`.
+    pub fn default_voltage(&self) -> Option<String> {
+        if self.voltages.iter().any(|name| name == "OUT") {
+            Some("OUT".to_owned())
+        } else {
+            self.voltages.first().cloned()
+        }
+    }
+}
+
+fn has_branch_current(component: &ComponentSpec) -> bool {
+    matches!(
+        component.kind,
+        ComponentKind::VoltageSource | ComponentKind::Inductor | ComponentKind::OpAmp
+    )
+}
+
+/// Editable transient settings stored as user-facing engineering text.
+#[derive(Clone, Debug, PartialEq)]
+pub struct TransientSettings {
+    /// Start time in seconds.
+    pub start_time: String,
+    /// Stop time in seconds.
+    pub stop_time: String,
+    /// Fixed integration step in seconds.
+    pub step: String,
+    /// Enables the source-step helper.
+    pub step_enabled: bool,
+    /// Selected independent source.
+    pub source: Option<String>,
+    /// Source value before the step.
+    pub initial_value: String,
+    /// Instant of the step in seconds.
+    pub event_time: String,
+    /// Source value after the step.
+    pub final_value: String,
+    last_source: Option<String>,
+}
+
+impl Default for TransientSettings {
+    fn default() -> Self {
+        Self {
+            start_time: "0".to_owned(),
+            stop_time: "5m".to_owned(),
+            step: "10u".to_owned(),
+            step_enabled: true,
+            source: None,
+            initial_value: "0".to_owned(),
+            event_time: "0".to_owned(),
+            final_value: String::new(),
+            last_source: None,
+        }
+    }
+}
+
+impl TransientSettings {
+    /// Keeps the selected source valid and initializes the step target.
+    pub fn ensure_catalog(&mut self, sources: &[SourceChoice]) {
+        let next = self
+            .source
+            .as_ref()
+            .filter(|label| sources.iter().any(|source| &source.label == *label))
+            .cloned()
+            .or_else(|| sources.first().map(|source| source.label.clone()));
+        if self.last_source != next {
+            if let Some(source) = next
+                .as_ref()
+                .and_then(|label| sources.iter().find(|source| &source.label == label))
+            {
+                self.final_value = source.formatted_dc();
+            }
+            self.last_source = next.clone();
+            self.source = next;
+        }
+        if sources.is_empty() {
+            self.step_enabled = false;
+        }
+    }
+}
+
+/// Editable AC sweep settings stored as user-facing engineering text.
+#[derive(Clone, Debug, PartialEq)]
+pub struct AcSettings {
+    /// Selected independent source.
+    pub source: Option<String>,
+    /// Preferred output net for Bode display.
+    pub output: Option<String>,
+    /// Excitation peak amplitude.
+    pub amplitude: String,
+    /// First frequency in hertz.
+    pub start: String,
+    /// Last frequency in hertz.
+    pub stop: String,
+    /// Number of logarithmically spaced points.
+    pub points: usize,
+}
+
+impl Default for AcSettings {
+    fn default() -> Self {
+        Self {
+            source: None,
+            output: None,
+            amplitude: "1".to_owned(),
+            start: "1".to_owned(),
+            stop: "1M".to_owned(),
+            points: 101,
+        }
+    }
+}
+
+impl AcSettings {
+    /// Keeps the selected source and output valid for the current schematic.
+    pub fn ensure_catalog(&mut self, catalog: &SignalCatalog) {
+        if !self
+            .source
+            .as_ref()
+            .is_some_and(|label| catalog.sources.iter().any(|source| &source.label == label))
+        {
+            self.source = catalog.sources.first().map(|source| source.label.clone());
+        }
+        if !self
+            .output
+            .as_ref()
+            .is_some_and(|name| catalog.voltages.contains(name))
+        {
+            self.output = catalog.default_voltage();
+        }
+    }
+}
+
+/// Netlist and options prepared for one worker submission.
+#[derive(Debug)]
+pub struct PreparedAnalysis {
+    netlist: Netlist,
+    analysis: Analysis,
+    context: RunContext,
+}
+
+/// Names and revision needed to interpret a worker result.
+#[derive(Clone, Debug)]
+pub struct RunContext {
+    /// Document revision at submission time.
+    pub document_revision: u64,
+    /// Net names mapped to netlist node identifiers.
+    pub nodes: BTreeMap<String, NodeId>,
+    /// Component labels mapped to netlist identifiers.
+    pub components: BTreeMap<String, ComponentId>,
+    /// AC excitation amplitude used for gain normalization.
+    pub input_amplitude: Option<f64>,
+    /// Requested transient step used by the FFT resampler.
+    pub nominal_step: Option<f64>,
+}
+
+/// Completed worker analysis with its interpretation context.
+#[derive(Clone, Debug)]
+pub struct CompletedRun {
+    /// Worker request revision.
+    pub revision: u64,
+    /// Analysis family.
+    pub kind: AnalysisKind,
+    /// Solver output.
+    pub result: AnalysisResult,
+    /// Net and component maps captured before execution.
+    pub context: RunContext,
+}
+
+/// Simulation error rendered in French by the interface.
+#[derive(Debug, Error)]
+pub enum SimulationError {
+    /// The worker could not be configured.
+    #[error("configuration du worker invalide : {0}")]
+    Worker(#[from] worker::WorkerError),
+    /// Frame encoding or decoding failed.
+    #[error("le protocole de calcul a échoué : {0}")]
+    Protocol(#[from] worker::protocol::ProtocolError),
+    /// The worker adapter failed.
+    #[error("le service de calcul a échoué : {0}")]
+    Service(#[from] worker::ServiceError),
+    /// The worker refused a request.
+    #[error("le worker a refusé la requête : {0}")]
+    Rejected(String),
+    /// The solver reported an analysis failure.
+    #[error("l'analyse {analysis} a échoué : {message}")]
+    AnalysisFailed {
+        /// French analysis name.
+        analysis: &'static str,
+        /// Technical solver diagnostic.
+        message: String,
+    },
+    /// A field contains invalid engineering text.
+    #[error("le champ « {field} » est invalide : {message}")]
+    InvalidField {
+        /// French field name.
+        field: &'static str,
+        /// Technical parser detail.
+        message: String,
+    },
+    /// A transient interval has no positive duration.
+    #[error("l'instant d'arrêt doit être strictement postérieur à l'instant de début")]
+    EmptyDuration,
+    /// A transient interval is too fine for interactive use.
+    #[error("le transitoire dépasse la limite interactive de {limit} pas")]
+    TooManySteps {
+        /// Maximum accepted number of intervals.
+        limit: usize,
+    },
+    /// The AC sweep point count is outside the supported range.
+    #[error("le nombre de points AC doit être compris entre 2 et {max}")]
+    InvalidPointCount {
+        /// Maximum accepted number of points.
+        max: usize,
+    },
+    /// The selected source disappeared from the netlist.
+    #[error("la source « {0} » n'existe plus dans la netlist")]
+    MissingSource(String),
+    /// The selected signal or net disappeared from the netlist.
+    #[error("le signal « {0} » n'existe plus dans le résultat")]
+    MissingSignal(String),
+    /// A source-step was requested without a selected source.
+    #[error("sélectionnez une source pour l'échelon")]
+    MissingStepSource,
+    /// The source-step target is not an independent source.
+    #[error("le composant « {0} » n'est pas une source indépendante")]
+    NotSource(String),
+    /// The netlist could not be rebuilt after a source override.
+    #[error("la netlist préparée est invalide : {0}")]
+    Netlist(#[from] NetlistError),
+    /// No trace can be produced from the current data.
+    #[error("aucune donnée exploitable n'est disponible")]
+    NoData,
+    /// The FFT needs enough uniform samples.
+    #[error("le spectre exige au moins 16 échantillons")]
+    SpectrumTooShort,
+    /// The FFT step is not usable.
+    #[error("le pas du transitoire est invalide pour le spectre")]
+    InvalidSpectrumStep,
+    /// A Bode trace requires a voltage output.
+    #[error("le diagramme de Bode exige une tension de sortie")]
+    BodeRequiresVoltage,
+    /// A worker result belongs to an unexpected request.
+    #[error("le worker a renvoyé une réponse inattendue")]
+    UnexpectedResponse,
+    /// One analysis is already pending.
+    #[error("une analyse est déjà en cours")]
+    Busy,
+    /// The internal revision counter is exhausted.
+    #[error("le compteur de révisions du worker est épuisé")]
+    RevisionExhausted,
+}
+
+impl SimulationError {
+    /// Returns a concise French message suitable for the interface.
+    pub fn user_message(&self) -> String {
+        self.to_string()
+    }
+}
+
+/// Builds a fixed-step transient request, including an optional source step.
+pub fn prepare_transient(
+    extraction: &Extraction,
+    settings: &TransientSettings,
+    document_revision: u64,
+) -> Result<PreparedAnalysis, SimulationError> {
+    let start_time = parse_time("temps de début", &settings.start_time)?;
+    let stop_time = parse_time("temps d'arrêt", &settings.stop_time)?;
+    let step = parse_time("pas de calcul", &settings.step)?;
+    if stop_time <= start_time {
+        return Err(SimulationError::EmptyDuration);
+    }
+    if step <= 0.0 {
+        return Err(SimulationError::InvalidField {
+            field: "pas de calcul",
+            message: "le pas doit être strictement positif".to_owned(),
+        });
+    }
+    let intervals = (stop_time - start_time) / step;
+    if !intervals.is_finite() || intervals > MAX_TRANSIENT_STEPS as f64 {
+        return Err(SimulationError::TooManySteps {
+            limit: MAX_TRANSIENT_STEPS,
+        });
+    }
+
+    let mut netlist = extraction.netlist.clone();
+    let mut events = Vec::new();
+    if settings.step_enabled {
+        let label = settings
+            .source
+            .as_ref()
+            .ok_or(SimulationError::MissingStepSource)?;
+        let component_id = {
+            let component = netlist
+                .components
+                .iter()
+                .find(|component| &component.label == label)
+                .ok_or_else(|| SimulationError::MissingSource(label.clone()))?;
+            if !matches!(
+                component.kind,
+                ComponentKind::VoltageSource | ComponentKind::CurrentSource
+            ) {
+                return Err(SimulationError::NotSource(label.clone()));
+            }
+            component.id
+        };
+        let initial_value = parse_number("valeur initiale", &settings.initial_value)?;
+        let final_value = parse_number("valeur finale", &settings.final_value)?;
+        let event_time = parse_time("instant de l'échelon", &settings.event_time)?;
+        if event_time < start_time || event_time >= stop_time {
+            return Err(SimulationError::InvalidField {
+                field: "instant de l'échelon",
+                message: "l'instant doit appartenir à [début, arrêt)".to_owned(),
+            });
+        }
+        if let Some(target) = netlist
+            .components
+            .iter_mut()
+            .find(|component| component.id == component_id)
+        {
+            target
+                .params
+                .insert("dc".to_owned(), ParamValue::Number(initial_value));
+        }
+        events.push(TransientEvent {
+            time: event_time,
+            action: TransientAction::SetSourceValue {
+                component: component_id,
+                value: final_value,
+            },
+        });
+        netlist.validate()?;
+    }
+
+    let interval_count = intervals.ceil() as usize;
+    let max_steps = interval_count
+        .saturating_add(events.len())
+        .saturating_add(4);
+    let analysis = Analysis::Transient(TransientOptions {
+        start_time,
+        stop_time,
+        step,
+        max_steps,
+        solver: DcOptions::default(),
+        events,
+    });
+    let context = RunContext {
+        document_revision,
+        nodes: node_map(&netlist),
+        components: component_map(&netlist),
+        input_amplitude: None,
+        nominal_step: Some(step),
+    };
+    Ok(PreparedAnalysis {
+        netlist,
+        analysis,
+        context,
+    })
+}
+
+/// Builds a logarithmic small-signal AC request for one source.
+pub fn prepare_ac(
+    extraction: &Extraction,
+    settings: &AcSettings,
+    document_revision: u64,
+) -> Result<PreparedAnalysis, SimulationError> {
+    if !(2..=MAX_AC_POINTS).contains(&settings.points) {
+        return Err(SimulationError::InvalidPointCount { max: MAX_AC_POINTS });
+    }
+    let start = parse_frequency("fréquence de début", &settings.start)?;
+    let stop = parse_frequency("fréquence de fin", &settings.stop)?;
+    if start <= 0.0 || stop <= 0.0 {
+        return Err(SimulationError::InvalidField {
+            field: "fréquence",
+            message: "les fréquences doivent être strictement positives".to_owned(),
+        });
+    }
+    if stop <= start {
+        return Err(SimulationError::InvalidField {
+            field: "fréquence de fin",
+            message: "la borne haute doit dépasser la borne basse".to_owned(),
+        });
+    }
+    let amplitude = parse_number("amplitude d'excitation", &settings.amplitude)?;
+    if amplitude <= 0.0 {
+        return Err(SimulationError::InvalidField {
+            field: "amplitude d'excitation",
+            message: "l'amplitude doit être strictement positive".to_owned(),
+        });
+    }
+    let label = settings
+        .source
+        .as_ref()
+        .ok_or_else(|| SimulationError::MissingSource("source AC".to_owned()))?;
+    let component = extraction
+        .netlist
+        .components
+        .iter()
+        .find(|component| &component.label == label)
+        .ok_or_else(|| SimulationError::MissingSource(label.clone()))?;
+    if !matches!(
+        component.kind,
+        ComponentKind::VoltageSource | ComponentKind::CurrentSource
+    ) {
+        return Err(SimulationError::NotSource(label.clone()));
+    }
+    let analysis = Analysis::Ac(AcOptions {
+        sweep: AcSweep::Logarithmic {
+            start,
+            stop,
+            points: settings.points,
+        },
+        excitations: vec![AcExcitation {
+            component: component.id,
+            magnitude: amplitude,
+            phase_degrees: 0.0,
+        }],
+        solver: DcOptions::default(),
+    });
+    let context = RunContext {
+        document_revision,
+        nodes: node_map(&extraction.netlist),
+        components: component_map(&extraction.netlist),
+        input_amplitude: Some(amplitude),
+        nominal_step: None,
+    };
+    Ok(PreparedAnalysis {
+        netlist: extraction.netlist.clone(),
+        analysis,
+        context,
+    })
+}
+
+fn parse_time(field: &'static str, text: &str) -> Result<f64, SimulationError> {
+    let value = parse_si(text).map_err(|error| SimulationError::InvalidField {
+        field,
+        message: error.to_string(),
+    })?;
+    if !value.is_finite() {
+        return Err(SimulationError::InvalidField {
+            field,
+            message: "la valeur doit être finie".to_owned(),
+        });
+    }
+    Ok(value)
+}
+
+fn parse_frequency(field: &'static str, text: &str) -> Result<f64, SimulationError> {
+    parse_time(field, text)
+}
+
+fn parse_number(field: &'static str, text: &str) -> Result<f64, SimulationError> {
+    let value = parse_si(text).map_err(|error| SimulationError::InvalidField {
+        field,
+        message: error.to_string(),
+    })?;
+    if !value.is_finite() {
+        return Err(SimulationError::InvalidField {
+            field,
+            message: "la valeur doit être finie".to_owned(),
+        });
+    }
+    Ok(value)
+}
+
+fn node_map(netlist: &Netlist) -> BTreeMap<String, NodeId> {
+    netlist
+        .nodes
+        .iter()
+        .map(|node| (node.name.as_str().to_owned(), node.id))
+        .collect()
+}
+
+fn component_map(netlist: &Netlist) -> BTreeMap<String, ComponentId> {
+    netlist
+        .components
+        .iter()
+        .map(|component| (component.label.clone(), component.id))
+        .collect()
+}
+
+/// Frame-oriented client with one pending job and monotonic revisions.
+pub struct SimulationClient {
+    service: WorkerService,
+    next_revision: u64,
+    pending: Option<PendingJob>,
+}
+
+struct PendingJob {
+    revision: u64,
+    kind: AnalysisKind,
+    context: RunContext,
+}
+
+impl SimulationClient {
+    /// Creates a client with the default worker rate limit.
+    pub fn new() -> Result<Self, SimulationError> {
+        Ok(Self {
+            service: WorkerService::new(WorkerConfig::default())?,
+            next_revision: 1,
+            pending: None,
+        })
+    }
+
+    /// Returns true when the worker still holds a submitted job.
+    pub fn has_pending(&self) -> bool {
+        self.pending.is_some()
+    }
+
+    /// Returns the analysis family of the pending job.
+    pub fn pending_kind(&self) -> Option<AnalysisKind> {
+        self.pending.as_ref().map(|pending| pending.kind)
+    }
+
+    /// Submits a prepared analysis and stores it in the worker slot.
+    pub fn submit(&mut self, prepared: PreparedAnalysis) -> Result<u64, SimulationError> {
+        if self.pending.is_some() {
+            return Err(SimulationError::Busy);
+        }
+        if self.next_revision == 0 || self.next_revision == u64::MAX {
+            return Err(SimulationError::RevisionExhausted);
+        }
+        let revision = self.next_revision;
+        let PreparedAnalysis {
+            netlist,
+            analysis,
+            context,
+        } = prepared;
+        let kind = analysis.kind();
+        let frame = encode_request(&ClientMessage::Submit {
+            job: Job {
+                revision,
+                netlist,
+                analysis,
+            },
+        })?;
+        let response = decode_response(&self.service.submit_frame(&frame)?)?;
+        match response {
+            ServerMessage::Accepted { revision: accepted }
+            | ServerMessage::Coalesced {
+                revision: accepted, ..
+            } if accepted == revision => {
+                self.next_revision = revision
+                    .checked_add(1)
+                    .ok_or(SimulationError::RevisionExhausted)?;
+                self.pending = Some(PendingJob {
+                    revision,
+                    kind,
+                    context,
+                });
+                Ok(revision)
+            }
+            ServerMessage::Rejected { reason, .. } => {
+                Err(SimulationError::Rejected(rejection_message(reason)))
+            }
+            _ => Err(SimulationError::UnexpectedResponse),
+        }
+    }
+
+    /// Polls the worker once and returns a completed analysis when available.
+    pub fn poll(&mut self, now_seconds: f64) -> Result<Option<CompletedRun>, SimulationError> {
+        let Some(frame) = self.service.poll_frame(now_seconds)? else {
+            return Ok(None);
+        };
+        let pending = self
+            .pending
+            .take()
+            .ok_or(SimulationError::UnexpectedResponse)?;
+        let response = decode_response(&frame)?;
+        match response {
+            ServerMessage::Result { revision, result } if revision == pending.revision => {
+                Ok(Some(CompletedRun {
+                    revision,
+                    kind: pending.kind,
+                    result,
+                    context: pending.context,
+                }))
+            }
+            ServerMessage::Failed {
+                revision, failure, ..
+            } if revision == pending.revision => Err(SimulationError::AnalysisFailed {
+                analysis: failure_kind_name(failure.kind),
+                message: failure.message,
+            }),
+            _ => Err(SimulationError::UnexpectedResponse),
+        }
+    }
+}
+
+fn rejection_message(reason: RejectionReason) -> String {
+    match reason {
+        RejectionReason::InvalidRevision => "révision nulle interdite".to_owned(),
+        RejectionReason::StaleRevision { latest } => {
+            format!("révision obsolète (dernière révision : {latest})")
+        }
+    }
+}
+
+/// Returns the French name of an analysis family.
+pub const fn analysis_name(kind: AnalysisKind) -> &'static str {
+    match kind {
+        AnalysisKind::Dc => "DC",
+        AnalysisKind::Transient => "transitoire",
+        AnalysisKind::Ac => "AC",
+    }
+}
+
+fn failure_kind_name(kind: AnalysisFailureKind) -> &'static str {
+    match kind {
+        AnalysisFailureKind::Netlist => "netlist",
+        AnalysisFailureKind::Dc => "point de fonctionnement",
+        AnalysisFailureKind::Transient => "transitoire",
+        AnalysisFailureKind::Ac => "AC",
+    }
+}
+
+/// One sampled waveform.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Trace {
+    /// Signal represented by the samples.
+    pub signal: SignalId,
+    /// Samples ordered by increasing time.
+    pub points: Vec<[f64; 2]>,
+}
+
+impl Trace {
+    /// Returns the label displayed in plots.
+    pub fn label(&self) -> String {
+        self.signal.label()
+    }
+
+    /// Returns the waveform unit.
+    pub const fn unit(&self) -> SignalUnit {
+        self.signal.unit()
+    }
+}
+
+/// Extracts the requested transient signals from one worker result.
+pub fn transient_traces(
+    result: &TransientResult,
+    context: &RunContext,
+    signals: &[SignalId],
+) -> Result<Vec<Trace>, SimulationError> {
+    let mut traces = Vec::with_capacity(signals.len());
+    for signal in signals {
+        let mut points = Vec::with_capacity(result.samples.len());
+        match signal {
+            SignalId::Voltage(name) => {
+                let node = context
+                    .nodes
+                    .get(name)
+                    .copied()
+                    .ok_or_else(|| SimulationError::MissingSignal(signal.label()))?;
+                for sample in &result.samples {
+                    if let Some(value) = sample.node_voltage(node) {
+                        points.push([sample.time, value]);
+                    }
+                }
+            }
+            SignalId::Current(name) => {
+                let component = context
+                    .components
+                    .get(name)
+                    .copied()
+                    .ok_or_else(|| SimulationError::MissingSignal(signal.label()))?;
+                for sample in &result.samples {
+                    if let Some(value) = sample.branch_current(component) {
+                        points.push([sample.time, value]);
+                    }
+                }
+            }
+        }
+        if points.is_empty() {
+            return Err(SimulationError::NoData);
+        }
+        traces.push(Trace {
+            signal: signal.clone(),
+            points,
+        });
+    }
+    Ok(traces)
+}
+
+/// Summary values computed from one waveform.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Measurement {
+    /// Measured signal.
+    pub signal: SignalId,
+    /// Smallest sample.
+    pub minimum: f64,
+    /// Largest sample.
+    pub maximum: f64,
+    /// Peak-to-peak amplitude.
+    pub peak_to_peak: f64,
+    /// Arithmetic mean.
+    pub mean: f64,
+    /// Root mean square.
+    pub rms: f64,
+    /// Number of samples.
+    pub samples: usize,
+}
+
+/// Computes minimum, maximum, mean, RMS, and peak-to-peak values.
+pub fn measurements(traces: &[Trace]) -> Vec<Measurement> {
+    traces
+        .iter()
+        .filter_map(|trace| {
+            let first = trace.points.first()?;
+            let mut minimum = first[1];
+            let mut maximum = first[1];
+            let mut sum = 0.0;
+            let mut square_sum = 0.0;
+            for point in &trace.points {
+                minimum = minimum.min(point[1]);
+                maximum = maximum.max(point[1]);
+                sum += point[1];
+                square_sum += point[1] * point[1];
+            }
+            let samples = trace.points.len();
+            let count = samples as f64;
+            Some(Measurement {
+                signal: trace.signal.clone(),
+                minimum,
+                maximum,
+                peak_to_peak: maximum - minimum,
+                mean: sum / count,
+                rms: (square_sum / count).sqrt(),
+                samples,
+            })
+        })
+        .collect()
+}
+
+/// One frequency-domain point of an AC response.
+#[derive(Clone, Debug, PartialEq)]
+pub struct BodePoint {
+    /// Frequency in hertz.
+    pub frequency: f64,
+    /// Output magnitude in volts.
+    pub magnitude: f64,
+    /// Gain relative to the excitation amplitude, in decibels.
+    pub gain_db: f64,
+    /// Output phase in degrees.
+    pub phase_degrees: f64,
+}
+
+/// Gain and phase response for one voltage net.
+#[derive(Clone, Debug, PartialEq)]
+pub struct BodeTrace {
+    /// Measured net voltage.
+    pub signal: SignalId,
+    /// Points ordered by increasing frequency.
+    pub points: Vec<BodePoint>,
+}
+
+/// Extracts one voltage Bode response from an AC result.
+pub fn bode_trace(
+    result: &AcResult,
+    context: &RunContext,
+    signal: &SignalId,
+) -> Result<BodeTrace, SimulationError> {
+    let SignalId::Voltage(name) = signal else {
+        return Err(SimulationError::BodeRequiresVoltage);
+    };
+    let node = context
+        .nodes
+        .get(name)
+        .copied()
+        .ok_or_else(|| SimulationError::MissingSignal(signal.label()))?;
+    let amplitude = context
+        .input_amplitude
+        .filter(|value| value.is_finite() && *value > 0.0)
+        .ok_or(SimulationError::NoData)?;
+    let mut points = Vec::with_capacity(result.samples.len());
+    for sample in &result.samples {
+        let Some(phasor) = sample.node_voltage(node) else {
+            continue;
+        };
+        let magnitude = phasor.magnitude();
+        if !magnitude.is_finite() || magnitude <= 0.0 {
+            continue;
+        }
+        let gain_db = 20.0 * (magnitude / amplitude).log10();
+        let phase_degrees = phasor.phase_degrees();
+        if !gain_db.is_finite() || !phase_degrees.is_finite() {
+            continue;
+        }
+        points.push(BodePoint {
+            frequency: sample.frequency,
+            magnitude,
+            gain_db,
+            phase_degrees,
+        });
+    }
+    if points.is_empty() {
+        return Err(SimulationError::NoData);
+    }
+    Ok(BodeTrace {
+        signal: signal.clone(),
+        points,
+    })
+}
+
+/// One frequency-domain amplitude sample.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Spectrum {
+    /// Frequency of each one-sided bin in hertz.
+    pub frequencies: Vec<f64>,
+    /// Peak amplitude of each bin in signal units.
+    pub magnitudes: Vec<f64>,
+    /// Frequency spacing in hertz.
+    pub resolution: f64,
+    /// Number of FFT input samples.
+    pub sample_count: usize,
+    /// Strongest non-DC bin.
+    pub peak: Option<SpectrumPeak>,
+}
+
+/// Strongest non-DC spectrum component.
+#[derive(Clone, Debug, PartialEq)]
+pub struct SpectrumPeak {
+    /// Frequency in hertz.
+    pub frequency: f64,
+    /// Amplitude in signal units.
+    pub magnitude: f64,
+}
+
+/// Computes a Hann-windowed, mean-removed one-sided amplitude spectrum.
+pub fn compute_spectrum(trace: &Trace, nominal_step: f64) -> Result<Spectrum, SimulationError> {
+    if trace.points.len() < 16 {
+        return Err(SimulationError::SpectrumTooShort);
+    }
+    if !nominal_step.is_finite() || nominal_step <= 0.0 {
+        return Err(SimulationError::InvalidSpectrumStep);
+    }
+    let start = trace.points[0][0];
+    let end = trace.points[trace.points.len() - 1][0];
+    let duration = end - start;
+    if !duration.is_finite() || duration <= 0.0 {
+        return Err(SimulationError::NoData);
+    }
+    let available = ((duration / nominal_step).floor() as usize).clamp(16, MAX_FFT_POINTS);
+    let sample_count = available.next_power_of_two().min(MAX_FFT_POINTS);
+    let dt = duration / sample_count as f64;
+    if !dt.is_finite() || dt <= 0.0 {
+        return Err(SimulationError::InvalidSpectrumStep);
+    }
+
+    let mut values = Vec::with_capacity(sample_count);
+    for index in 0..sample_count {
+        let time = start + index as f64 * dt;
+        values.push(interpolate(&trace.points, time));
+    }
+    let mean = values.iter().sum::<f64>() / sample_count as f64;
+    let mut window_sum = 0.0;
+    let mut buffer = Vec::with_capacity(sample_count);
+    for (index, value) in values.into_iter().enumerate() {
+        let window = 0.5 - 0.5 * (std::f64::consts::TAU * index as f64 / sample_count as f64).cos();
+        window_sum += window;
+        buffer.push(Complex::new((value - mean) * window, 0.0));
+    }
+    let mut planner = FftPlanner::<f64>::new();
+    let fft = planner.plan_fft_forward(sample_count);
+    fft.process(&mut buffer);
+
+    let half = sample_count / 2;
+    let mut frequencies = Vec::with_capacity(half + 1);
+    let mut magnitudes = Vec::with_capacity(half + 1);
+    for (index, bin) in buffer.iter().enumerate().take(half + 1) {
+        let frequency = index as f64 / duration;
+        let factor = if index == 0 || (sample_count.is_multiple_of(2) && index == half) {
+            1.0
+        } else {
+            2.0
+        };
+        let magnitude = factor * bin.norm() / window_sum;
+        frequencies.push(frequency);
+        magnitudes.push(magnitude);
+    }
+
+    let mut peak_index = 0;
+    let mut peak_magnitude = 0.0;
+    for (index, magnitude) in magnitudes.iter().enumerate().skip(1) {
+        if *magnitude > peak_magnitude {
+            peak_index = index;
+            peak_magnitude = *magnitude;
+        }
+    }
+    let peak = if peak_index == 0 || peak_magnitude <= 0.0 {
+        None
+    } else {
+        Some(SpectrumPeak {
+            frequency: frequencies[peak_index],
+            magnitude: peak_magnitude,
+        })
+    };
+    Ok(Spectrum {
+        frequencies,
+        magnitudes,
+        resolution: 1.0 / duration,
+        sample_count,
+        peak,
+    })
+}
+
+fn interpolate(points: &[[f64; 2]], time: f64) -> f64 {
+    let index = points.partition_point(|point| point[0] <= time);
+    if index == 0 {
+        return points[0][1];
+    }
+    if index >= points.len() {
+        return points[points.len() - 1][1];
+    }
+    let left = points[index - 1];
+    let right = points[index];
+    let span = right[0] - left[0];
+    if span <= 0.0 {
+        left[1]
+    } else {
+        let ratio = (time - left[0]) / span;
+        left[1] + (right[1] - left[1]) * ratio
+    }
+}
+
+/// Serializes transient traces as tidy long-form CSV.
+pub fn transient_csv(traces: &[Trace]) -> String {
+    let mut output = String::from("signal,unit,time_s,value\n");
+    for trace in traces {
+        let label = csv_field(&trace.label());
+        let unit = trace.unit().symbol();
+        for point in &trace.points {
+            push_csv_row(
+                &mut output,
+                &[
+                    label.clone(),
+                    unit.to_owned(),
+                    csv_number(point[0]),
+                    csv_number(point[1]),
+                ],
+            );
+        }
+    }
+    output
+}
+
+/// Serializes one amplitude spectrum as CSV.
+pub fn spectrum_csv(trace: &Trace, spectrum: &Spectrum) -> String {
+    let mut output = String::from("signal,unit,frequency_hz,magnitude\n");
+    let label = csv_field(&trace.label());
+    let unit = trace.unit().symbol();
+    for (frequency, magnitude) in spectrum.frequencies.iter().zip(&spectrum.magnitudes) {
+        push_csv_row(
+            &mut output,
+            &[
+                label.clone(),
+                unit.to_owned(),
+                csv_number(*frequency),
+                csv_number(*magnitude),
+            ],
+        );
+    }
+    output
+}
+
+/// Serializes a Bode response as CSV.
+pub fn bode_csv(trace: &BodeTrace) -> String {
+    let mut output = String::from("signal,frequency_hz,magnitude_v,gain_db,phase_deg\n");
+    let label = csv_field(&trace.signal.label());
+    for point in &trace.points {
+        push_csv_row(
+            &mut output,
+            &[
+                label.clone(),
+                csv_number(point.frequency),
+                csv_number(point.magnitude),
+                csv_number(point.gain_db),
+                csv_number(point.phase_degrees),
+            ],
+        );
+    }
+    output
+}
+
+fn push_csv_row(output: &mut String, fields: &[String]) {
+    for (index, field) in fields.iter().enumerate() {
+        if index > 0 {
+            output.push(',');
+        }
+        output.push_str(field);
+    }
+    output.push('\n');
+}
+
+fn csv_field(value: &str) -> String {
+    if value
+        .chars()
+        .any(|character| matches!(character, ',' | '"' | '\n' | '\r'))
+    {
+        format!("\"{}\"", value.replace('"', "\"\""))
+    } else {
+        value.to_owned()
+    }
+}
+
+fn csv_number(value: f64) -> String {
+    format!("{value:.12e}")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::document::Document;
+    use sim_core::netlist::NodeKind;
+
+    fn demo_extraction() -> Extraction {
+        Document::demo().unwrap().extraction().unwrap().clone()
+    }
+
+    fn default_signals(catalog: &SignalCatalog) -> Vec<SignalId> {
+        catalog
+            .voltages
+            .iter()
+            .cloned()
+            .map(SignalId::Voltage)
+            .collect()
+    }
+
+    #[test]
+    fn catalog_exposes_demo_nets_and_sources() {
+        let catalog = SignalCatalog::from_extraction(&demo_extraction());
+        assert_eq!(catalog.voltages, vec!["OUT".to_owned(), "VIN".to_owned()]);
+        assert_eq!(catalog.currents, vec!["V1".to_owned()]);
+        assert_eq!(catalog.sources.len(), 1);
+        assert_eq!(catalog.sources[0].label, "V1");
+        assert_eq!(catalog.default_voltage().as_deref(), Some("OUT"));
+    }
+
+    #[test]
+    fn transient_settings_follow_the_source_catalog() {
+        let extraction = demo_extraction();
+        let catalog = SignalCatalog::from_extraction(&extraction);
+        let mut settings = TransientSettings::default();
+        settings.ensure_catalog(&catalog.sources);
+        assert_eq!(settings.source.as_deref(), Some("V1"));
+        assert_eq!(settings.final_value, "5 V");
+        settings.final_value = "3".to_owned();
+        settings.ensure_catalog(&catalog.sources);
+        assert_eq!(settings.final_value, "3");
+        settings.ensure_catalog(&[]);
+        assert!(!settings.step_enabled);
+        assert!(settings.source.is_none());
+    }
+
+    #[test]
+    fn transient_source_step_overrides_the_dc_value_without_mutating_the_document() {
+        let extraction = demo_extraction();
+        let original = extraction
+            .netlist
+            .components
+            .iter()
+            .find(|component| component.kind == ComponentKind::VoltageSource)
+            .and_then(|component| component.params.get("dc"))
+            .and_then(ParamValue::as_number);
+        assert!(original.is_some());
+        let mut settings = TransientSettings::default();
+        settings.ensure_catalog(&SignalCatalog::from_extraction(&extraction).sources);
+        let prepared = prepare_transient(&extraction, &settings, 4).unwrap();
+        assert_eq!(prepared.context.document_revision, 4);
+        assert!((prepared.context.nominal_step.unwrap() - 1e-5).abs() < 1e-15);
+        let Analysis::Transient(options) = prepared.analysis else {
+            panic!("expected transient analysis");
+        };
+        assert_eq!(options.events.len(), 1);
+        assert_eq!(options.events[0].time, 0.0);
+        let source = prepared
+            .netlist
+            .components
+            .iter()
+            .find(|component| component.kind == ComponentKind::VoltageSource)
+            .unwrap();
+        assert_eq!(
+            source.params.get("dc").and_then(ParamValue::as_number),
+            Some(0.0)
+        );
+        let unchanged = extraction
+            .netlist
+            .components
+            .iter()
+            .find(|component| component.kind == ComponentKind::VoltageSource)
+            .and_then(|component| component.params.get("dc"))
+            .and_then(ParamValue::as_number);
+        assert_eq!(unchanged, original);
+    }
+
+    #[test]
+    fn oversized_transient_is_rejected() {
+        let extraction = demo_extraction();
+        let settings = TransientSettings {
+            step: "1n".to_owned(),
+            ..TransientSettings::default()
+        };
+        let error = prepare_transient(&extraction, &settings, 0).unwrap_err();
+        assert!(matches!(
+            error,
+            SimulationError::TooManySteps {
+                limit: MAX_TRANSIENT_STEPS
+            }
+        ));
+    }
+
+    #[test]
+    fn invalid_analysis_settings_are_rejected_before_submission() {
+        let extraction = demo_extraction();
+        let catalog = SignalCatalog::from_extraction(&extraction);
+        let mut transient = TransientSettings::default();
+        transient.ensure_catalog(&catalog.sources);
+        transient.event_time = "5m".to_owned();
+        assert!(matches!(
+            prepare_transient(&extraction, &transient, 0),
+            Err(SimulationError::InvalidField {
+                field: "instant de l'échelon",
+                ..
+            })
+        ));
+        transient.event_time = "0".to_owned();
+        transient.stop_time = "0".to_owned();
+        assert!(matches!(
+            prepare_transient(&extraction, &transient, 0),
+            Err(SimulationError::EmptyDuration)
+        ));
+
+        let mut ac = AcSettings::default();
+        ac.ensure_catalog(&catalog);
+        ac.points = 1;
+        assert!(matches!(
+            prepare_ac(&extraction, &ac, 0),
+            Err(SimulationError::InvalidPointCount { max: MAX_AC_POINTS })
+        ));
+        ac.points = 101;
+        ac.amplitude = "0".to_owned();
+        assert!(matches!(
+            prepare_ac(&extraction, &ac, 0),
+            Err(SimulationError::InvalidField {
+                field: "amplitude d'excitation",
+                ..
+            })
+        ));
+        ac.amplitude = "1".to_owned();
+        ac.start = "10".to_owned();
+        ac.stop = "1".to_owned();
+        assert!(matches!(
+            prepare_ac(&extraction, &ac, 0),
+            Err(SimulationError::InvalidField {
+                field: "fréquence de fin",
+                ..
+            })
+        ));
+    }
+
+    #[test]
+    fn transient_worker_run_produces_scope_data() {
+        let extraction = demo_extraction();
+        let catalog = SignalCatalog::from_extraction(&extraction);
+        let mut settings = TransientSettings::default();
+        settings.ensure_catalog(&catalog.sources);
+        let prepared = prepare_transient(&extraction, &settings, 0).unwrap();
+        let mut client = SimulationClient::new().unwrap();
+        let revision = client.submit(prepared).unwrap();
+        let run = client.poll(1.0).unwrap().unwrap();
+        assert_eq!(run.revision, revision);
+        assert_eq!(run.kind, AnalysisKind::Transient);
+        let AnalysisResult::Transient(result) = run.result else {
+            panic!("expected transient result");
+        };
+        assert!(result.samples.len() > 400);
+        let traces = transient_traces(&result, &run.context, &default_signals(&catalog)).unwrap();
+        assert_eq!(traces.len(), 2);
+        let out = traces
+            .iter()
+            .find(|trace| trace.signal == SignalId::Voltage("OUT".to_owned()))
+            .unwrap();
+        let final_voltage = out.points.last().unwrap()[1];
+        assert!((final_voltage - 5.0).abs() < 0.05);
+        let summary = measurements(&traces);
+        assert_eq!(summary.len(), 2);
+    }
+
+    #[test]
+    fn ac_worker_run_produces_a_low_pass_bode() {
+        let extraction = demo_extraction();
+        let catalog = SignalCatalog::from_extraction(&extraction);
+        let mut settings = AcSettings::default();
+        settings.ensure_catalog(&catalog);
+        let prepared = prepare_ac(&extraction, &settings, 0).unwrap();
+        let mut client = SimulationClient::new().unwrap();
+        client.submit(prepared).unwrap();
+        let run = client.poll(1.0).unwrap().unwrap();
+        let AnalysisResult::Ac(result) = run.result else {
+            panic!("expected AC result");
+        };
+        let trace =
+            bode_trace(&result, &run.context, &SignalId::Voltage("OUT".to_owned())).unwrap();
+        let first = trace.points.first().unwrap();
+        let last = trace.points.last().unwrap();
+        assert!(first.gain_db.abs() < 0.01);
+        assert!(last.gain_db < -60.0);
+        assert_eq!(trace.points.len(), 101);
+    }
+
+    #[test]
+    fn worker_failure_is_reported() {
+        let prepared = PreparedAnalysis {
+            netlist: Netlist::empty(),
+            analysis: Analysis::Transient(TransientOptions::default()),
+            context: RunContext {
+                document_revision: 0,
+                nodes: BTreeMap::new(),
+                components: BTreeMap::new(),
+                input_amplitude: None,
+                nominal_step: Some(1e-5),
+            },
+        };
+        let mut client = SimulationClient::new().unwrap();
+        client.submit(prepared).unwrap();
+        let error = client.poll(1.0).unwrap_err();
+        assert!(matches!(error, SimulationError::AnalysisFailed { .. }));
+        assert!(!client.has_pending());
+    }
+
+    #[test]
+    fn measurements_compute_summary_values() {
+        let trace = Trace {
+            signal: SignalId::Voltage("OUT".to_owned()),
+            points: vec![[0.0, 1.0], [1.0, 3.0]],
+        };
+        let summary = measurements(&[trace]);
+        assert_eq!(summary.len(), 1);
+        let measurement = &summary[0];
+        assert_eq!(measurement.minimum, 1.0);
+        assert_eq!(measurement.maximum, 3.0);
+        assert_eq!(measurement.peak_to_peak, 2.0);
+        assert_eq!(measurement.mean, 2.0);
+        assert!((measurement.rms - 5.0_f64.sqrt()).abs() < 1e-12);
+        assert_eq!(measurement.samples, 2);
+    }
+
+    #[test]
+    fn spectrum_and_bode_csv_have_stable_columns() {
+        let trace = Trace {
+            signal: SignalId::Voltage("OUT".to_owned()),
+            points: vec![[0.0, 0.0]],
+        };
+        let spectrum = Spectrum {
+            frequencies: vec![0.0, 10.0],
+            magnitudes: vec![0.0, 2.0],
+            resolution: 10.0,
+            sample_count: 16,
+            peak: Some(SpectrumPeak {
+                frequency: 10.0,
+                magnitude: 2.0,
+            }),
+        };
+        assert_eq!(
+            spectrum_csv(&trace, &spectrum),
+            "signal,unit,frequency_hz,magnitude\n\
+             V(OUT),V,0.000000000000e0,0.000000000000e0\n\
+             V(OUT),V,1.000000000000e1,2.000000000000e0\n"
+        );
+        let bode = BodeTrace {
+            signal: SignalId::Voltage("OUT".to_owned()),
+            points: vec![BodePoint {
+                frequency: 1.0,
+                magnitude: 1.0,
+                gain_db: 0.0,
+                phase_degrees: -45.0,
+            }],
+        };
+        assert_eq!(
+            bode_csv(&bode),
+            "signal,frequency_hz,magnitude_v,gain_db,phase_deg\n\
+             V(OUT),1.000000000000e0,1.000000000000e0,0.000000000000e0,-4.500000000000e1\n"
+        );
+    }
+
+    #[test]
+    fn fft_size_is_capped_for_long_transients() {
+        let points = (0..20_000)
+            .map(|index| [index as f64 * 1e-6, 0.0])
+            .collect();
+        let trace = Trace {
+            signal: SignalId::Voltage("OUT".to_owned()),
+            points,
+        };
+        let spectrum = compute_spectrum(&trace, 1e-6).unwrap();
+        assert_eq!(spectrum.sample_count, MAX_FFT_POINTS);
+        assert_eq!(spectrum.frequencies.len(), MAX_FFT_POINTS / 2 + 1);
+        assert!(spectrum.peak.is_none());
+    }
+
+    #[test]
+    fn fft_finds_a_bin_centered_sine() {
+        let points = (0..=1024)
+            .map(|index| {
+                let time = index as f64 / 1024.0;
+                [time, 2.0 * (std::f64::consts::TAU * 10.0 * time).sin()]
+            })
+            .collect();
+        let trace = Trace {
+            signal: SignalId::Voltage("OUT".to_owned()),
+            points,
+        };
+        let spectrum = compute_spectrum(&trace, 1.0 / 1024.0).unwrap();
+        assert_eq!(spectrum.sample_count, 1024);
+        let peak = spectrum.peak.unwrap();
+        assert!((peak.frequency - 10.0).abs() < 1e-9);
+        assert!((peak.magnitude - 2.0).abs() < 0.01);
+    }
+
+    #[test]
+    fn csv_output_is_deterministic_and_escaped() {
+        let trace = Trace {
+            signal: SignalId::Voltage("A,B".to_owned()),
+            points: vec![[0.0, 1.0], [1e-3, 2.5]],
+        };
+        let csv = transient_csv(&[trace]);
+        assert!(csv.starts_with("signal,unit,time_s,value\n"));
+        assert!(csv.contains("\"V(A,B)\",V,0.000000000000e0,1.000000000000e0\n"));
+        assert_eq!(&csv[..csv.len() - 1], csv.trim_end());
+    }
+
+    #[test]
+    fn node_maps_include_ground() {
+        let extraction = demo_extraction();
+        let map = node_map(&extraction.netlist);
+        let ground = extraction.netlist.ground_node_id().unwrap();
+        assert_eq!(map.get("0"), Some(&ground));
+        assert!(extraction
+            .netlist
+            .nodes
+            .iter()
+            .any(|node| node.kind == NodeKind::Ground && node.id == ground));
+    }
+}

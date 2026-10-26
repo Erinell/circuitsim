@@ -1,0 +1,153 @@
+<!doctype html>
+<html lang="fr">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="color-scheme" content="dark" />
+    <meta
+      name="description"
+      content="CircuitSim, simulateur de circuits analogiques en temps réel."
+    />
+    <title>CircuitSim</title>
+    <link
+      rel="icon"
+      href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='12' fill='%23121823'/%3E%3Cpath d='M14 32h10l5-12 8 24 5-12h8' fill='none' stroke='%23f0c674' stroke-width='4' stroke-linejoin='round'/%3E%3C/svg%3E"
+    />
+    <link
+      data-trunk
+      rel="rust"
+      href="crates/app/Cargo.toml"
+      data-bin="circuitsim"
+    />
+    <style>
+      :root {
+        color-scheme: dark;
+        background: #121823;
+        color: #d8e2f0;
+        font-family:
+          Inter, "Segoe UI", system-ui, -apple-system, BlinkMacSystemFont,
+          sans-serif;
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      html,
+      body {
+        width: 100%;
+        height: 100%;
+        margin: 0;
+        overflow: hidden;
+        background: #121823;
+      }
+
+      body {
+        overscroll-behavior: none;
+      }
+
+      #circuitsim-canvas {
+        display: block;
+        width: 100vw;
+        height: 100vh;
+        outline: none;
+        touch-action: none;
+      }
+
+      #circuitsim-loading {
+        position: fixed;
+        inset: 0;
+        display: grid;
+        place-items: center;
+        background:
+          radial-gradient(circle at 50% 40%, #1d2b3e 0%, #121823 58%),
+          #121823;
+        pointer-events: none;
+        transition: opacity 160ms ease-out;
+      }
+
+      .loading-card {
+        display: grid;
+        gap: 10px;
+        place-items: center;
+        padding: 28px 38px;
+        border: 1px solid #34465d;
+        border-radius: 10px;
+        background: rgba(18, 24, 35, 0.88);
+        box-shadow: 0 18px 60px rgba(0, 0, 0, 0.35);
+      }
+
+      .loading-card strong {
+        color: #f0c674;
+        font-size: 22px;
+        letter-spacing: 0.03em;
+      }
+
+      .loading-card span {
+        color: #8fa3ba;
+        font-size: 13px;
+      }
+
+      .loading-bar {
+        width: 150px;
+        height: 3px;
+        overflow: hidden;
+        border-radius: 999px;
+        background: #243348;
+      }
+
+      .loading-bar::after {
+        display: block;
+        width: 46%;
+        height: 100%;
+        border-radius: inherit;
+        background: #7db7c8;
+        content: "";
+        animation: loading-slide 1.15s ease-in-out infinite;
+      }
+
+      @keyframes loading-slide {
+        from {
+          transform: translateX(-110%);
+        }
+        to {
+          transform: translateX(330%);
+        }
+      }
+
+      @media (prefers-reduced-motion: reduce) {
+        .loading-bar::after {
+          animation: none;
+        }
+      }
+
+      noscript {
+        position: fixed;
+        inset: auto 16px 16px 16px;
+        padding: 12px 16px;
+        border: 1px solid #6c4a4a;
+        border-radius: 8px;
+        background: #2a1d1d;
+        color: #f0c0c0;
+        text-align: center;
+      }
+    </style>
+  </head>
+  <body>
+    <canvas
+      id="circuitsim-canvas"
+      tabindex="0"
+      aria-label="Éditeur et instruments de CircuitSim"
+    ></canvas>
+    <div id="circuitsim-loading" role="status" aria-live="polite">
+      <div class="loading-card">
+        <strong>CircuitSim</strong>
+        <span>Chargement du simulateur…</span>
+        <div class="loading-bar" aria-hidden="true"></div>
+      </div>
+    </div>
+    <noscript>
+      CircuitSim nécessite JavaScript et WebAssembly pour fonctionner.
+    </noscript>
+  </body>
+</html>

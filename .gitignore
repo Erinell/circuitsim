@@ -1,0 +1,36 @@
+# Builds and generated artifacts
+/target/
+/target/criterion/
+/dist/
+/pkg/
+/node_modules/
+/.trunk/
+
+# Editors and OS
+/.idea/
+/.vscode/
+/.fleet/
+*.swp
+*.swo
+*~
+.DS_Store
+Thumbs.db
+Desktop.ini
+ehthumbs.db
+
+# Local environment and secrets
+.env*
+*.pem
+*.key
+*.p12
+*.pfx
+
+# Temporary outputs
+*.log
+*.tmp
+*.bak
+*.orig
+*.rej
+/exports/
+/circuitsim-*.csv
+/circuitsim-*.png

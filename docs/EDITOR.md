@@ -1,0 +1,156 @@
+# Éditeur de schéma
+
+`editor-core` contient le schéma, les commandes réversibles, la connectivité,
+l'ERC et la sérialisation. Il ne dépend ni d'egui, ni du navigateur, ni d'une
+horloge. Les panneaux sont décrits dans [UI.md](UI.md), les composants dans
+[COMPONENTS.md](COMPONENTS.md).
+
+## 1. Grille et transformations
+
+- `GridPos { x, y }` utilise des `i32` bornés à `-1_000_000..=1_000_000`.
+- L'axe `y` augmente vers le bas ; aucune coordonnée fractionnaire.
+- Les déplacements utilisent des additions/soustractions vérifiées ; une
+  commande nulle, vide ou avec doublon est refusée.
+- Les broches sont transformées par miroir local (`x -> -x`), puis rotation
+  `R0/R90/R180/R270`, puis translation par `Symbol.at`.
+- `R90` applique `(x, y) -> (-y, x)`. Une broche hors grille produit
+  `ExtractError::PinOutOfBounds`.
+
+## 2. Symboles
+
+Le registre intégré contient les onze types de [NETLIST.md](NETLIST.md). Chaque
+`SymbolDef` valide un nom de type non vide (≤ 128 caractères), 1 à `u16::MAX`
+broches, des noms de broches uniques et valides, des positions dans la grille
+locale, des noms de paramètres valides et des valeurs numériques finies.
+
+Un `SymbolKind::Custom(String)` est refusé s'il est déjà enregistré. Le MOSFET
+n'est pas intégré : `examples/custom_mosfet.rs` illustre ses broches, l'extraction
+et le JSON ; aucun modèle électrique n'est fourni. Un type absent du registre
+produit `UnknownSymbolKind` à l'extraction.
+
+## 3. Fils et topologie
+
+Un `Wire` est un segment orthogonal fermé : longueur strictement positive,
+`a.x == b.x` ou `a.y == b.y`, extrémités dans la grille et réordonnées
+lexicographiquement. Diagonales et longueurs nulles sont refusées.
+
+| Situation | Connexion | Diagnostic |
+| --- | --- | --- |
+| Extrémités au même point | oui | aucun |
+| Extrémité sur l'intérieur d'un autre fil (T) | oui | aucun |
+| Croisement perpendiculaire sans point | non | aucun |
+| Croisement perpendiculaire avec `Junction` | oui | aucun |
+| Chevauchement colinéaire | oui | `WireOverlap` |
+| Jonction hors fil | non applicable | `JunctionOffWire` |
+| Jonction sur un seul fil ou une broche | non applicable | `RedundantJunction` |
+
+Une jonction relie tous les fils qui contiennent sa position. Un label ne
+remplace pas un composant : un fil seulement décoré par un label garde une
+extrémité non connectée.
+
+## 4. Labels et extraction
+
+Un `NetLabel` possède une position et un texte validé, coupé des espaces. Il
+s'attache aux broches et fils présents à sa position, jamais à distance.
+
+- Label sur une broche ou un fil : nomme le net correspondant.
+- Label touchant plusieurs racines non connectées : `AmbiguousLabel`.
+- Label hors conducteur : `LabelOffWire`.
+- Plusieurs labels sur un net : `MultipleLabelsOnNet` ; le plus petit est retenu.
+- Deux nets distincts avec le même texte ne sont pas fusionnés ; le second reçoit
+  un suffixe et l'ERC émet `DuplicateNetName`.
+
+L'extraction utilise un union-find : indices `0..P` pour les broches,
+`P..P+W` pour les fils.
+
+1. Unir les broches à la même position.
+2. Unir chaque broche contenue dans un fil.
+3. Classer chaque paire de fils par `segment_relation` : contact ou
+   chevauchement colinéaire, croisement avec extrémité, ou croisement intérieur
+   seulement avec jonction.
+4. Unir les fils contenant une jonction.
+5. Rattacher les labels aux racines touchées.
+6. Ignorer les groupes sans broche ; leurs fils sont pendants.
+
+Un groupe avec au moins une broche devient un nœud. Broches, fils et labels sont
+ordonnés par `(SymbolId, index)`, `WireId` et `NetLabelId`. La complexité actuelle
+est quadratique en fils, linéaire par broche/fil, adaptée aux schémas
+pédagogiques.
+
+## 5. Noms de nets
+
+L'allocateur réserve `0` à la masse.
+
+- Le premier net de masse devient `0`, même avec un label ; ce label émet
+  `GroundLabelIgnored`.
+- Un autre net prend son plus petit label.
+- Un label déjà pris reçoit `#2`, `#3`, etc., sans dépasser 128 caractères.
+- Le label `0` hors masse est renommé et produit `ReservedNetName`.
+- Sans label, le net reçoit `N$001`, `N$002`, etc., en évitant les collisions.
+- Ordre : masse, puis plus petite broche, plus petit fil, plus petit label,
+  racine union-find.
+
+Le nom final est revalidé par `NetName::new`.
+
+## 6. Commandes et undo/redo
+
+Commandes publiques : `AddSymbol`, `RemoveSymbol`, `AddWire`, `RemoveWire`,
+`AddJunction`, `RemoveJunction`, `AddLabel`, `RemoveLabel`, `MoveObjects`,
+`ReplaceSymbol`, `ReplaceWire`, `ReplaceLabel`, `Composite`.
+
+Une suppression stocke l'objet complet et exige qu'il soit identique à l'état
+courant, sinon `StaleCommand`. `UndoStack` applique sur un clone, valide, puis
+remplace l'état ; un échec laisse tout inchangé. L'historique est illimité, une
+nouvelle commande vide le redo, et les identifiants annulés ne sont jamais
+réutilisés.
+
+## 7. ERC
+
+Les diagnostics sont triés par sévérité, code, position, sujet et message. Une
+erreur ERC n'empêche pas forcément l'extraction ; seule une `ExtractError` la
+bloque. Le contrat de simulation reste séparé.
+
+| Code | Sévérité | Sens |
+| --- | --- | --- |
+| `NoGround` | erreur | aucun symbole de masse |
+| `MultipleGround` | erreur | plusieurs nets de masse séparés |
+| `DuplicateNetName` | erreur | label dupliqué, net renommé |
+| `ReservedNetName` | erreur | label `0` hors masse |
+| `FloatingPin` | avertissement | broche seule sans fil ni label |
+| `StackedPins` | information | plusieurs broches au même point |
+| `DanglingWire` | avertissement | fil sans broche |
+| `UnconnectedWireEnd` | avertissement | extrémité libre |
+| `WireOverlap` | avertissement | chevauchement colinéaire |
+| `JunctionOffWire` | avertissement | jonction hors fil |
+| `RedundantJunction` | information | jonction inutile |
+| `LabelOffWire` | avertissement | label hors conducteur |
+| `AmbiguousLabel` | avertissement | label sur plusieurs racines |
+| `MultipleLabelsOnNet` | avertissement | plusieurs labels sur un net |
+| `GroundLabelIgnored` | information | label ignoré sur la masse |
+
+## 8. JSON et interface
+
+Format versionné :
+
+```json
+{
+  "schema_version": 1,
+  "schematic": {
+    "symbols": {},
+    "wires": {},
+    "junctions": {},
+    "labels": {},
+    "next_id": 54
+  }
+}
+```
+
+`to_json` valide avant écriture. `from_json` lit `schema_version`, refuse une
+version future avant le payload, désérialise puis revalide ; les champs inconnus
+sont refusés. `next_id` est persisté, l'historique undo ne l'est pas.
+
+L'interface alloue via `Schematic::allocate_id`, construit les commandes avec les
+objets courants, traite `EditError` sans modifier l'état, affiche l'ERC sans
+supprimer et redemande une extraction après chaque modification acceptée. Elle ne
+modifie jamais directement les `BTreeMap` internes. Une action refusée ne change
+ni contenu, ni révision, ni compteur d'identifiants.

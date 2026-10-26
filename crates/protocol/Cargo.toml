@@ -1,0 +1,17 @@
+[package]
+name = "worker-protocol"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+description = "Versioned binary protocol shared by the CircuitSim UI and worker"
+
+[dependencies]
+postcard.workspace = true
+serde.workspace = true
+sim-core = { path = "../sim-core" }
+thiserror.workspace = true
+
+[lints]
+workspace = true

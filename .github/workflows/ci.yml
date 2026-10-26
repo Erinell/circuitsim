@@ -1,0 +1,78 @@
+name: CI
+
+'on':
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  checks:
+    name: Format, lint, tests, WASM and benches
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Linux desktop dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libwayland-dev libxkbcommon-dev libx11-dev libxi-dev \
+            libxcursor-dev libxrandr-dev libxinerama-dev \
+            libgl1-mesa-dev libegl1-mesa-dev
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+          targets: wasm32-unknown-unknown
+
+      - name: Cache Cargo artifacts
+        uses: Swatinem/rust-cache@v2
+
+      - name: Install Trunk
+        uses: taiki-e/install-action@v2
+        with:
+          tool: trunk@0.21.14
+
+      - name: Format, clippy and tests
+        run: cargo xtask check
+
+      - name: Check WASM target
+        run: cargo xtask wasm-check
+
+      - name: Run benchmarks quickly
+        run: |
+          cargo bench -p sim-core --bench solvers -- --quick --noplot
+          cargo bench -p editor-core --bench extraction -- --quick --noplot
+          cargo bench -p circuitsim-app --bench instruments -- --quick --noplot
+
+      - name: Run examples
+        run: |
+          cargo run -q -p sim-core --example rc_response
+          cargo run -q --example custom_mosfet
+
+      - name: Build native release
+        run: cargo build --release -p circuitsim-app
+
+      - name: Build web distribution
+        run: cargo xtask web-build
+
+      - name: Upload web distribution
+        uses: actions/upload-artifact@v4
+        with:
+          name: circuitsim-web
+          path: dist
+          if-no-files-found: error
+          retention-days: 14

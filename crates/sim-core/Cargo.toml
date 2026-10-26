@@ -1,0 +1,23 @@
+[package]
+name = "sim-core"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+description = "CircuitSim netlist model, typed SI units, MNA, DC, transient and AC analysis"
+
+[dependencies]
+nalgebra.workspace = true
+serde.workspace = true
+thiserror.workspace = true
+
+[dev-dependencies]
+criterion.workspace = true
+
+[[bench]]
+name = "solvers"
+harness = false
+
+[lints]
+workspace = true

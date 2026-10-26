@@ -1,0 +1,74 @@
+[workspace]
+members = [
+    "crates/app",
+    "crates/editor-core",
+    "crates/protocol",
+    "crates/sim-core",
+    "crates/worker",
+    "xtask",
+]
+resolver = "2"
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.93"
+license = "MIT OR Apache-2.0"
+publish = false
+
+[workspace.dependencies]
+criterion = { version = "0.8.2", default-features = false, features = ["cargo_bench_support"] }
+eframe = { version = "0.35.0", default-features = false, features = ["default_fonts", "glow", "wayland", "x11"] }
+egui_plot = { version = "0.36.0", default-features = false }
+nalgebra = { version = "0.35.0", default-features = false, features = ["std"] }
+postcard = { version = "1.0", default-features = false, features = ["alloc"] }
+proptest = "1.0"
+rustfft = { version = "6.4.1", default-features = false }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+thiserror = "2.0"
+js-sys = "0.3.106"
+wasm-bindgen = "0.2.129"
+wasm-bindgen-futures = "0.4.58"
+web-sys = { version = "0.3.106", features = [
+    "Blob",
+    "BlobPropertyBag",
+    "Document",
+    "Element",
+    "HtmlAnchorElement",
+    "HtmlCanvasElement",
+    "HtmlElement",
+    "Node",
+    "Url",
+    "Window",
+] }
+
+[workspace.lints.rust]
+unsafe_code = "forbid"
+
+[workspace.lints.clippy]
+all = "warn"
+
+[package]
+name = "circuitsim-harness"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+description = "Native test harness for CircuitSim"
+
+[lib]
+name = "circuitsim_harness"
+path = "src/lib.rs"
+
+[dependencies]
+editor-core = { path = "crates/editor-core" }
+sim-core = { path = "crates/sim-core" }
+
+[dev-dependencies]
+proptest.workspace = true
+serde_json.workspace = true
+
+[lints]
+workspace = true
