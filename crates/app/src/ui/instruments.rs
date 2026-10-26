@@ -102,6 +102,37 @@ impl InstrumentsState {
         }
     }
 
+    /// Returns the last transient sample mapped to names for the inspector.
+    pub fn live_values(&self) -> crate::analysis::LiveValues {
+        let Some(run) = &self.transient_run else {
+            return crate::analysis::LiveValues::default();
+        };
+        let AnalysisResult::Transient(result) = &run.result else {
+            return crate::analysis::LiveValues::default();
+        };
+        let Some(sample) = result.samples.last() else {
+            return crate::analysis::LiveValues::default();
+        };
+        let mut node_voltages = std::collections::BTreeMap::new();
+        for (name, node) in &run.context.nodes {
+            if let Some(voltage) = sample.node_voltage(*node) {
+                node_voltages.insert(name.clone(), voltage);
+            }
+        }
+        let mut branch_currents = std::collections::BTreeMap::new();
+        for (name, component) in &run.context.components {
+            if let Some(current) = sample.branch_current(*component) {
+                branch_currents.insert(name.clone(), current);
+            }
+        }
+        crate::analysis::LiveValues {
+            document_revision: run.context.document_revision,
+            time: Some(sample.time),
+            node_voltages,
+            branch_currents,
+        }
+    }
+
     /// Draws the bottom instrument panel.
     pub fn show(&mut self, ui: &mut Ui, document: &Document, status: &mut Status) {
         let now = ui.input(|input| input.time);
