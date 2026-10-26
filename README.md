@@ -59,6 +59,7 @@ cargo test -p worker
 cargo run -p sim-core --example rc_response
 cargo run --example custom_mosfet
 cargo bench --workspace --no-run
+cargo deny check licenses
 cargo fmt --all
 cargo clippy --workspace --all-targets -- -D warnings
 ```
@@ -94,6 +95,8 @@ cargo clippy --workspace --all-targets -- -D warnings
 | [Performances](docs/PERFORMANCE.md) | charges, mesures, budgets |
 | [Exemples](docs/EXAMPLES.md) | RC, composant personnalisé, benchmarks |
 | [Livraison](docs/DELIVERY.md) | artefacts, Web, audit, vérifications, risques |
+| [Git](docs/GIT_WORKFLOW.md) | branches, commits, tags et réglages GitHub |
+| [Licences](docs/LICENSING.md) | licence du projet et politique des dépendances |
 
 ## Principes et limites
 
@@ -112,4 +115,5 @@ cargo clippy --workspace --all-targets -- -D warnings
 
 Distribué sous `MIT OR Apache-2.0`. Textes : [LICENSE-MIT](LICENSE-MIT) et
 [LICENSE-APACHE](LICENSE-APACHE). Toute contribution est soumise aux mêmes
-termes. Copyright © 2026 Cédric Debois.
+termes. Copyright © 2026 Cédric Debois. Vérification :
+`cargo deny check licenses` ; politique : [docs/LICENSING.md](docs/LICENSING.md).
