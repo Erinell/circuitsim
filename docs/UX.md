@@ -35,7 +35,8 @@
 | `Home`, `Ctrl+Home` | Cadrer tout le schéma, cadrer la sélection |
 | `Ctrl+1`…`Ctrl+4` | Tout, Édition, Simulation, Canevas |
 | `Ctrl+Entrée`, `F5` | Relancer le transitoire |
-| `?` | Ouvrir ou fermer l’aide |
+| `?` / `F1` | Ouvrir ou fermer l’aide |
+| `Ctrl+Maj+A` | Préférences d’affichage et accessibilité |
 | `Échap` | Annuler l’outil, le fil, le collage ou la sélection |
 
 Les raccourcis sont ignorés lorsqu’un champ texte a le focus, à l’exception de
@@ -149,7 +150,22 @@ Les raccourcis sont ignorés lorsqu’un champ texte a le focus, à l’exceptio
 - Sur le Bode, un clic pose un marqueur de fréquence commun au gain et à la
   phase ; le panneau affiche fréquence, gain en dB et phase en degrés.
 
-## 10. Inspecteur, valeurs et historique
+## 10. Accueil et accessibilité
+
+- Le guide de démarrage présente quatre gestes : placer, câbler, simuler,
+  explorer. Il propose l’exemple RC, un schéma vide et l’aide complète.
+- Il s’ouvre au lancement et reste accessible par le bouton **Démarrage** ou la
+  palette de commandes.
+- L’état vide du canevas rappelle les trois actions essentielles et renvoie au
+  guide.
+- Les préférences d’affichage proposent un thème sombre ou à contraste élevé,
+  une taille d’interface de 85 à 130 % et la réduction des animations.
+- `Tab` et `Maj+Tab` parcourent les contrôles, `Entrée` active, `Échap` ferme.
+  Toutes les actions principales ont un libellé texte et une infobulle.
+- Les préférences sont appliquées immédiatement et restent valables pour la
+  session ; leur persistance est prévue ultérieurement.
+
+## 11. Inspecteur, valeurs et historique
 
 - L’inspecteur affiche la référence, l’orientation, le miroir et les paramètres.
 - Les valeurs s’écrivent directement en notation d’ingénieur : `4k7`, `100n`,
@@ -171,13 +187,13 @@ Les raccourcis sont ignorés lorsqu’un champ texte a le focus, à l’exceptio
   puis copier, dupliquer, supprimer. Sur le vide, il propose coller, tout
   sélectionner, ajuster, annuler et rétablir.
 
-## 11. Résultats et erreurs
+## 12. Résultats et erreurs
 
 Une opération refusée affiche un message français dans la barre d’état et ne
 modifie ni le schéma, ni la révision, ni `next_id`. Les erreurs techniques
 restent typées dans les crates.
 
-## 12. Critères d’acceptation
+## 13. Critères d’acceptation
 
 - Construire un RC, le câbler et lancer la simulation en six actions maximum.
 - Aucune interaction de survol, glisser, rectangle ou câblage ne dépasse 16 ms
@@ -192,13 +208,18 @@ restent typées dans les crates.
   est identifiable sans ambiguïté.
 - Deux curseurs donnent un Δt et des mesures d’intervalle reproductibles, sans
   modifier le résultat ni le schéma.
+- Un nouvel utilisateur trouve le guide, charge l’exemple et lance une
+  simulation sans documentation externe.
+- Le contraste élevé, la taille de l’interface et la réduction des animations
+  s’appliquent immédiatement et restent utilisables au clavier.
 
-## 13. Périmètre de cette version
+## 14. Périmètre de cette version
 
 La sélection rectangle, le presse-papiers, la duplication, la rotation et le
 miroir de groupe, l’édition directe E12/E24/E96, l’inspecteur avec valeurs
 simulées, les menus contextuels, l’historique nommé, les dispositions fiables,
 la mini-carte, le calcul rapide, le rafraîchissement automatique, les curseurs de
-portée et le marqueur Bode sont livrés. Le dockage libre, les thèmes et
-l’onboarding restent dans le lot G7. Voir [UI.md](UI.md),
+portée, le marqueur Bode, le guide de démarrage et les préférences
+d’accessibilité sont livrés. Le dockage libre reste hors périmètre et la
+persistance des préférences appartient à la finalisation. Voir [UI.md](UI.md),
 [INSTRUMENTS.md](INSTRUMENTS.md) et [EDITOR.md](EDITOR.md).

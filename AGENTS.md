@@ -138,7 +138,7 @@ Le MOSFET reste un exemple d'extension (`examples/custom_mosfet.rs`) ; les types
 | G4 navigation et disposition | terminé |
 | G5 simulation interactive | terminé |
 | G6 ergonomie du scope | terminé |
-| G7 onboarding et accessibilité | à faire |
+| G7 onboarding et accessibilité | terminé |
 | G8 finalisation `v0.2.0` | à faire |
 
 ## Limites finales
