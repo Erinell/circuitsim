@@ -9,7 +9,7 @@ use crate::ui::canvas::CanvasState;
 use crate::ui::glyph::{paint_symbol, GlyphColors};
 use crate::ui::{Tool, ACCENT, HOVER, LABEL, MUTED, PIN, SYMBOL};
 
-pub(crate) const BUILTINS: [(SymbolKind, &str, &str); 11] = [
+pub(crate) const BUILTINS: [(SymbolKind, &str, &str); 14] = [
     (SymbolKind::Resistor, "Résistance", "R"),
     (SymbolKind::Capacitor, "Condensateur", "C"),
     (SymbolKind::Inductor, "Bobine", "L"),
@@ -21,6 +21,9 @@ pub(crate) const BUILTINS: [(SymbolKind, &str, &str); 11] = [
     (SymbolKind::Led, "LED", "LED"),
     (SymbolKind::Zener, "Diode Zener", "DZ"),
     (SymbolKind::OpAmp, "Ampli. opérationnel", "U"),
+    (SymbolKind::Voltmeter, "Voltmètre", "VM"),
+    (SymbolKind::Ammeter, "Ampèremètre", "AM"),
+    (SymbolKind::Ohmmeter, "Ohmmètre", "OH"),
 ];
 
 /// Favorites and recently used components.
@@ -120,10 +123,16 @@ pub fn show(
                     SymbolKind::Zener,
                     SymbolKind::OpAmp,
                 ];
+                let probes = [
+                    SymbolKind::Voltmeter,
+                    SymbolKind::Ammeter,
+                    SymbolKind::Ohmmeter,
+                ];
                 for (title, kinds) in [
                     ("Passifs", passive.as_slice()),
                     ("Sources et connexions", sources.as_slice()),
                     ("Semi-conducteurs", semi.as_slice()),
+                    ("Mesures", probes.as_slice()),
                 ] {
                     egui::CollapsingHeader::new(title)
                         .default_open(true)
@@ -339,8 +348,8 @@ mod tests {
 
     #[test]
     fn builtin_palette_is_complete_and_deterministic() {
-        assert_eq!(BUILTINS.len(), 11);
+        assert_eq!(BUILTINS.len(), 14);
         assert_eq!(BUILTINS[0].2, "R");
-        assert_eq!(BUILTINS[10].2, "U");
+        assert_eq!(BUILTINS[13].2, "OH");
     }
 }

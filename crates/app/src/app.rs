@@ -1,8 +1,13 @@
 //! Application shell, toolbar, shortcuts, and panel layout.
 
 use editor_core::{GridPos, ObjectRef};
-use eframe::egui::{self, Align, Color32, Context, FontId, Key, Layout, RichText, Ui};
+use eframe::egui::{
+    self, Align, Align2, Color32, Context, FontId, Key, Layout, RichText, Ui, Vec2,
+};
+use std::collections::BTreeSet;
 use std::time::Duration;
+
+use crate::analysis::probe_readings;
 
 use crate::document::{Alignment, DistributionAxis, Document};
 use crate::ui::canvas::CanvasState;
@@ -462,13 +467,13 @@ impl CircuitApp {
                 if ui.checkbox(&mut minimap, "Mini-carte").changed() {
                     self.canvas.set_minimap_visible(minimap);
                 }
-                let mut voltages = self.canvas.net_voltages_visible();
+                let mut flow = self.canvas.current_flow_visible();
                 if ui
-                    .checkbox(&mut voltages, "Tensions des nets")
-                    .on_hover_text("Affiche les tensions du dernier transitoire sur le canevas")
+                    .checkbox(&mut flow, "Courant animé")
+                    .on_hover_text("Anime le flux de courant après une simulation")
                     .changed()
                 {
-                    self.canvas.set_net_voltages_visible(voltages);
+                    self.canvas.set_current_flow_visible(flow);
                 }
                 ui.separator();
                 ui.label(RichText::new("Disposition").small().color(ui::MUTED));
@@ -620,6 +625,21 @@ impl CircuitApp {
             && !self.show_preferences
             && !self.palette.is_open();
         let live = self.instruments.live_values();
+        let readings = probe_readings(&self.document, &live);
+        let visible = self
+            .document
+            .schematic()
+            .symbols()
+            .filter(|symbol| {
+                symbol.kind.is_measurement() && self.instruments.probe_visible(symbol.id)
+            })
+            .map(|symbol| symbol.id)
+            .collect::<BTreeSet<_>>();
+        let flow_time = if self.instruments.realtime_paused() {
+            self.instruments.transient_time().unwrap_or(0.0)
+        } else {
+            ui.input(|input| input.time)
+        };
         ui::canvas::CanvasState::show(
             &mut self.canvas,
             ui,
@@ -628,6 +648,9 @@ impl CircuitApp {
             &mut self.status,
             interactive,
             &live,
+            &readings,
+            &visible,
+            flow_time,
         );
     }
 
@@ -1007,6 +1030,7 @@ impl CircuitApp {
         let mut close = false;
         egui::Window::new("Démarrage rapide")
             .open(&mut open)
+            .anchor(Align2::CENTER_CENTER, Vec2::ZERO)
             .collapsible(false)
             .resizable(false)
             .default_width(480.0)
@@ -1119,6 +1143,7 @@ impl CircuitApp {
         let mut changed = false;
         egui::Window::new("Préférences d’affichage")
             .open(&mut open)
+            .anchor(Align2::CENTER_CENTER, Vec2::ZERO)
             .collapsible(false)
             .resizable(false)
             .default_width(360.0)
@@ -1199,6 +1224,7 @@ impl CircuitApp {
         let mut open = self.show_help;
         egui::Window::new("Aide de CircuitSim")
             .open(&mut open)
+            .anchor(Align2::CENTER_CENTER, Vec2::ZERO)
             .collapsible(false)
             .resizable(false)
             .default_width(500.0)
@@ -1266,8 +1292,9 @@ impl CircuitApp {
                      à une valeur initiale avant d'appliquer sa valeur finale.",
                 );
                 ui.label(
-                    "Simuler (Ctrl+Entrée ou F5) relance le transitoire ; Auto recalcule après \
-                     une modification et superpose les tensions des nets sur le canevas.",
+                    "Simuler (Ctrl+Entrée ou F5) démarre le temps réel ; la vitesse et la pause \
+                     sont dans le panneau. Les fils affichent un flux animé et les sondes V/A/Ω \
+                     se placent depuis la palette.",
                 );
                 ui.label(
                     "Dans la portée, deux clics placent les curseurs A et B ; les écarts et \
@@ -1317,8 +1344,12 @@ impl eframe::App for CircuitApp {
         self.handle_shortcuts(ui.ctx());
         let now = ui.input(|input| input.time);
         self.tick_auto_simulation(now);
+        self.instruments.tick_realtime(now, &mut self.status);
         if self.instruments.auto_refresh() && (self.auto.pending() || self.instruments.is_busy()) {
             ui.ctx().request_repaint_after(Duration::from_millis(40));
+        }
+        if self.instruments.realtime_active() && !self.instruments.realtime_paused() {
+            ui.ctx().request_repaint_after(Duration::from_millis(16));
         }
 
         egui::Panel::top("top_bar")

@@ -23,6 +23,9 @@ pub enum SymbolKind {
     Led,
     Zener,
     OpAmp,
+    Voltmeter,
+    Ammeter,
+    Ohmmeter,
     Custom(String),
 }
 
@@ -41,6 +44,9 @@ impl SymbolKind {
             Self::Led => "led",
             Self::Zener => "zener",
             Self::OpAmp => "opamp",
+            Self::Voltmeter => "voltmeter",
+            Self::Ammeter => "ammeter",
+            Self::Ohmmeter => "ohmmeter",
             Self::Custom(key) => key,
         }
     }
@@ -59,6 +65,9 @@ impl SymbolKind {
             "led" => Some(Self::Led),
             "zener" => Some(Self::Zener),
             "opamp" => Some(Self::OpAmp),
+            "voltmeter" => Some(Self::Voltmeter),
+            "ammeter" => Some(Self::Ammeter),
+            "ohmmeter" => Some(Self::Ohmmeter),
             _ => None,
         }
     }
@@ -66,6 +75,11 @@ impl SymbolKind {
     /// Returns true for the ground symbol.
     pub const fn is_ground(&self) -> bool {
         matches!(self, Self::Ground)
+    }
+
+    /// Returns true for a measurement probe excluded from the netlist.
+    pub const fn is_measurement(&self) -> bool {
+        matches!(self, Self::Voltmeter | Self::Ammeter | Self::Ohmmeter)
     }
 }
 
@@ -367,6 +381,27 @@ fn builtin_defs() -> Vec<SymbolDef> {
         )
         .expect("op-amp definition is valid"),
     ]
+    .into_iter()
+    .chain(probe_defs())
+    .collect()
+}
+
+fn probe_defs() -> Vec<SymbolDef> {
+    [
+        SymbolKind::Voltmeter,
+        SymbolKind::Ammeter,
+        SymbolKind::Ohmmeter,
+    ]
+    .into_iter()
+    .map(|kind| {
+        SymbolDef::new(
+            kind,
+            vec![PinDef::new("probe", GridPos::new(0, 0))],
+            ParamMap::new(),
+        )
+        .expect("probe definition is valid")
+    })
+    .collect()
 }
 
 fn two_terminal(kind: SymbolKind, defaults: &[(&str, f64)]) -> SymbolDef {
@@ -409,7 +444,7 @@ mod tests {
     #[test]
     fn builtin_registry_contains_expected_symbols() {
         let registry = SymbolRegistry::builtin();
-        assert_eq!(registry.len(), 11);
+        assert_eq!(registry.len(), 14);
         assert_eq!(
             registry
                 .get(&SymbolKind::Resistor)

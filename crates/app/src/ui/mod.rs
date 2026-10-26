@@ -151,6 +151,9 @@ pub fn symbol_kind_name(kind: &SymbolKind) -> &'static str {
         SymbolKind::Led => "LED",
         SymbolKind::Zener => "Zener",
         SymbolKind::OpAmp => "Amplificateur opérationnel",
+        SymbolKind::Voltmeter => "Voltmètre",
+        SymbolKind::Ammeter => "Ampèremètre",
+        SymbolKind::Ohmmeter => "Ohmmètre",
         SymbolKind::Custom(_) => "Composant personnalisé",
     }
 }
