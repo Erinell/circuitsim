@@ -1614,9 +1614,16 @@ impl CanvasState {
         painter.text(
             rect.center() + Vec2::new(0.0, 18.0),
             Align2::CENTER_CENTER,
-            "ou utilisez l'outil Fil pour dessiner une connexion.",
+            "Câblez avec W, puis simulez avec Ctrl+Entrée.",
             FontId::proportional(13.0),
             MUTED.gamma_multiply(0.8),
+        );
+        painter.text(
+            rect.center() + Vec2::new(0.0, 40.0),
+            Align2::CENTER_CENTER,
+            "Le bouton Démarrage propose un guide en quatre étapes.",
+            FontId::proportional(12.0),
+            MUTED.gamma_multiply(0.65),
         );
     }
 

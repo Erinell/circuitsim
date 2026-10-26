@@ -141,6 +141,19 @@ impl InstrumentsState {
         }
     }
 
+    /// Clears analyses and cursors without recreating the worker client.
+    pub fn clear_results(&mut self) {
+        self.transient_run = None;
+        self.ac_run = None;
+        self.pending = None;
+        self.error = None;
+        self.selection_initialized = false;
+        self.scope_cursor_a = None;
+        self.scope_cursor_b = None;
+        self.scope_active_cursor = CursorSlot::A;
+        self.bode_cursor = None;
+    }
+
     /// Returns the last transient sample mapped to names for the inspector.
     pub fn live_values(&self) -> crate::analysis::LiveValues {
         let Some(run) = &self.transient_run else {
