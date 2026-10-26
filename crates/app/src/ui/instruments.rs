@@ -3,16 +3,16 @@
 use std::collections::BTreeSet;
 use std::time::Duration;
 
-use eframe::egui::{self, Align, Color32, Layout, RichText, Ui, Vec2};
+use eframe::egui::{self, Align, Align2, Color32, FontId, Layout, RichText, Ui, Vec2};
 use egui_plot::{Corner, HoverPosition, Legend, Line, Plot};
 use sim_core::units::{format_si_precision, Unit};
 use worker::protocol::{AnalysisKind, AnalysisResult};
 
 use crate::analysis::{
     analysis_name, bode_csv, bode_trace, compute_spectrum, measurements, prepare_ac,
-    prepare_transient, spectrum_csv, transient_csv, transient_traces, AcSettings, BodeTrace,
-    CompletedRun, SignalCatalog, SignalId, SignalUnit, SimulationClient, SimulationError, Spectrum,
-    Trace, TransientSettings, MAX_AC_POINTS,
+    prepare_transient, spectrum_csv, transient_csv, transient_traces, AcSettings, BodePoint,
+    BodeTrace, CompletedRun, SignalCatalog, SignalId, SignalUnit, SimulationClient,
+    SimulationError, Spectrum, Trace, TransientSettings, MAX_AC_POINTS,
 };
 use crate::document::Document;
 use crate::export;
@@ -76,7 +76,40 @@ pub struct InstrumentsState {
     error: Option<String>,
     selection_initialized: bool,
     auto_refresh: bool,
+    scope_cursor_a: Option<f64>,
+    scope_cursor_b: Option<f64>,
+    scope_active_cursor: CursorSlot,
+    bode_cursor: Option<f64>,
     export_path: String,
+}
+
+/// Active scope cursor selected by the controls.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+enum CursorSlot {
+    #[default]
+    A,
+    B,
+}
+
+impl CursorSlot {
+    const fn label(self) -> &'static str {
+        match self {
+            Self::A => "A",
+            Self::B => "B",
+        }
+    }
+}
+
+/// Values read at the two time cursors for one trace.
+#[derive(Clone, Debug, PartialEq)]
+struct CursorMeasurement {
+    signal: SignalId,
+    value_a: Option<f64>,
+    value_b: Option<f64>,
+    delta: Option<f64>,
+    interval_min: Option<f64>,
+    interval_max: Option<f64>,
+    interval_rms: Option<f64>,
 }
 
 impl InstrumentsState {
@@ -100,6 +133,10 @@ impl InstrumentsState {
             error: None,
             selection_initialized: false,
             auto_refresh: false,
+            scope_cursor_a: None,
+            scope_cursor_b: None,
+            scope_active_cursor: CursorSlot::A,
+            bode_cursor: None,
             export_path: default_export_path(),
         }
     }
@@ -305,6 +342,13 @@ impl InstrumentsState {
         now: f64,
         status: &mut Status,
     ) {
+        let traces = self.current_traces();
+        if let Ok(Some(available)) = &traces {
+            if !available.is_empty() {
+                self.scope_cursor_controls(ui, available);
+                ui.separator();
+            }
+        }
         let can_run = self.can_run(document);
         if transient_controls(ui, &mut self.transient, catalog, can_run) {
             self.run_transient(document, now, status);
@@ -313,8 +357,10 @@ impl InstrumentsState {
         signal_controls(ui, &mut self.selected, catalog);
         ui.separator();
         ui.heading("Mesures");
-        match self.current_traces() {
-            Ok(Some(traces)) if !traces.is_empty() => measurement_table(ui, &traces),
+        match traces {
+            Ok(Some(traces)) if !traces.is_empty() => {
+                measurement_table(ui, &traces);
+            }
             Ok(_) => {
                 ui.label(
                     RichText::new("Lancez le transitoire pour mesurer les signaux.").color(MUTED),
@@ -322,6 +368,81 @@ impl InstrumentsState {
             }
             Err(error) => {
                 ui.colored_label(ERROR, error.user_message());
+            }
+        }
+    }
+
+    fn scope_cursor_controls(&mut self, ui: &mut Ui, traces: &[Trace]) {
+        ui.heading("Curseurs");
+        ui.horizontal(|ui| {
+            for slot in [CursorSlot::A, CursorSlot::B] {
+                ui.selectable_value(&mut self.scope_active_cursor, slot, slot.label());
+            }
+            if ui
+                .small_button("Effacer")
+                .on_hover_text("Retire les deux curseurs")
+                .clicked()
+            {
+                self.scope_cursor_a = None;
+                self.scope_cursor_b = None;
+            }
+        });
+        ui.label(
+            RichText::new("Clic : premier A, deuxième B, puis curseur actif · droit/Maj : B")
+                .small()
+                .color(MUTED),
+        );
+        for (slot, value) in [
+            (CursorSlot::A, self.scope_cursor_a),
+            (CursorSlot::B, self.scope_cursor_b),
+        ] {
+            if let Some(time) = value {
+                ui.label(format!(
+                    "{} : t = {}",
+                    slot.label(),
+                    format_si_precision(time, Unit::Second, 4)
+                ));
+            }
+        }
+        if let (Some(a), Some(b)) = (self.scope_cursor_a, self.scope_cursor_b) {
+            let delta = (b - a).abs();
+            let frequency = if delta > 0.0 { 1.0 / delta } else { 0.0 };
+            ui.label(format!(
+                "Δt = {} · 1/Δt = {}",
+                format_si_precision(delta, Unit::Second, 4),
+                format_si_precision(frequency, Unit::Hertz, 4)
+            ));
+        }
+        for measurement in cursor_measurements(traces, self.scope_cursor_a, self.scope_cursor_b) {
+            let unit = measurement.signal.unit().unit();
+            let value = |value: Option<f64>| {
+                value.map_or_else(
+                    || "—".to_owned(),
+                    |value| format_si_precision(value, unit, 4),
+                )
+            };
+            ui.label(RichText::new(measurement.signal.label()).strong());
+            ui.label(
+                RichText::new(format!(
+                    "A {} · B {} · Δ {}",
+                    value(measurement.value_a),
+                    value(measurement.value_b),
+                    value(measurement.delta)
+                ))
+                .small()
+                .color(MUTED),
+            );
+            if measurement.interval_min.is_some() {
+                ui.label(
+                    RichText::new(format!(
+                        "intervalle min {} · max {} · RMS {}",
+                        value(measurement.interval_min),
+                        value(measurement.interval_max),
+                        value(measurement.interval_rms)
+                    ))
+                    .small()
+                    .color(MUTED),
+                );
             }
         }
     }
@@ -393,6 +514,25 @@ impl InstrumentsState {
                         .small()
                         .color(MUTED),
                 );
+                if let Some(frequency) = self.bode_cursor {
+                    if let Some(point) = nearest_bode_point(&trace.points, frequency) {
+                        ui.label(format!(
+                            "Curseur : {} · gain {:.2} dB · phase {:.1}°",
+                            format_frequency(point.frequency),
+                            point.gain_db,
+                            point.phase_degrees
+                        ));
+                        if ui.small_button("Effacer le curseur").clicked() {
+                            self.bode_cursor = None;
+                        }
+                    }
+                } else {
+                    ui.label(
+                        RichText::new("Clic sur le graphe : marqueur de fréquence.")
+                            .small()
+                            .color(MUTED),
+                    );
+                }
             }
             Ok(None) => {
                 ui.label(RichText::new("Lancez l'analyse AC pour tracer le Bode.").color(MUTED));
@@ -403,7 +543,7 @@ impl InstrumentsState {
         }
     }
 
-    fn plots(&self, ui: &mut Ui) {
+    fn plots(&mut self, ui: &mut Ui) {
         match self.tab {
             InstrumentTab::Scope => self.scope_plot(ui),
             InstrumentTab::Spectrum => self.spectrum_plot(ui),
@@ -411,7 +551,7 @@ impl InstrumentsState {
         }
     }
 
-    fn scope_plot(&self, ui: &mut Ui) {
+    fn scope_plot(&mut self, ui: &mut Ui) {
         let traces = match self.current_traces() {
             Ok(Some(traces)) => traces,
             Ok(None) => {
@@ -430,13 +570,25 @@ impl InstrumentsState {
         let unit = common_unit(&traces);
         let revision = self.transient_run.as_ref().map_or(0, |run| run.revision);
         let height = ui.available_height().max(100.0);
+        let sample_times = traces
+            .first()
+            .map(|trace| {
+                trace
+                    .points
+                    .iter()
+                    .map(|point| point[0])
+                    .collect::<Vec<_>>()
+            })
+            .unwrap_or_default();
+        let mut clicked_time = None;
+        let mut second_cursor = false;
         let y_formatter = move |mark: egui_plot::GridMark, _: &std::ops::RangeInclusive<f64>| {
             format_axis(mark.value, unit)
         };
         let x_formatter = |mark: egui_plot::GridMark, _: &std::ops::RangeInclusive<f64>| {
             format_si_precision(mark.value, Unit::Second, 3)
         };
-        Plot::new(format!("scope_plot_{revision}"))
+        let response = Plot::new(format!("scope_plot_{revision}"))
             .height(height)
             .x_axis_label("Temps")
             .y_axis_label(match unit {
@@ -467,7 +619,77 @@ impl InstrumentsState {
                             .width(1.8),
                     );
                 }
+                if plot_ui.response().clicked() || plot_ui.response().secondary_clicked() {
+                    if let Some(point) = plot_ui.pointer_coordinate() {
+                        clicked_time = nearest_sample_time(&sample_times, point.x);
+                        second_cursor = plot_ui.response().secondary_clicked()
+                            || plot_ui.ctx().input(|input| input.modifiers.shift);
+                    }
+                }
             });
+        if let Some(time) = clicked_time {
+            if second_cursor {
+                self.scope_cursor_b = Some(time);
+                self.scope_active_cursor = CursorSlot::B;
+            } else if self.scope_cursor_a.is_none() {
+                self.scope_cursor_a = Some(time);
+                self.scope_active_cursor = CursorSlot::A;
+            } else if self.scope_cursor_b.is_none() {
+                self.scope_cursor_b = Some(time);
+                self.scope_active_cursor = CursorSlot::B;
+            } else {
+                match self.scope_active_cursor {
+                    CursorSlot::A => self.scope_cursor_a = Some(time),
+                    CursorSlot::B => self.scope_cursor_b = Some(time),
+                }
+            }
+        }
+        self.paint_scope_cursors(ui, &response);
+    }
+
+    fn paint_scope_cursors(&self, ui: &Ui, response: &egui_plot::PlotResponse<()>) {
+        let frame = *response.transform.frame();
+        if !frame.is_positive() {
+            return;
+        }
+        let painter = ui.painter().with_clip_rect(frame);
+        let cursor_a = self.scope_cursor_a.map(|time| {
+            (
+                CursorSlot::A.label(),
+                response.transform.position_from_point_x(time),
+                HOVER,
+            )
+        });
+        let cursor_b = self.scope_cursor_b.map(|time| {
+            (
+                CursorSlot::B.label(),
+                response.transform.position_from_point_x(time),
+                ACCENT,
+            )
+        });
+        if let (Some((_, xa, _)), Some((_, xb, _))) = (cursor_a, cursor_b) {
+            painter.rect_filled(
+                egui::Rect::from_x_y_ranges(xa.min(xb)..=xa.max(xb), frame.y_range()),
+                0.0,
+                HOVER.gamma_multiply(0.07),
+            );
+        }
+        for (label, x, color) in [cursor_a, cursor_b].into_iter().flatten() {
+            if x < frame.left() || x > frame.right() {
+                continue;
+            }
+            painter.line_segment(
+                [egui::pos2(x, frame.top()), egui::pos2(x, frame.bottom())],
+                egui::Stroke::new(1.3, color),
+            );
+            painter.text(
+                egui::pos2((x + 4.0).min(frame.right() - 10.0), frame.top() + 4.0),
+                Align2::LEFT_TOP,
+                label,
+                FontId::monospace(11.0),
+                color,
+            );
+        }
     }
 
     fn spectrum_plot(&self, ui: &mut Ui) {
@@ -526,7 +748,7 @@ impl InstrumentsState {
             });
     }
 
-    fn bode_plot(&self, ui: &mut Ui) {
+    fn bode_plot(&mut self, ui: &mut Ui) {
         let trace = match self.bode_data() {
             Ok(Some(trace)) => trace,
             Ok(None) => {
@@ -561,7 +783,8 @@ impl InstrumentsState {
         let phase_formatter = |mark: egui_plot::GridMark, _: &std::ops::RangeInclusive<f64>| {
             format!("{:.0}°", mark.value)
         };
-        Plot::new(format!("bode_gain_{revision}"))
+        let mut clicked_frequency = None;
+        let gain_response = Plot::new(format!("bode_gain_{revision}"))
             .height(gain_height)
             .link_axis(egui::Id::new("bode_frequency_axis"), [true, false])
             .x_axis_label("Fréquence")
@@ -583,9 +806,15 @@ impl InstrumentsState {
                         .color(SYMBOL)
                         .width(1.8),
                 );
+                if plot_ui.response().clicked() {
+                    if let Some(point) = plot_ui.pointer_coordinate() {
+                        clicked_frequency = Some(10f64.powf(point.x));
+                    }
+                }
             });
+        self.apply_bode_click(clicked_frequency.take(), &trace);
         ui.add_space(4.0);
-        Plot::new(format!("bode_phase_{revision}"))
+        let phase_response = Plot::new(format!("bode_phase_{revision}"))
             .height(phase_height)
             .link_axis(egui::Id::new("bode_frequency_axis"), [true, false])
             .x_axis_label("Fréquence")
@@ -609,7 +838,28 @@ impl InstrumentsState {
                         .color(ACCENT)
                         .width(1.6),
                 );
+                if plot_ui.response().clicked() {
+                    if let Some(point) = plot_ui.pointer_coordinate() {
+                        clicked_frequency = Some(10f64.powf(point.x));
+                    }
+                }
             });
+        self.apply_bode_click(clicked_frequency, &trace);
+        if let Some(point) = self
+            .bode_cursor
+            .and_then(|frequency| nearest_bode_point(&trace.points, frequency))
+        {
+            let x = point.frequency.log10();
+            paint_vertical_marker(ui, &gain_response, x, "f", HOVER);
+            paint_vertical_marker(ui, &phase_response, x, "f", HOVER);
+        }
+    }
+
+    fn apply_bode_click(&mut self, frequency: Option<f64>, trace: &BodeTrace) {
+        if let Some(frequency) = frequency {
+            self.bode_cursor =
+                nearest_bode_point(&trace.points, frequency).map(|point| point.frequency);
+        }
     }
 
     fn export_controls(&mut self, ui: &mut Ui, status: &mut Status) {
@@ -1198,6 +1448,143 @@ fn bode_output_control(ui: &mut Ui, output: &mut Option<String>, catalog: &Signa
         });
 }
 
+fn nearest_sample_time(times: &[f64], target: f64) -> Option<f64> {
+    let index = times.partition_point(|time| *time < target);
+    let left = index.checked_sub(1).and_then(|index| times.get(index));
+    let right = times.get(index);
+    match (left, right) {
+        (Some(left), Some(right)) => {
+            if (target - *left).abs() <= (*right - target).abs() {
+                Some(*left)
+            } else {
+                Some(*right)
+            }
+        }
+        (Some(left), None) => Some(*left),
+        (None, Some(right)) => Some(*right),
+        (None, None) => None,
+    }
+}
+
+fn value_at(points: &[[f64; 2]], time: f64) -> Option<f64> {
+    let index = points.partition_point(|point| point[0] < time);
+    let left = index.checked_sub(1).and_then(|index| points.get(index));
+    let right = points.get(index);
+    match (left, right) {
+        (Some(left), Some(right)) => {
+            if (time - left[0]).abs() <= (right[0] - time).abs() {
+                Some(left[1])
+            } else {
+                Some(right[1])
+            }
+        }
+        (Some(left), None) => Some(left[1]),
+        (None, Some(right)) => Some(right[1]),
+        (None, None) => None,
+    }
+}
+
+fn cursor_measurements(
+    traces: &[Trace],
+    cursor_a: Option<f64>,
+    cursor_b: Option<f64>,
+) -> Vec<CursorMeasurement> {
+    traces
+        .iter()
+        .map(|trace| {
+            let value_a = cursor_a.and_then(|time| value_at(&trace.points, time));
+            let value_b = cursor_b.and_then(|time| value_at(&trace.points, time));
+            let delta = value_a.zip(value_b).map(|(a, b)| b - a);
+            let interval = match (cursor_a, cursor_b) {
+                (Some(a), Some(b)) if a <= b => {
+                    let window = trace
+                        .points
+                        .iter()
+                        .filter(|point| point[0] >= a && point[0] <= b)
+                        .collect::<Vec<_>>();
+                    if window.is_empty() {
+                        None
+                    } else {
+                        let mut minimum = window[0][1];
+                        let mut maximum = window[0][1];
+                        let mut square_sum = 0.0;
+                        for point in &window {
+                            minimum = minimum.min(point[1]);
+                            maximum = maximum.max(point[1]);
+                            square_sum += point[1] * point[1];
+                        }
+                        let count = window.len() as f64;
+                        Some((minimum, maximum, (square_sum / count).sqrt()))
+                    }
+                }
+                _ => None,
+            };
+            CursorMeasurement {
+                signal: trace.signal.clone(),
+                value_a,
+                value_b,
+                delta,
+                interval_min: interval.map(|(minimum, _, _)| minimum),
+                interval_max: interval.map(|(_, maximum, _)| maximum),
+                interval_rms: interval.map(|(_, _, rms)| rms),
+            }
+        })
+        .collect()
+}
+
+fn nearest_bode_point(points: &[BodePoint], frequency: f64) -> Option<&BodePoint> {
+    let index = points.partition_point(|point| point.frequency < frequency);
+    let left = index.checked_sub(1).and_then(|index| points.get(index));
+    let right = points.get(index);
+    match (left, right) {
+        (Some(left), Some(right)) => {
+            if (frequency - left.frequency).abs() <= (right.frequency - frequency).abs() {
+                Some(left)
+            } else {
+                Some(right)
+            }
+        }
+        (Some(left), None) => Some(left),
+        (None, Some(right)) => Some(right),
+        (None, None) => None,
+    }
+}
+
+fn paint_vertical_marker(
+    ui: &Ui,
+    response: &egui_plot::PlotResponse<()>,
+    x: f64,
+    label: &str,
+    color: Color32,
+) {
+    let frame = *response.transform.frame();
+    if !frame.is_positive() {
+        return;
+    }
+    let screen_x = response.transform.position_from_point_x(x);
+    if screen_x < frame.left() || screen_x > frame.right() {
+        return;
+    }
+    let painter = ui.painter().with_clip_rect(frame);
+    painter.line_segment(
+        [
+            egui::pos2(screen_x, frame.top()),
+            egui::pos2(screen_x, frame.bottom()),
+        ],
+        egui::Stroke::new(1.3, color),
+    );
+    painter.text(
+        egui::pos2(
+            (screen_x + 4.0).min(frame.right() - 10.0),
+            frame.top() + 4.0,
+        ),
+        Align2::LEFT_TOP,
+        label,
+        FontId::monospace(11.0),
+        color,
+    );
+}
+
 fn measurement_table(ui: &mut Ui, traces: &[Trace]) {
     for measurement in measurements(traces) {
         let unit = measurement.signal.unit().unit();
@@ -1371,6 +1758,53 @@ mod tests {
         assert!(state.selected.is_empty());
         state.ensure_catalog(&SignalCatalog::default());
         assert!(!state.selection_initialized);
+    }
+
+    #[test]
+    fn scope_cursors_snap_and_measure_an_interval() {
+        let trace = Trace {
+            signal: SignalId::Voltage("OUT".to_owned()),
+            points: vec![[0.0, 1.0], [1.0, 3.0], [2.0, 5.0]],
+        };
+        assert_eq!(nearest_sample_time(&[0.0, 1.0, 2.0], 0.6), Some(1.0));
+        assert_eq!(nearest_sample_time(&[0.0, 1.0, 2.0], 9.0), Some(2.0));
+        let measurements = cursor_measurements(&[trace], Some(0.0), Some(2.0));
+        assert_eq!(measurements.len(), 1);
+        let measurement = &measurements[0];
+        assert_eq!(measurement.value_a, Some(1.0));
+        assert_eq!(measurement.value_b, Some(5.0));
+        assert_eq!(measurement.delta, Some(4.0));
+        assert_eq!(measurement.interval_min, Some(1.0));
+        assert_eq!(measurement.interval_max, Some(5.0));
+        let expected_rms = (35.0_f64 / 3.0).sqrt();
+        assert!((measurement.interval_rms.unwrap() - expected_rms).abs() < 1e-12);
+        assert_eq!(value_at(&[[0.0, 1.0], [2.0, 5.0]], 0.9), Some(1.0));
+    }
+
+    #[test]
+    fn bode_marker_snaps_to_the_nearest_frequency() {
+        let points = vec![
+            BodePoint {
+                frequency: 10.0,
+                magnitude: 1.0,
+                gain_db: 0.0,
+                phase_degrees: 0.0,
+            },
+            BodePoint {
+                frequency: 100.0,
+                magnitude: 0.5,
+                gain_db: -6.0,
+                phase_degrees: -45.0,
+            },
+        ];
+        assert_eq!(
+            nearest_bode_point(&points, 74.0).map(|point| point.frequency),
+            Some(100.0)
+        );
+        assert_eq!(
+            nearest_bode_point(&points, 12.0).map(|point| point.frequency),
+            Some(10.0)
+        );
     }
 
     #[test]
