@@ -71,7 +71,23 @@ le premier coude. Une extrémité identique ou un fil existant est refusé sans
 consommer d'identifiant. Jonction refuse les doublons ; Label propose les nets
 existants.
 
-## 3. Propriétés et ERC
+## 3. Démarrage et accessibilité
+
+Le bouton **Démarrage** ouvre un guide en quatre étapes (placer, câbler, simuler,
+explorer). Il peut charger l’exemple RC, vider le schéma ou ouvrir l’aide. Le
+guide est affiché au lancement et reste accessible ensuite ; l’état vide du
+canevas renvoie aussi vers ce guide.
+
+Le bouton **Accessibilité** ou `Ctrl+Maj+A` ouvre les préférences d’affichage :
+
+- thème **Sombre** ou **Contraste élevé** ;
+- taille de l’interface 85, 100, 115 ou 130 % ;
+- réduction des animations ;
+- rappel de la navigation clavier `Tab`/`Maj+Tab`.
+
+Ces réglages sont appliqués à la session ; ils ne sont pas encore persistés.
+
+## 4. Propriétés et ERC
 
 L'inspecteur se synchronise sur `(révision, sélection)` et travaille sur un
 brouillon jusqu'à **Appliquer** ou `Entrée`.
@@ -99,7 +115,7 @@ affiche les compteurs et les diagnostics triés ; un clic sélectionne l'objet
 correspondant s'il existe. L'ERC est un rapport : seule une erreur structurelle
 d'extraction bloque les nets et les analyses.
 
-## 4. Instruments
+## 5. Instruments
 
 Les contrôles acceptent `5m`, `10u`, etc. Le bouton de lancement est désactivé
 sans extraction valide, pendant une analyse ou si le worker est indisponible.
@@ -127,7 +143,7 @@ et ne remplace pas le dernier résultat valide. Pendant l'attente, les boutons s
 désactivés et le panneau se rafraîchit toutes les 20 ms. Les détails de calcul et
 les formats de fichiers sont dans [INSTRUMENTS.md](INSTRUMENTS.md).
 
-## 5. Raccourcis
+## 6. Raccourcis
 
 | Touche | Action |
 | --- | --- |
@@ -144,7 +160,8 @@ les formats de fichiers sont dans [INSTRUMENTS.md](INSTRUMENTS.md).
 | `Suppr`, `Retour arrière` | supprimer |
 | `Ctrl+Z`, `Ctrl+Y` / `Ctrl+Maj+Z` | annuler, rétablir |
 | `Ctrl+A` | tout sélectionner |
-| `?` | aide et raccourcis |
+| `?`, `F1` | aide et raccourcis |
+| `Ctrl+Maj+A` | préférences d’affichage et accessibilité |
 | `Home` | ajuster la vue au schéma |
 | `Ctrl+Home` | cadrer la sélection |
 | `+`, `-`, `0` | zoom avant, arrière, 100 % |
@@ -157,7 +174,7 @@ Les raccourcis sont ignorés si un champ texte a le focus, à l’exception de
 `Ctrl+K` pour la palette de commandes. Aucun raccourci global ne lance une
 simulation.
 
-## 6. Atomicité, limites et tests
+## 7. Atomicité, limites et tests
 
 Toute création alloue l'identifiant sur un clone et n'exécute la commande
 qu'après validation. Une action refusée ne change ni contenu, ni révision, ni
@@ -170,8 +187,9 @@ opamp sans alimentation/pôle, pas de thème clair ni de mobile spécifique, fil
 non extensibles par extrémité. Les panneaux sont masquables et redimensionnables,
 mais il n'y a pas de dockage libre ni de disposition persistée. Les valeurs
 simulées de l’inspecteur et du canevas proviennent du dernier transitoire ; il
-n’y a pas encore de pause ni de reprise. Le câblage à double-clic et la
-persistance des favoris restent aux lots suivants.
+n’y a pas encore de pause ni de reprise. Les préférences d’affichage sont
+session-locales ; le câblage à double-clic et la persistance des favoris restent
+aux lots suivants.
 
 Tests : `cargo test -p circuitsim-app` couvre document, vue, navigation,
 mini-carte, édition, palette, propriétés, historique, presse-papiers, sélection

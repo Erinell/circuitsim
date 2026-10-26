@@ -72,14 +72,19 @@ documents spécialisés.
     le fil de l’interface et aucun résultat partiel n’est affiché. Le dernier
     échantillon alimente le canevas et l’inspecteur. Voir
     [INSTRUMENTS.md](INSTRUMENTS.md).
+14. **Accessibilité sans dépendance supplémentaire.** Le contraste, la taille et
+    la réduction des animations utilisent les styles egui et `set_zoom_factor`.
+    Les préférences restent session-locales pour éviter d’activer la persistance
+    d’eframe et ses dépendances ; `Tab`/`Maj+Tab` restent la navigation clavier
+    native d’egui. Voir [UI.md](UI.md).
 
 ## Tests et périmètre
 
-14. **Composants personnalisés représentés, pas simulés.** Le registre,
+15. **Composants personnalisés représentés, pas simulés.** Le registre,
     l'extraction, le JSON et la netlist acceptent `Custom`; les solveurs le
     refusent avec `MnaError::UnsupportedComponent` jusqu'à l'ajout d'un modèle
     dans `sim-core`. Voir [COMPONENTS.md](COMPONENTS.md).
-15. **Tests natifs, benchmarks et CI.** Les tests ne demandent ni navigateur ni
+16. **Tests natifs, benchmarks et CI.** Les tests ne demandent ni navigateur ni
     ngspice ; les propriétés proptest affichent leur graine. La CI vérifie
     format, clippy, tests, WASM, benchmarks rapides, exemples et builds
     natif/web. Les budgets Criterion sont des seuils de revue, non bloquants sur

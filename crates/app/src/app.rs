@@ -25,7 +25,11 @@ pub struct CircuitApp {
     palette: CommandPalette,
     status: Status,
     auto: AutoRefresh,
+    preferences: DisplayPreferences,
+    preferences_dirty: bool,
     show_help: bool,
+    show_onboarding: bool,
+    show_preferences: bool,
     show_palette: bool,
     show_inspector: bool,
     show_instruments: bool,
@@ -43,6 +47,48 @@ enum LayoutPreset {
     /// Canvas only.
     Canvas,
 }
+
+/// Visual theme available in the accessibility preferences.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+enum ThemeMode {
+    /// Default dark palette.
+    #[default]
+    Dark,
+    /// Maximum contrast for low-vision use.
+    HighContrast,
+}
+
+impl ThemeMode {
+    const ALL: [Self; 2] = [Self::Dark, Self::HighContrast];
+
+    const fn label(self) -> &'static str {
+        match self {
+            Self::Dark => "Sombre",
+            Self::HighContrast => "Contraste élevé",
+        }
+    }
+}
+
+/// Session-local display preferences.
+#[derive(Clone, Copy, Debug, PartialEq)]
+struct DisplayPreferences {
+    theme: ThemeMode,
+    scale: f32,
+    reduce_motion: bool,
+}
+
+impl Default for DisplayPreferences {
+    fn default() -> Self {
+        Self {
+            theme: ThemeMode::Dark,
+            scale: 1.0,
+            reduce_motion: false,
+        }
+    }
+}
+
+/// Supported interface scales.
+const UI_SCALES: [f32; 4] = [0.85, 1.0, 1.15, 1.3];
 
 impl LayoutPreset {
     const ALL: [Self; 4] = [Self::All, Self::Editing, Self::Simulation, Self::Canvas];
@@ -118,7 +164,8 @@ impl AutoRefresh {
 impl CircuitApp {
     /// Creates the application and configures the egui style.
     pub fn new(cc: &eframe::CreationContext<'_>) -> Self {
-        configure_style(&cc.egui_ctx);
+        let preferences = DisplayPreferences::default();
+        apply_style(&cc.egui_ctx, preferences);
         let (document, status) = match Document::demo() {
             Ok(document) => (
                 document,
@@ -143,7 +190,11 @@ impl CircuitApp {
             palette: CommandPalette::default(),
             status,
             auto: AutoRefresh::default(),
+            preferences,
+            preferences_dirty: false,
             show_help: false,
+            show_onboarding: true,
+            show_preferences: false,
             show_palette: true,
             show_inspector: true,
             show_instruments: true,
@@ -200,6 +251,27 @@ impl CircuitApp {
             self.instruments
                 .run_transient_now(&self.document, now, &mut self.status);
         }
+    }
+
+    fn load_demo(&mut self) {
+        match Document::demo() {
+            Ok(document) => {
+                self.document = document;
+                self.instruments.clear_results();
+                self.canvas.cancel_interaction();
+                self.canvas.request_fit();
+                self.status.success("Exemple RC chargé.");
+            }
+            Err(error) => self.status.error(error.user_message()),
+        }
+    }
+
+    fn apply_preferences(&mut self, context: &Context) {
+        if !self.preferences_dirty {
+            return;
+        }
+        apply_style(context, self.preferences);
+        self.preferences_dirty = false;
     }
 
     fn toolbar(&mut self, ui: &mut Ui) {
@@ -407,6 +479,15 @@ impl CircuitApp {
                     }
                 }
                 ui.separator();
+                if ui
+                    .button("Préférences d’affichage…")
+                    .on_hover_text("Contraste, taille de l’interface et animations (Ctrl+Maj+A)")
+                    .clicked()
+                {
+                    self.show_preferences = true;
+                    ui.close();
+                }
+                ui.separator();
                 ui.horizontal(|ui| {
                     if ui
                         .small_button("−")
@@ -442,6 +523,20 @@ impl CircuitApp {
                 }
             });
             ui.separator();
+            if ui
+                .button("Démarrage")
+                .on_hover_text("Guide de démarrage rapide")
+                .clicked()
+            {
+                self.show_onboarding = true;
+            }
+            if ui
+                .button("Accessibilité")
+                .on_hover_text("Contraste, taille de l’interface et animations (Ctrl+Maj+A)")
+                .clicked()
+            {
+                self.show_preferences = true;
+            }
             if ui
                 .button("Commandes")
                 .on_hover_text("Palette de commandes (Ctrl+K)")
@@ -519,7 +614,11 @@ impl CircuitApp {
     }
 
     fn canvas(&mut self, ui: &mut Ui) {
-        let interactive = !self.canvas.has_dialog() && !self.show_help && !self.palette.is_open();
+        let interactive = !self.canvas.has_dialog()
+            && !self.show_help
+            && !self.show_onboarding
+            && !self.show_preferences
+            && !self.palette.is_open();
         let live = self.instruments.live_values();
         ui::canvas::CanvasState::show(
             &mut self.canvas,
@@ -683,6 +782,9 @@ impl CircuitApp {
                 Err(error) => self.status.error(error.user_message()),
             },
             CommandAction::Instruments => self.show_instruments = !self.show_instruments,
+            CommandAction::Onboarding => self.show_onboarding = true,
+            CommandAction::LoadDemo => self.load_demo(),
+            CommandAction::Preferences => self.show_preferences = true,
             CommandAction::Help => self.show_help = true,
         }
     }
@@ -696,6 +798,13 @@ impl CircuitApp {
         if self.palette.is_open() {
             return;
         }
+        if (self.show_onboarding || self.show_preferences)
+            && context.input(|input| input.key_pressed(Key::Escape))
+        {
+            self.show_onboarding = false;
+            self.show_preferences = false;
+            return;
+        }
         if context.egui_wants_keyboard_input() {
             return;
         }
@@ -705,6 +814,7 @@ impl CircuitApp {
         if self.show_help {
             if context.input(|input| {
                 input.key_pressed(Key::Escape)
+                    || input.key_pressed(Key::F1)
                     || input.key_pressed(Key::Questionmark)
                     || (input.modifiers.shift && input.key_pressed(Key::Slash))
             }) {
@@ -732,6 +842,10 @@ impl CircuitApp {
         }
         if command && context.input(|input| input.key_pressed(Key::Y)) {
             self.redo();
+            return;
+        }
+        if command && shift && context.input(|input| input.key_pressed(Key::A)) {
+            self.show_preferences = true;
             return;
         }
         if command && context.input(|input| input.key_pressed(Key::A)) {
@@ -826,6 +940,7 @@ impl CircuitApp {
         }
         if context.input(|input| {
             input.key_pressed(Key::Questionmark)
+                || input.key_pressed(Key::F1)
                 || (input.modifiers.shift && input.key_pressed(Key::Slash))
         }) {
             self.show_help = true;
@@ -881,6 +996,202 @@ impl CircuitApp {
         }
     }
 
+    fn onboarding_window(&mut self, context: &Context) {
+        if !self.show_onboarding {
+            return;
+        }
+        let mut open = self.show_onboarding;
+        let mut load_demo = false;
+        let mut empty = false;
+        let mut open_help = false;
+        let mut close = false;
+        egui::Window::new("Démarrage rapide")
+            .open(&mut open)
+            .collapsible(false)
+            .resizable(false)
+            .default_width(480.0)
+            .show(context, |ui| {
+                ui.heading("Bienvenue dans CircuitSim");
+                ui.label(
+                    "Quatre gestes suffisent pour placer, câbler, simuler et explorer un \
+                     circuit analogique.",
+                );
+                ui.add_space(8.0);
+                for (index, title, detail) in [
+                    (
+                        1,
+                        "Placer",
+                        "Choisissez un composant dans la palette ou appuyez sur Ctrl+K. \
+                         R et F orientent l’aperçu.",
+                    ),
+                    (
+                        2,
+                        "Câbler",
+                        "Appuyez sur W, partez d’une broche ou d’un fil, puis cliquez \
+                         l’extrémité. Maj change le coude.",
+                    ),
+                    (
+                        3,
+                        "Simuler",
+                        "Ctrl+Entrée lance le transitoire. Les tensions des nets \
+                         apparaissent sur le canevas.",
+                    ),
+                    (
+                        4,
+                        "Explorer",
+                        "Sélectionnez un objet pour l’inspecteur, utilisez deux curseurs \
+                         dans la portée et ? pour l’aide.",
+                    ),
+                ] {
+                    ui.label(
+                        RichText::new(format!("{index}. {title}"))
+                            .strong()
+                            .color(ui::ACCENT),
+                    );
+                    ui.label(RichText::new(detail).small().color(ui::MUTED));
+                    ui.add_space(3.0);
+                }
+                ui.separator();
+                ui.horizontal_wrapped(|ui| {
+                    if ui
+                        .button("Charger l’exemple RC")
+                        .on_hover_text("Remplace le schéma par le circuit RC de démonstration")
+                        .clicked()
+                    {
+                        load_demo = true;
+                    }
+                    if ui
+                        .button("Schéma vide")
+                        .on_hover_text("Efface le schéma, annulable avec Ctrl+Z")
+                        .clicked()
+                    {
+                        empty = true;
+                    }
+                    if ui.button("Aide complète").clicked() {
+                        open_help = true;
+                    }
+                    if ui.button("Fermer").clicked() {
+                        close = true;
+                    }
+                });
+                ui.add_space(4.0);
+                ui.label(
+                    RichText::new(
+                        "Le guide reste accessible par le bouton Démarrage et la palette \
+                         de commandes.",
+                    )
+                    .small()
+                    .color(ui::MUTED),
+                );
+            });
+        if load_demo {
+            self.load_demo();
+            open = false;
+        }
+        if close {
+            open = false;
+        }
+        if empty {
+            match self.document.clear() {
+                Ok(()) => {
+                    self.instruments.clear_results();
+                    self.canvas.cancel_interaction();
+                    self.canvas.request_fit();
+                    self.status
+                        .success("Schéma vide. Utilisez la palette pour commencer.");
+                }
+                Err(error) => self.status.error(error.user_message()),
+            }
+            open = false;
+        }
+        if open_help {
+            self.show_help = true;
+            open = false;
+        }
+        self.show_onboarding = open;
+    }
+
+    fn preferences_window(&mut self, context: &Context) {
+        if !self.show_preferences {
+            return;
+        }
+        let mut open = self.show_preferences;
+        let mut changed = false;
+        egui::Window::new("Préférences d’affichage")
+            .open(&mut open)
+            .collapsible(false)
+            .resizable(false)
+            .default_width(360.0)
+            .show(context, |ui| {
+                ui.heading("Accessibilité");
+                ui.label(
+                    RichText::new("Réglages appliqués à cette session.")
+                        .small()
+                        .color(ui::MUTED),
+                );
+                ui.separator();
+                ui.label(RichText::new("Thème").strong());
+                ui.horizontal(|ui| {
+                    for theme in ThemeMode::ALL {
+                        if ui
+                            .radio_value(&mut self.preferences.theme, theme, theme.label())
+                            .changed()
+                        {
+                            changed = true;
+                        }
+                    }
+                });
+                ui.add_space(6.0);
+                ui.label(RichText::new("Taille de l’interface").strong());
+                egui::ComboBox::from_id_salt("ui_scale")
+                    .selected_text(format!("{:.0} %", self.preferences.scale * 100.0))
+                    .show_ui(ui, |ui| {
+                        for scale in UI_SCALES {
+                            if ui
+                                .selectable_value(
+                                    &mut self.preferences.scale,
+                                    scale,
+                                    format!("{:.0} %", scale * 100.0),
+                                )
+                                .changed()
+                            {
+                                changed = true;
+                            }
+                        }
+                    });
+                ui.add_space(6.0);
+                if ui
+                    .checkbox(
+                        &mut self.preferences.reduce_motion,
+                        "Réduire les animations",
+                    )
+                    .on_hover_text("Désactive les transitions et animations de l’interface")
+                    .changed()
+                {
+                    changed = true;
+                }
+                ui.add_space(6.0);
+                ui.separator();
+                ui.label(
+                    RichText::new(
+                        "Clavier : Tab et Maj+Tab parcourent les contrôles, Entrée active, \
+                         Échap ferme les fenêtres. Ctrl+K ouvre toutes les commandes.",
+                    )
+                    .small()
+                    .color(ui::MUTED),
+                );
+                ui.add_space(6.0);
+                if ui.button("Réinitialiser").clicked() {
+                    self.preferences = DisplayPreferences::default();
+                    changed = true;
+                }
+            });
+        if changed {
+            self.preferences_dirty = true;
+        }
+        self.show_preferences = open;
+    }
+
     fn help_window(&mut self, context: &Context) {
         if !self.show_help {
             return;
@@ -896,6 +1207,14 @@ impl CircuitApp {
                 ui.label(
                     "La palette choisit un composant ou un outil. Le canevas se déplace avec \
                      le bouton milieu de la souris et se zoome avec la molette.",
+                );
+                ui.label(
+                    RichText::new(
+                        "Le bouton Démarrage rouvre le guide de quatre étapes. \
+                         Ctrl+Maj+A ouvre les préférences d’affichage.",
+                    )
+                    .small()
+                    .color(ui::MUTED),
                 );
                 ui.add_space(6.0);
                 ui.label(RichText::new("Souris").strong());
@@ -930,7 +1249,8 @@ impl CircuitApp {
                         shortcut(ui, "Ctrl+Y", "rétablir");
                         shortcut(ui, "Ctrl+A", "tout sélectionner");
                         shortcut(ui, "Échap", "annuler l'outil, le collage ou la sélection");
-                        shortcut(ui, "?", "ouvrir ou fermer cette aide");
+                        shortcut(ui, "? / F1", "ouvrir ou fermer cette aide");
+                        shortcut(ui, "Ctrl+Maj+A", "préférences d’affichage et accessibilité");
                         shortcut(ui, "Home", "ajuster la vue au schéma");
                         shortcut(ui, "Ctrl+Home", "cadrer la sélection");
                         shortcut(ui, "+ / -", "zoom avant / arrière");
@@ -993,6 +1313,7 @@ impl CircuitApp {
 
 impl eframe::App for CircuitApp {
     fn ui(&mut self, ui: &mut Ui, _frame: &mut eframe::Frame) {
+        self.apply_preferences(ui.ctx());
         self.handle_shortcuts(ui.ctx());
         let now = ui.input(|input| input.time);
         self.tick_auto_simulation(now);
@@ -1037,10 +1358,29 @@ impl eframe::App for CircuitApp {
             self.apply_command(command);
         }
         self.help_window(ui.ctx());
+        self.onboarding_window(ui.ctx());
+        self.preferences_window(ui.ctx());
     }
 }
 
-fn configure_style(context: &Context) {
+fn apply_style(context: &Context, preferences: DisplayPreferences) {
+    let visuals = match preferences.theme {
+        ThemeMode::Dark => dark_visuals(),
+        ThemeMode::HighContrast => high_contrast_visuals(),
+    };
+    context.set_visuals(visuals);
+    context.all_styles_mut(|style| {
+        style.spacing.item_spacing = egui::vec2(7.0, 5.0);
+        style.spacing.button_padding = egui::vec2(8.0, 4.0);
+        style.animation_time = if preferences.reduce_motion { 0.0 } else { 0.2 };
+        style
+            .text_styles
+            .insert(egui::TextStyle::Heading, FontId::proportional(19.0));
+    });
+    context.set_zoom_factor(preferences.scale);
+}
+
+fn dark_visuals() -> egui::Visuals {
     let mut visuals = egui::Visuals::dark();
     visuals.panel_fill = Color32::from_rgb(18, 24, 35);
     visuals.window_fill = Color32::from_rgb(24, 32, 46);
@@ -1049,15 +1389,25 @@ fn configure_style(context: &Context) {
     visuals.selection.bg_fill = Color32::from_rgb(62, 103, 152);
     visuals.hyperlink_color = ui::HOVER;
     visuals.window_stroke = egui::Stroke::new(1.0, Color32::from_rgb(56, 76, 102));
-    context.set_visuals(visuals);
+    visuals
+}
 
-    context.all_styles_mut(|style| {
-        style.spacing.item_spacing = egui::vec2(7.0, 5.0);
-        style.spacing.button_padding = egui::vec2(8.0, 4.0);
-        style
-            .text_styles
-            .insert(egui::TextStyle::Heading, FontId::proportional(19.0));
-    });
+fn high_contrast_visuals() -> egui::Visuals {
+    let mut visuals = egui::Visuals::dark();
+    visuals.override_text_color = Some(Color32::WHITE);
+    visuals.panel_fill = Color32::BLACK;
+    visuals.window_fill = Color32::from_rgb(8, 8, 8);
+    visuals.extreme_bg_color = Color32::BLACK;
+    visuals.faint_bg_color = Color32::from_rgb(26, 26, 26);
+    visuals.selection.bg_fill = Color32::from_rgb(0, 95, 215);
+    visuals.selection.stroke = egui::Stroke::new(1.0, Color32::WHITE);
+    visuals.hyperlink_color = Color32::from_rgb(120, 220, 255);
+    visuals.window_stroke = egui::Stroke::new(1.5, Color32::WHITE);
+    visuals.widgets.noninteractive.fg_stroke = egui::Stroke::new(1.2, Color32::WHITE);
+    visuals.widgets.inactive.fg_stroke = egui::Stroke::new(1.2, Color32::WHITE);
+    visuals.widgets.hovered.fg_stroke = egui::Stroke::new(1.5, Color32::WHITE);
+    visuals.widgets.active.fg_stroke = egui::Stroke::new(1.5, Color32::WHITE);
+    visuals
 }
 
 fn tool_toggle(ui: &mut Ui, tool: &mut Tool, canvas: &mut CanvasState, target: Tool, label: &str) {
@@ -1111,6 +1461,16 @@ mod tests {
         assert_eq!(LayoutPreset::Simulation.visibility(), (false, true, true));
         assert_eq!(LayoutPreset::Canvas.visibility(), (false, false, false));
         assert_eq!(LayoutPreset::ALL.len(), 4);
+    }
+
+    #[test]
+    fn display_preferences_have_safe_defaults_and_scales() {
+        let preferences = DisplayPreferences::default();
+        assert_eq!(preferences.theme, ThemeMode::Dark);
+        assert_eq!(preferences.scale, 1.0);
+        assert!(!preferences.reduce_motion);
+        assert!(UI_SCALES.windows(2).all(|pair| pair[0] < pair[1]));
+        assert_eq!(ThemeMode::HighContrast.label(), "Contraste élevé");
     }
 
     #[test]

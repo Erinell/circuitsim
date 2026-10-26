@@ -38,6 +38,9 @@ sémantique.
 - Deux curseurs temporels A/B sur la portée, avec Δt, 1/Δt, valeurs, min, max et
   RMS sur l’intervalle.
 - Marqueur de fréquence sur le Bode, avec gain et phase au point choisi.
+- Guide de démarrage rapide, accès à l’exemple RC et état vide plus explicite.
+- Préférences d’affichage : thème sombre ou contraste élevé, taille de
+  l’interface et réduction des animations.
 
 ### Changed
 

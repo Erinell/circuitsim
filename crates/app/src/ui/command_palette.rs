@@ -42,6 +42,12 @@ pub enum CommandAction {
     New,
     /// Toggle the instruments panel.
     Instruments,
+    /// Open the quick-start guide.
+    Onboarding,
+    /// Load the RC demonstration.
+    LoadDemo,
+    /// Open display and accessibility preferences.
+    Preferences,
     /// Open help.
     Help,
 }
@@ -322,6 +328,27 @@ impl CommandPalette {
             "Nouveau schéma",
             "efface",
             CommandAction::New,
+        );
+        push_match(
+            &mut entries,
+            query,
+            "Charger l’exemple RC",
+            "démonstration",
+            CommandAction::LoadDemo,
+        );
+        push_match(
+            &mut entries,
+            query,
+            "Démarrage rapide",
+            "guide",
+            CommandAction::Onboarding,
+        );
+        push_match(
+            &mut entries,
+            query,
+            "Préférences d’affichage",
+            "accessibilité, contraste, taille",
+            CommandAction::Preferences,
         );
         push_match(
             &mut entries,
