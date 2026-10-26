@@ -2,12 +2,16 @@
 
 use std::collections::BTreeSet;
 
-use editor_core::{GridPos, ObjectRef, Orientation, SnapTarget, Symbol, SymbolId, WireId};
+use editor_core::{
+    ExtractedNet, GridPos, ObjectRef, Orientation, SnapTarget, Symbol, SymbolId, WireId,
+};
 use eframe::egui::{
     self, Align2, Color32, CursorIcon, FontId, Key, Painter, PointerButton, Pos2, Rect, Sense,
     Stroke, StrokeKind, Ui, Vec2,
 };
+use sim_core::units::{format_si_precision, Unit};
 
+use crate::analysis::LiveValues;
 use crate::document::{ActionError, ClipboardItem, Document, SelectionChange, SelectionMode};
 use crate::ui::glyph::{paint_symbol, GlyphColors};
 use crate::ui::{
@@ -25,6 +29,9 @@ const MINIMAP_WIDTH: f32 = 152.0;
 const MINIMAP_HEIGHT: f32 = 112.0;
 const MINIMAP_MARGIN: f32 = 12.0;
 const ZOOM_STEP: f32 = 1.25;
+const POSITIVE_VOLTAGE: Color32 = Color32::from_rgb(255, 190, 92);
+const NEGATIVE_VOLTAGE: Color32 = Color32::from_rgb(120, 210, 220);
+const LIVE_BADGE: Color32 = Color32::from_rgba_premultiplied(20, 30, 44, 228);
 
 /// Canvas interaction state that survives between frames.
 pub struct CanvasState {
@@ -43,6 +50,7 @@ pub struct CanvasState {
     pending_fit: Option<(GridPos, GridPos)>,
     last_rect: Option<Rect>,
     minimap_visible: bool,
+    net_voltages: bool,
     label_dialog: Option<LabelDialog>,
 }
 
@@ -91,6 +99,7 @@ impl CanvasState {
             pending_fit: None,
             last_rect: None,
             minimap_visible: true,
+            net_voltages: true,
             label_dialog: None,
         }
     }
@@ -198,6 +207,16 @@ impl CanvasState {
         self.minimap_visible = visible;
     }
 
+    /// Returns whether net voltages are overlaid on the canvas.
+    pub const fn net_voltages_visible(&self) -> bool {
+        self.net_voltages
+    }
+
+    /// Shows or hides the net-voltage overlay.
+    pub fn set_net_voltages_visible(&mut self, visible: bool) {
+        self.net_voltages = visible;
+    }
+
     /// Returns true while the label name dialog is open.
     pub const fn has_dialog(&self) -> bool {
         self.label_dialog.is_some()
@@ -216,6 +235,7 @@ impl CanvasState {
         tool: &crate::ui::Tool,
         status: &mut Status,
         interactive: bool,
+        live: &LiveValues,
     ) {
         let available = ui.available_size();
         if available.x < 2.0 || available.y < 2.0 {
@@ -277,6 +297,9 @@ impl CanvasState {
         self.paint_grid(&painter, rect);
         self.paint_document(&painter, rect, document);
         self.paint_hover(&painter, rect, document);
+        if self.net_voltages {
+            self.paint_net_voltages(&painter, rect, document, live);
+        }
         let shift = ui.input(|input| input.modifiers.shift);
         self.paint_previews(&painter, rect, document, tool, hovered_point, shift);
         if self.paste_preview {
@@ -287,6 +310,7 @@ impl CanvasState {
         self.paint_snap(&painter, rect);
         self.paint_empty_state(&painter, rect, document);
         self.paint_tool_badge(&painter, rect, tool);
+        self.paint_simulation_badge(&painter, rect, document, live);
         self.paint_minimap(&painter, rect, document);
         self.set_cursor(ui, &response, tool);
         if interactive {
@@ -1009,6 +1033,93 @@ impl CanvasState {
         }
     }
 
+    fn paint_net_voltages(
+        &self,
+        painter: &Painter,
+        rect: Rect,
+        document: &Document,
+        live: &LiveValues,
+    ) {
+        if live.is_empty() || self.viewport.scale() < 10.0 {
+            return;
+        }
+        let Some(extraction) = document.extraction() else {
+            return;
+        };
+        let maximum = live
+            .node_voltages
+            .values()
+            .fold(0.0_f64, |current, value| current.max(value.abs()));
+        let stale = live.document_revision != document.revision();
+        for net in &extraction.nets {
+            let name = net.name.as_str();
+            if name == "0" {
+                continue;
+            }
+            let Some(value) = live.voltage(name) else {
+                continue;
+            };
+            let Some(position) = net_overlay_position(document, net) else {
+                continue;
+            };
+            let labeled = net.labels.iter().any(|id| document.label(*id).is_some());
+            let color = if stale {
+                voltage_color(value, maximum).gamma_multiply(0.55)
+            } else {
+                voltage_color(value, maximum)
+            };
+            let text = if labeled {
+                format_si_precision(value, Unit::Volt, 3)
+            } else {
+                format!("{name} {}", format_si_precision(value, Unit::Volt, 3))
+            };
+            let galley = painter.layout_no_wrap(text, FontId::monospace(10.5), color);
+            let anchor = self.viewport.grid_to_screen(rect, position) + Vec2::new(0.0, -7.0);
+            let text_rect = Align2::CENTER_BOTTOM.anchor_size(anchor, galley.size());
+            painter.rect_filled(
+                text_rect.expand(3.0),
+                3.0,
+                Color32::from_rgba_premultiplied(12, 18, 28, 185),
+            );
+            painter.galley(text_rect.min, galley, color);
+        }
+    }
+
+    fn paint_simulation_badge(
+        &self,
+        painter: &Painter,
+        rect: Rect,
+        document: &Document,
+        live: &LiveValues,
+    ) {
+        if live.is_empty() {
+            return;
+        }
+        let stale = live.document_revision != document.revision();
+        let time = live.time.map_or_else(
+            || "échantillon".to_owned(),
+            |value| format_si_precision(value, Unit::Second, 4),
+        );
+        let text = format!(
+            "t = {time} · {}",
+            if stale { "antérieur" } else { "à jour" }
+        );
+        let color = if stale { ACCENT } else { HOVER };
+        let galley = painter.layout_no_wrap(text, FontId::proportional(11.0), color);
+        let anchor = rect.right_top() + Vec2::new(-12.0, 12.0);
+        let badge = Align2::RIGHT_TOP
+            .anchor_size(anchor, galley.size())
+            .expand2(Vec2::new(8.0, 4.0));
+        painter.rect_filled(badge, 5.0, LIVE_BADGE);
+        painter.rect_stroke(
+            badge,
+            5.0,
+            Stroke::new(1.0, color.gamma_multiply(0.6)),
+            StrokeKind::Inside,
+        );
+        painter.galley(badge.min + Vec2::new(8.0, 4.0), galley, color);
+    }
+
     fn paint_hover(&self, painter: &Painter, rect: Rect, document: &Document) {
         let Some(object) = self.hover else {
             return;
@@ -1590,6 +1701,43 @@ impl Default for CanvasState {
     }
 }
 
+fn net_overlay_position(document: &Document, net: &ExtractedNet) -> Option<GridPos> {
+    if net.name.as_str() == "0" {
+        return None;
+    }
+    if let Some(label) = net
+        .labels
+        .iter()
+        .filter_map(|id| document.label(*id))
+        .min_by_key(|label| label.id)
+    {
+        return Some(label.at);
+    }
+    net.wires
+        .iter()
+        .filter_map(|id| document.wire(*id))
+        .max_by_key(|wire| (wire.length(), wire.id.0))
+        .map(|wire| {
+            GridPos::new(
+                (wire.a.x + wire.b.x).div_euclid(2),
+                (wire.a.y + wire.b.y).div_euclid(2),
+            )
+        })
+}
+
+fn voltage_color(value: f64, maximum: f64) -> Color32 {
+    if value == 0.0 || !value.is_finite() || maximum <= f64::MIN_POSITIVE {
+        return MUTED;
+    }
+    let strength = (value.abs() / maximum).clamp(0.0, 1.0) as f32;
+    let base = if value < 0.0 {
+        NEGATIVE_VOLTAGE
+    } else {
+        POSITIVE_VOLTAGE
+    };
+    base.gamma_multiply(0.55 + 0.45 * strength)
+}
+
 fn report(status: &mut Status, result: Result<(), ActionError>, success: &str) {
     match result {
         Ok(()) => status.success(success),
@@ -1674,7 +1822,7 @@ mod tests {
             egui::CentralPanel::default()
                 .frame(Frame::NONE)
                 .show(ui, |ui| {
-                    canvas.show(ui, document, tool, status, true);
+                    canvas.show(ui, document, tool, status, true, &LiveValues::default());
                 });
         });
     }
@@ -1900,6 +2048,29 @@ mod tests {
         assert!(canvas.is_pasting());
         canvas.cancel_interaction();
         assert!(!canvas.is_pasting());
+    }
+
+    #[test]
+    fn live_overlay_prefers_net_labels_and_ignores_ground() {
+        let document = Document::demo().unwrap();
+        let extraction = document.extraction().unwrap();
+        let vin = extraction
+            .nets
+            .iter()
+            .find(|net| net.name.as_str() == "VIN")
+            .unwrap();
+        assert_eq!(
+            net_overlay_position(&document, vin),
+            Some(GridPos::new(-6, -8))
+        );
+        let ground = extraction
+            .nets
+            .iter()
+            .find(|net| net.name.as_str() == "0")
+            .unwrap();
+        assert_eq!(net_overlay_position(&document, ground), None);
+        assert_eq!(voltage_color(0.0, 5.0), MUTED);
+        assert_ne!(voltage_color(5.0, 5.0), voltage_color(-5.0, 5.0));
     }
 
     #[test]

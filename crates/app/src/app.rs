@@ -2,6 +2,7 @@
 
 use editor_core::{GridPos, ObjectRef};
 use eframe::egui::{self, Align, Color32, Context, FontId, Key, Layout, RichText, Ui};
+use std::time::Duration;
 
 use crate::document::{Alignment, DistributionAxis, Document};
 use crate::ui::canvas::CanvasState;
@@ -23,6 +24,7 @@ pub struct CircuitApp {
     instruments: InstrumentsState,
     palette: CommandPalette,
     status: Status,
+    auto: AutoRefresh,
     show_help: bool,
     show_palette: bool,
     show_inspector: bool,
@@ -64,6 +66,55 @@ impl LayoutPreset {
     }
 }
 
+/// Debounce state for automatic transient refreshes.
+#[derive(Clone, Debug, Default)]
+struct AutoRefresh {
+    due: Option<f64>,
+    attempted: Option<u64>,
+}
+
+const AUTO_REFRESH_DELAY: f64 = 0.35;
+
+impl AutoRefresh {
+    fn should_run(
+        &mut self,
+        enabled: bool,
+        busy: bool,
+        document_revision: u64,
+        result_revision: Option<u64>,
+        now: f64,
+    ) -> bool {
+        if !enabled {
+            self.due = None;
+            self.attempted = None;
+            return false;
+        }
+        if busy {
+            return false;
+        }
+        if result_revision == Some(document_revision) || self.attempted == Some(document_revision) {
+            self.due = None;
+            return false;
+        }
+        let due = *self.due.get_or_insert(now + AUTO_REFRESH_DELAY);
+        if now < due {
+            return false;
+        }
+        self.due = None;
+        self.attempted = Some(document_revision);
+        true
+    }
+
+    fn note_manual(&mut self, document_revision: u64) {
+        self.attempted = Some(document_revision);
+        self.due = None;
+    }
+
+    const fn pending(&self) -> bool {
+        self.due.is_some()
+    }
+}
+
 impl CircuitApp {
     /// Creates the application and configures the egui style.
     pub fn new(cc: &eframe::CreationContext<'_>) -> Self {
@@ -91,6 +142,7 @@ impl CircuitApp {
             instruments: InstrumentsState::new(),
             palette: CommandPalette::default(),
             status,
+            auto: AutoRefresh::default(),
             show_help: false,
             show_palette: true,
             show_inspector: true,
@@ -119,6 +171,35 @@ impl CircuitApp {
         };
         self.canvas.request_fit_bounds(bounds);
         self.status.success("Vue cadrée sur la sélection.");
+    }
+
+    fn simulate(&mut self, now: f64) {
+        if !self.instruments.can_simulate(&self.document) {
+            if self.instruments.is_busy() {
+                self.status.info("Une analyse est déjà en cours.");
+            } else {
+                self.status
+                    .error("Aucune netlist valide n'est disponible pour la simulation.");
+            }
+            return;
+        }
+        self.auto.note_manual(self.document.revision());
+        self.instruments
+            .run_transient_now(&self.document, now, &mut self.status);
+    }
+
+    fn tick_auto_simulation(&mut self, now: f64) {
+        let enabled = self.instruments.auto_refresh();
+        if self.auto.should_run(
+            enabled,
+            self.instruments.is_busy(),
+            self.document.revision(),
+            self.instruments.transient_revision(),
+            now,
+        ) {
+            self.instruments
+                .run_transient_now(&self.document, now, &mut self.status);
+        }
     }
 
     fn toolbar(&mut self, ui: &mut Ui) {
@@ -286,6 +367,21 @@ impl CircuitApp {
                     self.fit_selection();
                 }
             });
+            ui.separator();
+            if ui
+                .add_enabled(
+                    self.instruments.can_simulate(&self.document),
+                    egui::Button::new("Simuler"),
+                )
+                .on_hover_text("Ctrl+Entrée / F5 : relancer le transitoire")
+                .clicked()
+            {
+                let now = ui.input(|input| input.time);
+                self.simulate(now);
+            }
+            if self.instruments.is_busy() {
+                ui.spinner();
+            }
             ui.menu_button("Vue", |ui| {
                 ui.checkbox(&mut self.show_palette, "Palette");
                 ui.checkbox(&mut self.show_inspector, "Inspecteur");
@@ -293,6 +389,14 @@ impl CircuitApp {
                 let mut minimap = self.canvas.minimap_visible();
                 if ui.checkbox(&mut minimap, "Mini-carte").changed() {
                     self.canvas.set_minimap_visible(minimap);
+                }
+                let mut voltages = self.canvas.net_voltages_visible();
+                if ui
+                    .checkbox(&mut voltages, "Tensions des nets")
+                    .on_hover_text("Affiche les tensions du dernier transitoire sur le canevas")
+                    .changed()
+                {
+                    self.canvas.set_net_voltages_visible(voltages);
                 }
                 ui.separator();
                 ui.label(RichText::new("Disposition").small().color(ui::MUTED));
@@ -416,6 +520,7 @@ impl CircuitApp {
 
     fn canvas(&mut self, ui: &mut Ui) {
         let interactive = !self.canvas.has_dialog() && !self.show_help && !self.palette.is_open();
+        let live = self.instruments.live_values();
         ui::canvas::CanvasState::show(
             &mut self.canvas,
             ui,
@@ -423,6 +528,7 @@ impl CircuitApp {
             &self.tool,
             &mut self.status,
             interactive,
+            &live,
         );
     }
 
@@ -681,6 +787,13 @@ impl CircuitApp {
             self.canvas.reset_zoom();
             return;
         }
+        if context.input(|input| {
+            input.key_pressed(Key::F5) || (input.modifiers.command && input.key_pressed(Key::Enter))
+        }) {
+            let now = context.input(|input| input.time);
+            self.simulate(now);
+            return;
+        }
         let (pan_left, pan_right, pan_up, pan_down, alt) = context.input(|input| {
             (
                 input.key_pressed(Key::ArrowLeft),
@@ -811,6 +924,7 @@ impl CircuitApp {
                         shortcut(ui, "Alt+clic", "sélectionner tout le net");
                         shortcut(ui, "Ctrl+C / Ctrl+V", "copier / coller avec aperçu");
                         shortcut(ui, "Ctrl+D", "dupliquer la sélection");
+                        shortcut(ui, "Ctrl+Entrée / F5", "relancer le transitoire");
                         shortcut(ui, "Suppr", "supprimer la sélection");
                         shortcut(ui, "Ctrl+Z", "annuler");
                         shortcut(ui, "Ctrl+Y", "rétablir");
@@ -830,6 +944,10 @@ impl CircuitApp {
                     "Le panneau Instruments exécute le transitoire, le spectre FFT et \
                      l'analyse AC par le service worker. L'échelon de source force une source \
                      à une valeur initiale avant d'appliquer sa valeur finale.",
+                );
+                ui.label(
+                    "Simuler (Ctrl+Entrée ou F5) relance le transitoire ; Auto recalcule après \
+                     une modification et superpose les tensions des nets sur le canevas.",
                 );
                 ui.label(
                     "Sur le canevas, Ctrl+K ouvre la palette de commandes. R et F orientent \
@@ -871,6 +989,11 @@ impl CircuitApp {
 impl eframe::App for CircuitApp {
     fn ui(&mut self, ui: &mut Ui, _frame: &mut eframe::Frame) {
         self.handle_shortcuts(ui.ctx());
+        let now = ui.input(|input| input.time);
+        self.tick_auto_simulation(now);
+        if self.instruments.auto_refresh() && (self.auto.pending() || self.instruments.is_busy()) {
+            ui.ctx().request_repaint_after(Duration::from_millis(40));
+        }
 
         egui::Panel::top("top_bar")
             .resizable(false)
@@ -983,5 +1106,23 @@ mod tests {
         assert_eq!(LayoutPreset::Simulation.visibility(), (false, true, true));
         assert_eq!(LayoutPreset::Canvas.visibility(), (false, false, false));
         assert_eq!(LayoutPreset::ALL.len(), 4);
+    }
+
+    #[test]
+    fn auto_refresh_debounces_and_tracks_the_document_revision() {
+        let mut auto = AutoRefresh::default();
+        assert!(!auto.should_run(false, false, 3, None, 0.0));
+        assert!(!auto.should_run(true, false, 3, None, 0.0));
+        assert!(auto.pending());
+        assert!(!auto.should_run(true, false, 3, None, 0.2));
+        assert!(auto.should_run(true, false, 3, None, 0.4));
+        assert!(!auto.should_run(true, false, 3, None, 1.0));
+        assert!(!auto.should_run(true, true, 4, None, 1.0));
+        assert!(!auto.should_run(true, false, 4, None, 1.0));
+        assert!(auto.should_run(true, false, 4, None, 1.4));
+        auto.note_manual(5);
+        assert!(!auto.should_run(true, false, 5, None, 2.0));
+        assert!(!auto.should_run(true, false, 5, Some(5), 3.0));
+        assert!(!auto.should_run(true, false, 6, Some(6), 4.0));
     }
 }
