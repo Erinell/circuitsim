@@ -1,6 +1,7 @@
 //! egui panels, canvas interaction, and application status messages.
 
 pub mod canvas;
+pub mod command_palette;
 pub mod erc;
 pub mod glyph;
 pub mod instruments;

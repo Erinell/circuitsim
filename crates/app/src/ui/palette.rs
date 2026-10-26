@@ -1,5 +1,7 @@
 //! Symbol palette and editing-tool selector.
 
+use std::collections::BTreeSet;
+
 use editor_core::{GridPos, Orientation, Symbol, SymbolId, SymbolKind, SymbolRegistry};
 use eframe::egui::{self, Align2, Color32, FontId, Pos2, Sense, Ui, Vec2};
 
@@ -7,7 +9,7 @@ use crate::ui::canvas::CanvasState;
 use crate::ui::glyph::{paint_symbol, GlyphColors};
 use crate::ui::{Tool, ACCENT, HOVER, LABEL, MUTED, PIN, SYMBOL};
 
-const BUILTINS: [(SymbolKind, &str, &str); 11] = [
+pub(crate) const BUILTINS: [(SymbolKind, &str, &str); 11] = [
     (SymbolKind::Resistor, "Résistance", "R"),
     (SymbolKind::Capacitor, "Condensateur", "C"),
     (SymbolKind::Inductor, "Bobine", "L"),
@@ -21,11 +23,37 @@ const BUILTINS: [(SymbolKind, &str, &str); 11] = [
     (SymbolKind::OpAmp, "Ampli. opérationnel", "U"),
 ];
 
+/// Favorites and recently used components.
+#[derive(Default)]
+pub struct PaletteState {
+    favorites: BTreeSet<SymbolKind>,
+    recent: Vec<SymbolKind>,
+}
+
+impl PaletteState {
+    pub(crate) fn is_favorite(&self, kind: &SymbolKind) -> bool {
+        self.favorites.contains(kind)
+    }
+
+    fn toggle_favorite(&mut self, kind: &SymbolKind) {
+        if !self.favorites.remove(kind) {
+            self.favorites.insert(kind.clone());
+        }
+    }
+
+    fn touch(&mut self, kind: &SymbolKind) {
+        self.recent.retain(|candidate| candidate != kind);
+        self.recent.insert(0, kind.clone());
+        self.recent.truncate(5);
+    }
+}
+
 /// Draws the palette and updates the active tool.
 pub fn show(
     ui: &mut Ui,
     registry: &SymbolRegistry,
     filter: &mut String,
+    state: &mut PaletteState,
     tool: &mut Tool,
     canvas: &mut CanvasState,
 ) {
@@ -62,27 +90,93 @@ pub fn show(
         .auto_shrink([false, false])
         .show(ui, |ui| {
             let mut shown = 0_u16;
-            for (kind, name, reference) in &BUILTINS {
-                let haystack = format!("{name} {reference} {}", kind.key()).to_lowercase();
-                if !needle.is_empty() && !haystack.contains(&needle) {
-                    continue;
-                }
-                shown += 1;
-                if symbol_button(ui, registry, tool, kind, name, reference) {
-                    canvas.cancel_interaction();
+            if needle.is_empty() && !state.favorites.is_empty() {
+                ui.label(egui::RichText::new("Favoris").small().color(MUTED));
+                for kind in state.favorites.clone() {
+                    if show_builtin(ui, registry, state, tool, canvas, &kind) {
+                        shown += 1;
+                    }
                 }
             }
-            for (key, definition) in registry.iter() {
-                if !matches!(definition.kind, SymbolKind::Custom(_)) {
-                    continue;
+            if needle.is_empty() && !state.recent.is_empty() {
+                ui.label(egui::RichText::new("Récents").small().color(MUTED));
+                for kind in state.recent.clone() {
+                    if show_builtin(ui, registry, state, tool, canvas, &kind) {
+                        shown += 1;
+                    }
                 }
-                let haystack = format!("{key} personnalisé").to_lowercase();
-                if !needle.is_empty() && !haystack.contains(&needle) {
-                    continue;
+            }
+            if needle.is_empty() {
+                let passive = [SymbolKind::Resistor, SymbolKind::Capacitor, SymbolKind::Inductor];
+                let sources = [
+                    SymbolKind::VoltageSource,
+                    SymbolKind::CurrentSource,
+                    SymbolKind::Ground,
+                    SymbolKind::Switch,
+                ];
+                let semi = [
+                    SymbolKind::Diode,
+                    SymbolKind::Led,
+                    SymbolKind::Zener,
+                    SymbolKind::OpAmp,
+                ];
+                for (title, kinds) in [
+                    ("Passifs", passive.as_slice()),
+                    ("Sources et connexions", sources.as_slice()),
+                    ("Semi-conducteurs", semi.as_slice()),
+                ] {
+                    egui::CollapsingHeader::new(title)
+                        .default_open(true)
+                        .show(ui, |ui| {
+                            for kind in kinds {
+                                if show_builtin(ui, registry, state, tool, canvas, kind) {
+                                    shown += 1;
+                                }
+                            }
+                        });
                 }
-                shown += 1;
-                if symbol_button(ui, registry, tool, &definition.kind, key, key) {
-                    canvas.cancel_interaction();
+                let customs = registry
+                    .iter()
+                    .filter(|(_, definition)| matches!(definition.kind, SymbolKind::Custom(_)))
+                    .map(|(key, definition)| (key.to_owned(), definition.kind.clone()))
+                    .collect::<Vec<_>>();
+                if !customs.is_empty() {
+                    egui::CollapsingHeader::new("Personnalisés")
+                        .default_open(true)
+                        .show(ui, |ui| {
+                            for (key, kind) in &customs {
+                                if symbol_button(ui, registry, state, tool, kind, key, key) {
+                                    state.touch(kind);
+                                    canvas.cancel_interaction();
+                                    shown += 1;
+                                }
+                            }
+                        });
+                }
+            } else {
+                for (kind, name, reference) in &BUILTINS {
+                    let haystack = format!("{name} {reference} {}", kind.key()).to_lowercase();
+                    if !haystack.contains(&needle) {
+                        continue;
+                    }
+                    shown += 1;
+                    if symbol_button(ui, registry, state, tool, kind, name, reference) {
+                        state.touch(kind);
+                        canvas.cancel_interaction();
+                    }
+                }
+                for (key, definition) in registry.iter() {
+                    if !matches!(definition.kind, SymbolKind::Custom(_)) {
+                        continue;
+                    }
+                    if !format!("{key} personnalisé").to_lowercase().contains(&needle) {
+                        continue;
+                    }
+                    shown += 1;
+                    if symbol_button(ui, registry, state, tool, &definition.kind, key, key) {
+                        state.touch(&definition.kind);
+                        canvas.cancel_interaction();
+                    }
                 }
             }
             if shown == 0 {
@@ -95,12 +189,31 @@ pub fn show(
             ui.add_space(8.0);
             ui.label(
                 egui::RichText::new(
-                    "Raccourcis : V sélection, W fil, J jonction, L label, R pivoter, M miroir.",
+                    "Clic droit : favori · V sélection, W fil, J jonction, L label, R pivoter, M miroir.",
                 )
                 .small()
                 .color(MUTED),
             );
         });
+}
+
+fn show_builtin(
+    ui: &mut Ui,
+    registry: &SymbolRegistry,
+    state: &mut PaletteState,
+    tool: &mut Tool,
+    canvas: &mut CanvasState,
+    kind: &SymbolKind,
+) -> bool {
+    let Some((kind, name, reference)) = BUILTINS.iter().find(|(candidate, _, _)| candidate == kind)
+    else {
+        return false;
+    };
+    if symbol_button(ui, registry, state, tool, kind, name, reference) {
+        state.touch(kind);
+        canvas.cancel_interaction();
+    }
+    true
 }
 
 fn tool_button(ui: &mut Ui, tool: &mut Tool, canvas: &mut CanvasState, target: Tool, label: &str) {
@@ -114,6 +227,7 @@ fn tool_button(ui: &mut Ui, tool: &mut Tool, canvas: &mut CanvasState, target: T
 fn symbol_button(
     ui: &mut Ui,
     registry: &SymbolRegistry,
+    state: &mut PaletteState,
     tool: &mut Tool,
     kind: &SymbolKind,
     name: &str,
@@ -121,7 +235,18 @@ fn symbol_button(
 ) -> bool {
     let width = ui.available_width();
     let (rect, response) = ui.allocate_exact_size(Vec2::new(width, 48.0), Sense::click());
-    let response = response.on_hover_text(format!("{name}  [{reference}]"));
+    let response = response.on_hover_text(format!("{name}  [{reference}] · clic droit : favori"));
+    let _ = response.context_menu(|ui| {
+        let label = if state.is_favorite(kind) {
+            "Retirer des favoris"
+        } else {
+            "Ajouter aux favoris"
+        };
+        if ui.button(label).clicked() {
+            state.toggle_favorite(kind);
+            ui.close();
+        }
+    });
     let selected = tool == &Tool::Place(kind.clone());
     let background = if selected {
         Color32::from_rgb(63, 55, 34)
@@ -190,6 +315,15 @@ fn symbol_button(
         FontId::monospace(9.5),
         MUTED,
     );
+    if state.is_favorite(kind) {
+        painter.text(
+            Pos2::new(rect.right() - 12.0, rect.center().y),
+            Align2::CENTER_CENTER,
+            "★",
+            FontId::proportional(13.0),
+            ACCENT,
+        );
+    }
 
     if response.clicked() {
         *tool = Tool::Place(kind.clone());

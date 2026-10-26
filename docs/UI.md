@@ -14,14 +14,16 @@ La distribution web utilise `index.html` et Trunk.
 | `view.rs` | transformations grille/écran, zoom, ajustement |
 | `analysis.rs` | catalogue, préparation worker, traces, mesures, FFT, Bode, CSV |
 | `export.rs` | fichier natif et téléchargement navigateur |
-| `ui/canvas.rs` | entrées souris et peinture |
-| `ui/palette.rs`, `ui/glyph.rs` | outils et symboles |
+| `ui/canvas.rs` | entrées souris, placement, câblage et peinture |
+| `ui/command_palette.rs` | recherche floue et actions clavier |
+| `ui/palette.rs`, `ui/glyph.rs` | composants, favoris/récents et symboles |
 | `ui/properties.rs`, `ui/erc.rs` | inspecteur, ERC et nets |
 | `ui/instruments.rs` | panneau de simulation et graphiques |
 
 De haut en bas : barre d'outils (document, undo/redo, outils, transformations,
-Instruments, aide), palette filtrable à gauche, canevas central, inspecteur/ERC
-à droite, instruments en bas (210–560 px), barre d'état. Les onglets **Portée**,
+alignement, Instruments, **Commandes**, aide), palette filtrable à gauche,
+canevas central, inspecteur/ERC à droite, instruments en bas (210–560 px), barre
+d'état. `Ctrl+K` ouvre la palette de commandes. Les onglets **Portée**,
 **Spectre** et **Bode** conservent leurs résultats séparément. La démonstration
 présélectionne `V1`, `5 V` et `OUT`.
 
@@ -31,21 +33,24 @@ est entière avec un pas visuel adaptatif.
 ## 2. Interactions
 
 - Clic : sélectionne l'objet sous le curseur ou vide la sélection.
-- `Maj` + clic : ajoute/retire un objet.
-- Glisser : déplace la sélection d'un delta entier.
+- `Maj` + clic : ajoute/retire un objet ; `Alt` + clic : sélectionne le net.
+- Glisser un symbole/label/jonction : déplace la sélection d'un delta entier.
+- Glisser un fil : déplace le segment perpendiculairement.
 - `Ctrl+A` : tout sélectionner ; `Échap` : annuler l'outil ou la sélection.
 - Molette : zoom centré sous le curseur (8–80 px/case).
 - Bouton milieu + glisser : déplacer la vue ; `Home` : ajuster.
 
-Priorité au clic : label, jonction, symbole, fil. Le survol affiche une
-prévisualisation pour le placement, le fil, la jonction, le label et le
-déplacement.
+Priorité au clic : label, jonction, symbole, fil. Le survol d'un fil ou d'une
+broche met en évidence le net complet. Des guides apparaissent pendant le
+déplacement lorsque des symboles partagent une coordonnée.
 
-Le placement utilise la grille avec un label unique. L'outil Fil demande deux
-clics ; un tracé diagonal devient deux segments orthogonaux avec coin en
-`(x arrivée, y départ)`. Une extrémité identique ou un fil existant est refusé
-sans consommer d'identifiant. Jonction refuse les doublons ; Label ouvre un
-dialogue validé avant insertion.
+Le placement utilise la grille avec un label unique et reste actif pour des
+placements répétés. `R`/`F` orientent l’aperçu. Un composant à deux broches déposé
+sur un fil est inséré en série. L'outil Fil part d'une grille, d'une broche ou
+d'un point de fil ; le tracé est orthogonal, évite les symboles et `Maj` change
+le premier coude. Une extrémité identique ou un fil existant est refusé sans
+consommer d'identifiant. Jonction refuse les doublons ; Label propose les nets
+existants.
 
 ## 3. Propriétés et ERC
 
@@ -93,8 +98,12 @@ les formats de fichiers sont dans [INSTRUMENTS.md](INSTRUMENTS.md).
 
 | Touche | Action |
 | --- | --- |
+| `Ctrl+K` | palette de commandes |
 | `V`, `W`, `J`, `L` | Sélection, Fil, Jonction, Label |
 | `R`, `M` | pivoter, miroir |
+| `R`, `F` | orienter/miroiter l’aperçu de placement |
+| `Maj` pendant un fil | changer le coude |
+| `Alt` + clic | sélectionner le net complet |
 | `Suppr`, `Retour arrière` | supprimer |
 | `Ctrl+Z`, `Ctrl+Y` / `Ctrl+Maj+Z` | annuler, rétablir |
 | `Ctrl+A` | tout sélectionner |
@@ -114,7 +123,8 @@ d'identifiants. Collections et rendu sont ordonnés.
 Limites : worker dans le fil de l'interface, tests navigateur non automatisés,
 transitoire à pas fixe, FFT plafonnée, pas de curseurs/PNG/persistance de projet,
 opamp sans alimentation/pôle, pas de thème clair ni de mobile spécifique, fils
-non extensibles par extrémité.
+non extensibles par extrémité. Les sélections rectangle, l’édition directe de
+valeur et le câblage à double-clic restent aux lots suivants.
 
 Tests : `cargo test -p circuitsim-app` couvre document, vue, édition, palette,
 propriétés, ERC, canevas headless, instruments, worker, FFT, Bode, CSV et export.

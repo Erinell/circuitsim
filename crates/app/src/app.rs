@@ -3,9 +3,11 @@
 use editor_core::ObjectRef;
 use eframe::egui::{self, Align, Color32, Context, FontId, Key, Layout, RichText, Ui};
 
-use crate::document::Document;
+use crate::document::{Alignment, DistributionAxis, Document};
 use crate::ui::canvas::CanvasState;
+use crate::ui::command_palette::{CommandAction, CommandPalette};
 use crate::ui::instruments::InstrumentsState;
+use crate::ui::palette::PaletteState;
 use crate::ui::properties::InspectorState;
 use crate::ui::{self, Status, Tool};
 use crate::view::DEFAULT_SCALE;
@@ -15,9 +17,11 @@ pub struct CircuitApp {
     document: Document,
     tool: Tool,
     filter: String,
+    palette_state: PaletteState,
     canvas: CanvasState,
     inspector: InspectorState,
     instruments: InstrumentsState,
+    palette: CommandPalette,
     status: Status,
     show_help: bool,
     show_instruments: bool,
@@ -44,9 +48,11 @@ impl CircuitApp {
             document,
             tool: Tool::Select,
             filter: String::new(),
+            palette_state: PaletteState::default(),
             canvas: CanvasState::new(),
             inspector: InspectorState::default(),
             instruments: InstrumentsState::new(),
+            palette: CommandPalette::default(),
             status,
             show_help: false,
             show_instruments: true,
@@ -135,6 +141,55 @@ impl CircuitApp {
                     self.delete();
                 }
             });
+            ui.add_enabled_ui(self.document.selection().len() >= 2, |ui| {
+                ui.menu_button("Aligner", |ui| {
+                    if ui.button("Gauche").clicked() {
+                        self.align(Alignment::Left);
+                        ui.close();
+                    }
+                    if ui.button("Centre horizontal").clicked() {
+                        self.align(Alignment::CenterX);
+                        ui.close();
+                    }
+                    if ui.button("Droite").clicked() {
+                        self.align(Alignment::Right);
+                        ui.close();
+                    }
+                    if ui.button("Haut").clicked() {
+                        self.align(Alignment::Top);
+                        ui.close();
+                    }
+                    if ui.button("Milieu vertical").clicked() {
+                        self.align(Alignment::CenterY);
+                        ui.close();
+                    }
+                    if ui.button("Bas").clicked() {
+                        self.align(Alignment::Bottom);
+                        ui.close();
+                    }
+                    ui.separator();
+                    if ui
+                        .add_enabled(
+                            self.document.selection().len() >= 3,
+                            egui::Button::new("Distribuer horizontalement"),
+                        )
+                        .clicked()
+                    {
+                        self.distribute(DistributionAxis::Horizontal);
+                        ui.close();
+                    }
+                    if ui
+                        .add_enabled(
+                            self.document.selection().len() >= 3,
+                            egui::Button::new("Distribuer verticalement"),
+                        )
+                        .clicked()
+                    {
+                        self.distribute(DistributionAxis::Vertical);
+                        ui.close();
+                    }
+                });
+            });
             if ui.button("Ajuster").on_hover_text("Home").clicked() {
                 self.canvas.request_fit();
             }
@@ -146,7 +201,18 @@ impl CircuitApp {
             {
                 self.show_instruments = !self.show_instruments;
             }
-            if ui.button("Aide").clicked() {
+            if ui
+                .button("Commandes")
+                .on_hover_text("Palette de commandes (Ctrl+K)")
+                .clicked()
+            {
+                self.palette.open(self.canvas.last_pointer_grid());
+            }
+            if ui
+                .button("Aide")
+                .on_hover_text("Raccourcis et fonctionnement")
+                .clicked()
+            {
                 self.show_help = !self.show_help;
             }
         });
@@ -184,6 +250,7 @@ impl CircuitApp {
             ui,
             self.document.registry(),
             &mut self.filter,
+            &mut self.palette_state,
             &mut self.tool,
             &mut self.canvas,
         );
@@ -204,7 +271,7 @@ impl CircuitApp {
     }
 
     fn canvas(&mut self, ui: &mut Ui) {
-        let interactive = !self.canvas.has_dialog() && !self.show_help;
+        let interactive = !self.canvas.has_dialog() && !self.show_help && !self.palette.is_open();
         ui::canvas::CanvasState::show(
             &mut self.canvas,
             ui,
@@ -258,7 +325,85 @@ impl CircuitApp {
         }
     }
 
+    fn align(&mut self, alignment: Alignment) {
+        match self.document.align_selection(alignment) {
+            Ok(()) => self.status.success("Sélection alignée."),
+            Err(error) => self.status.error(error.user_message()),
+        }
+    }
+
+    fn distribute(&mut self, axis: DistributionAxis) {
+        match self.document.distribute_selection(axis) {
+            Ok(()) => self.status.success("Sélection distribuée."),
+            Err(error) => self.status.error(error.user_message()),
+        }
+    }
+
+    fn apply_command(&mut self, command: CommandAction) {
+        match command {
+            CommandAction::Place(kind) => {
+                if let Some(point) = self.palette.anchor() {
+                    if let Some(editor_core::ObjectRef::Wire(wire)) = self.document.object_at(point)
+                    {
+                        if self
+                            .document
+                            .registry()
+                            .get(&kind)
+                            .is_some_and(|definition| definition.pins.len() == 2)
+                        {
+                            match self.document.insert_symbol_on_wire(kind, wire, point) {
+                                Ok(_) => self.status.success("Composant inséré en série."),
+                                Err(error) => self.status.error(error.user_message()),
+                            }
+                            return;
+                        }
+                    }
+                    match self.document.add_symbol_oriented(
+                        kind,
+                        point,
+                        self.canvas.placement_orientation(),
+                        self.canvas.placement_mirrored(),
+                    ) {
+                        Ok(_) => self.status.success("Composant placé au curseur."),
+                        Err(error) => self.status.error(error.user_message()),
+                    }
+                } else {
+                    self.set_tool(Tool::Place(kind));
+                    self.status.info("Placez le composant sur le canevas.");
+                }
+            }
+            CommandAction::Tool(tool) => self.set_tool(tool),
+            CommandAction::Fit => self.canvas.request_fit(),
+            CommandAction::Undo => self.undo(),
+            CommandAction::Redo => self.redo(),
+            CommandAction::Delete => self.delete(),
+            CommandAction::Rotate => self.rotate(),
+            CommandAction::Mirror => self.mirror(),
+            CommandAction::Align(alignment) => self.align(alignment),
+            CommandAction::Distribute(axis) => self.distribute(axis),
+            CommandAction::New => match self.document.clear() {
+                Ok(()) => {
+                    self.canvas.cancel_interaction();
+                    self.canvas.request_fit();
+                    self.status
+                        .success("Schéma effacé. Ctrl+Z permet de le restaurer.");
+                }
+                Err(error) => self.status.error(error.user_message()),
+            },
+            CommandAction::Instruments => self.show_instruments = !self.show_instruments,
+            CommandAction::Help => self.show_help = true,
+        }
+    }
+
     fn handle_shortcuts(&mut self, context: &Context) {
+        if context.input(|input| input.modifiers.command && input.key_pressed(Key::K)) {
+            self.palette.toggle(self.canvas.last_pointer_grid());
+            self.canvas.cancel_interaction();
+            return;
+        }
+        if self.palette.is_open() {
+            return;
+        }
         if context.egui_wants_keyboard_input() {
             return;
         }
@@ -329,13 +474,17 @@ impl CircuitApp {
             self.set_tool(Tool::Junction);
         } else if context.input(|input| input.key_pressed(Key::L)) {
             self.set_tool(Tool::Label);
-        } else if context.input(|input| input.key_pressed(Key::R)) {
+        } else if context.input(|input| input.key_pressed(Key::R))
+            && !matches!(self.tool, Tool::Place(_))
+        {
             if selection_has_symbols(&self.document) {
                 self.rotate();
             } else {
                 self.status.info("Sélectionnez un symbole à pivoter.");
             }
-        } else if context.input(|input| input.key_pressed(Key::M)) {
+        } else if context.input(|input| input.key_pressed(Key::M))
+            && !matches!(self.tool, Tool::Place(_))
+        {
             if selection_has_symbols(&self.document) {
                 self.mirror();
             } else {
@@ -379,6 +528,9 @@ impl CircuitApp {
                         shortcut(ui, "J", "outil Jonction");
                         shortcut(ui, "L", "outil Label");
                         shortcut(ui, "R / M", "pivoter / miroir");
+                        shortcut(ui, "R / F en pose", "tourner / miroir de l’aperçu");
+                        shortcut(ui, "Ctrl+K", "palette de commandes");
+                        shortcut(ui, "Alt+clic", "sélectionner tout le net");
                         shortcut(ui, "Suppr", "supprimer la sélection");
                         shortcut(ui, "Ctrl+Z", "annuler");
                         shortcut(ui, "Ctrl+Y", "rétablir");
@@ -392,6 +544,11 @@ impl CircuitApp {
                     "Le panneau Instruments exécute le transitoire, le spectre FFT et \
                      l'analyse AC par le service worker. L'échelon de source force une source \
                      à une valeur initiale avant d'appliquer sa valeur finale.",
+                );
+                ui.label(
+                    "Sur le canevas, Ctrl+K ouvre la palette de commandes. R et F orientent \
+                     l’aperçu de placement ; Maj change le coude d’un fil. Alt+clic sélectionne \
+                     le net complet et un composant déposé sur un fil s’insère en série.",
                 );
                 ui.label(
                     "Les résultats restent affichés après une modification du schéma et sont \
@@ -445,6 +602,9 @@ impl eframe::App for CircuitApp {
 
         self.canvas
             .show_label_dialog(ui.ctx(), &mut self.document, &mut self.status);
+        if let Some(command) = self.palette.show(ui.ctx(), &self.document) {
+            self.apply_command(command);
+        }
         self.help_window(ui.ctx());
     }
 }
