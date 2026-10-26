@@ -34,6 +34,7 @@
 | Flèches, `Maj`+flèches | Déplacer la vue |
 | `Home`, `Ctrl+Home` | Cadrer tout le schéma, cadrer la sélection |
 | `Ctrl+1`…`Ctrl+4` | Tout, Édition, Simulation, Canevas |
+| `Ctrl+Entrée`, `F5` | Relancer le transitoire |
 | `?` | Ouvrir ou fermer l’aide |
 | `Échap` | Annuler l’outil, le fil, le collage ou la sélection |
 
@@ -115,7 +116,26 @@ Les raccourcis sont ignorés lorsqu’un champ texte a le focus, à l’exceptio
 - Un clic sur une broche ou un fil met en évidence le net complet. `Alt` + clic
   sélectionne tous ses objets.
 
-## 8. Inspecteur, valeurs et historique
+## 8. Simulation interactive
+
+- **Simuler** dans la barre d’outils, `Ctrl+Entrée` ou `F5` relancent le
+  transitoire avec les réglages courants, sans ouvrir le panneau Instruments.
+- L’option **Auto** du panneau Instruments relance le calcul 0,35 s après une
+  modification acceptée. Le bouton reste désactivé pendant un calcul, sans
+  extraction valide ou si le worker est indisponible.
+- Le dernier échantillon est superposé aux nets du canevas : valeur seule sur un
+  net déjà nommé, nom et valeur sinon. Les tensions positives et négatives ont
+  des couleurs distinctes ; l’option **Vue → Tensions des nets** masque
+  l’ensemble.
+- Un badge en haut à droite indique `t = … · à jour` ou `antérieur`. Le panneau
+  Inspecteur reprend les tensions par broche, le courant et la puissance.
+- Une modification du schéma ne détruit pas le dernier résultat : il reste
+  visible, marqué comme antérieur, jusqu’au prochain calcul manuel ou
+  automatique.
+- Le calcul reste synchrone dans le fil de l’interface ; le worker dédié et
+  `SharedArrayBuffer` restent hors périmètre.
+
+## 9. Inspecteur, valeurs et historique
 
 - L’inspecteur affiche la référence, l’orientation, le miroir et les paramètres.
 - Les valeurs s’écrivent directement en notation d’ingénieur : `4k7`, `100n`,
@@ -137,13 +157,13 @@ Les raccourcis sont ignorés lorsqu’un champ texte a le focus, à l’exceptio
   puis copier, dupliquer, supprimer. Sur le vide, il propose coller, tout
   sélectionner, ajuster, annuler et rétablir.
 
-## 9. Résultats et erreurs
+## 10. Résultats et erreurs
 
 Une opération refusée affiche un message français dans la barre d’état et ne
 modifie ni le schéma, ni la révision, ni `next_id`. Les erreurs techniques
 restent typées dans les crates.
 
-## 10. Critères d’acceptation
+## 11. Critères d’acceptation
 
 - Construire un RC, le câbler et lancer la simulation en six actions maximum.
 - Aucune interaction de survol, glisser, rectangle ou câblage ne dépasse 16 ms
@@ -154,12 +174,15 @@ restent typées dans les crates.
   séries E, presse-papiers, navigation et restauration après undo.
 - Les quatre dispositions gardent un canevas utilisable, sans panneau
   superposé ; la mini-carte reste cohérente après zoom et déplacement.
+- Après une simulation, les tensions restent lisibles et le résultat antérieur
+  est identifiable sans ambiguïté.
 
-## 11. Périmètre de cette version
+## 12. Périmètre de cette version
 
 La sélection rectangle, le presse-papiers, la duplication, la rotation et le
 miroir de groupe, l’édition directe E12/E24/E96, l’inspecteur avec valeurs
-simulées, les menus contextuels, l’historique nommé, les dispositions fiables et
-la mini-carte sont livrés. Le dockage libre, les thèmes, la simulation
-interactive, le scope avancé et l’onboarding restent dans les lots G5 à G7. Voir
-[UI.md](UI.md) et [EDITOR.md](EDITOR.md).
+simulées, les menus contextuels, l’historique nommé, les dispositions fiables,
+la mini-carte, le calcul rapide et le rafraîchissement automatique sont livrés.
+Le dockage libre, les thèmes, le scope avancé et l’onboarding restent dans les
+lots G6 et G7. Voir [UI.md](UI.md), [INSTRUMENTS.md](INSTRUMENTS.md) et
+[EDITOR.md](EDITOR.md).

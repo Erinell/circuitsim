@@ -113,7 +113,7 @@ gain fini et saturation.
 
 ## 8. Qualité et livraison
 
-La suite compte 224 tests natifs, dont six propriétés proptest. La CI exécute
+La suite compte 226 tests natifs, dont six propriétés proptest. La CI exécute
 formatage, clippy strict, tests, `cargo deny check licenses`, WASM, benchmarks
 rapides, exemples, build natif release et build web. Les budgets de performance
 sont documentés mais non bloquants. Voir [LICENSING.md](LICENSING.md) et

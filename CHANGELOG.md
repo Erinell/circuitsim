@@ -31,6 +31,10 @@ sémantique.
 - Mini-carte navigable montrant contenu, sélection et fenêtre visible.
 - Menu **Vue**, panneaux masquables et dispositions Tout, Édition, Simulation et
   Canevas, sans dockage libre.
+- Bouton **Simuler** et raccourci `Ctrl+Entrée`/`F5` pour relancer le transitoire.
+- Rafraîchissement automatique optionnel après modification, avec délai.
+- Tensions des nets superposées au canevas et badge d’état du dernier
+  échantillon, avec signalement d’un résultat antérieur.
 
 ### Changed
 
