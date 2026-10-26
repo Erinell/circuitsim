@@ -8,7 +8,7 @@ use eframe::egui::{
     Stroke, StrokeKind, Ui, Vec2,
 };
 
-use crate::document::Document;
+use crate::document::{ActionError, ClipboardItem, Document, SelectionChange, SelectionMode};
 use crate::ui::glyph::{paint_symbol, GlyphColors};
 use crate::ui::{
     symbol_kind_name, Status, ACCENT, CANVAS_BACKGROUND, HOVER, LABEL, MUTED, PIN, SYMBOL, WIRE,
@@ -33,6 +33,7 @@ pub struct CanvasState {
     hover_net: BTreeSet<ObjectRef>,
     snap_target: Option<SnapTarget>,
     last_pointer_grid: Option<GridPos>,
+    paste_preview: bool,
     fit_requested: bool,
     label_dialog: Option<LabelDialog>,
 }
@@ -47,6 +48,11 @@ enum DragState {
         wire: WireId,
         start: GridPos,
         current: GridPos,
+    },
+    Marquee {
+        start: GridPos,
+        current: GridPos,
+        change: SelectionChange,
     },
 }
 
@@ -72,6 +78,7 @@ impl CanvasState {
             hover_net: BTreeSet::new(),
             snap_target: None,
             last_pointer_grid: None,
+            paste_preview: false,
             fit_requested: true,
             label_dialog: None,
         }
@@ -94,6 +101,19 @@ impl CanvasState {
         self.wire_prefer_horizontal = true;
         self.placement_orientation = Orientation::R0;
         self.placement_mirrored = false;
+        self.paste_preview = false;
+    }
+
+    /// Arms a clipboard paste preview at the pointer.
+    pub fn begin_paste(&mut self) {
+        self.paste_preview = true;
+        self.drag = None;
+        self.wire_start = None;
+    }
+
+    /// Returns true while a paste preview follows the pointer.
+    pub const fn is_pasting(&self) -> bool {
+        self.paste_preview
     }
 
     /// Returns the last snapped pointer position, if any.
@@ -198,10 +218,18 @@ impl CanvasState {
         self.paint_hover(&painter, rect, document);
         let shift = ui.input(|input| input.modifiers.shift);
         self.paint_previews(&painter, rect, document, tool, hovered_point, shift);
+        if self.paste_preview {
+            if let Some(point) = hovered_point {
+                self.paint_clipboard_ghost(&painter, rect, document, point);
+            }
+        }
         self.paint_snap(&painter, rect);
         self.paint_empty_state(&painter, rect, document);
         self.paint_tool_badge(&painter, rect, tool);
         self.set_cursor(ui, &response, tool);
+        if interactive {
+            self.context_menu(&response, document, status);
+        }
     }
 
     /// Shows the label naming dialog and creates the label on confirmation.
@@ -341,13 +369,14 @@ impl CanvasState {
         status: &mut Status,
         hovered_point: Option<GridPos>,
     ) {
-        let (primary_pressed, primary_released, primary_down, shift, alt, latest_pos) =
-            ui.input(|input| {
+        let (primary_pressed, primary_released, primary_down, shift, ctrl, alt, latest_pos) = ui
+            .input(|input| {
                 (
                     input.pointer.primary_pressed(),
                     input.pointer.primary_released(),
                     input.pointer.primary_down(),
                     input.modifiers.shift,
+                    input.modifiers.command || input.modifiers.ctrl,
                     input.modifiers.alt,
                     input.pointer.hover_pos(),
                 )
@@ -355,6 +384,19 @@ impl CanvasState {
         let latest_point = latest_pos
             .and_then(|position| self.viewport.screen_to_grid(rect, position))
             .or(hovered_point);
+
+        if self.paste_preview {
+            if primary_pressed {
+                if let Some(point) = hovered_point {
+                    match document.paste_clipboard(point) {
+                        Ok(count) => status.success(format!("{count} objet(s) collé(s).")),
+                        Err(error) => status.error(error.user_message()),
+                    }
+                }
+                self.drag = None;
+            }
+            return;
+        }
 
         if response.hovered() && primary_pressed && matches!(tool, crate::ui::Tool::Select) {
             if let Some(point) = hovered_point {
@@ -368,11 +410,23 @@ impl CanvasState {
                     self.drag = None;
                     return;
                 }
+                let change = if ctrl {
+                    SelectionChange::Toggle
+                } else if shift {
+                    SelectionChange::Add
+                } else {
+                    SelectionChange::Replace
+                };
                 if let Some(object) = document.object_at(point) {
-                    if shift {
-                        document.toggle_selection(object);
-                    } else if !document.selection().contains(&object) {
-                        document.select_only(Some(object));
+                    match change {
+                        SelectionChange::Replace => {
+                            if !document.selection().contains(&object) {
+                                document.select_only(Some(object));
+                            }
+                        }
+                        SelectionChange::Add | SelectionChange::Toggle => {
+                            document.toggle_selection(object);
+                        }
                     }
                     self.drag = if document.selection().contains(&object) {
                         Some(match object {
@@ -390,10 +444,11 @@ impl CanvasState {
                         None
                     };
                 } else {
-                    if !shift {
-                        document.clear_selection();
-                    }
-                    self.drag = None;
+                    self.drag = Some(DragState::Marquee {
+                        start: point,
+                        current: point,
+                        change,
+                    });
                 }
             }
         }
@@ -402,7 +457,9 @@ impl CanvasState {
             if let Some(drag) = self.drag.as_mut() {
                 if let Some(point) = latest_point {
                     match drag {
-                        DragState::Objects { current, .. } | DragState::Segment { current, .. } => {
+                        DragState::Objects { current, .. }
+                        | DragState::Segment { current, .. }
+                        | DragState::Marquee { current, .. } => {
                             *current = point;
                         }
                     }
@@ -446,6 +503,25 @@ impl CanvasState {
                             }
                         }
                     }
+                    DragState::Marquee {
+                        start,
+                        current,
+                        change,
+                    } => {
+                        let mode = if start.x <= current.x {
+                            SelectionMode::Enclosing
+                        } else {
+                            SelectionMode::Touching
+                        };
+                        let count = document.select_in_rect(start, current, mode, change);
+                        if count > 0 {
+                            let rule = match mode {
+                                SelectionMode::Enclosing => "inclus",
+                                SelectionMode::Touching => "touchés",
+                            };
+                            status.success(format!("{count} objet(s) {rule} sélectionné(s)."));
+                        }
+                    }
                 }
             }
         }
@@ -455,6 +531,129 @@ impl CanvasState {
                 self.handle_click(point, document, tool, status, shift);
             }
         }
+    }
+
+    fn context_menu(
+        &mut self,
+        response: &egui::Response,
+        document: &mut Document,
+        status: &mut Status,
+    ) {
+        let point = self.last_pointer_grid;
+        response.context_menu(|ui| {
+            let Some(point) = point else {
+                ui.label("Aucun emplacement sous le curseur.");
+                return;
+            };
+            let object = document.object_at(point);
+            if let Some(object) = object {
+                if !document.selection().contains(&object) {
+                    document.select_only(Some(object));
+                }
+                match object {
+                    ObjectRef::Symbol(_) => {
+                        if ui.button("Pivoter").clicked() {
+                            report(status, document.rotate_selection(), "Symbole(s) pivoté(s).");
+                            ui.close();
+                        }
+                        if ui.button("Miroir").clicked() {
+                            report(
+                                status,
+                                document.mirror_selection(),
+                                "Symbole(s) mis en miroir.",
+                            );
+                            ui.close();
+                        }
+                    }
+                    ObjectRef::Label(id) => {
+                        if ui.button("Renommer").clicked() {
+                            if let Some(label) = document.label(id) {
+                                self.label_dialog = Some(LabelDialog {
+                                    at: label.at,
+                                    text: label.text.clone(),
+                                    error: None,
+                                    focus: true,
+                                });
+                            }
+                            ui.close();
+                        }
+                        if ui.button("Sélectionner le net").clicked() {
+                            report(
+                                status,
+                                document.select_net_at(point).map(|_| ()),
+                                "Net sélectionné.",
+                            );
+                            ui.close();
+                        }
+                    }
+                    ObjectRef::Wire(_) | ObjectRef::Junction(_) => {
+                        if ui.button("Sélectionner le net").clicked() {
+                            report(
+                                status,
+                                document.select_net_at(point).map(|_| ()),
+                                "Net sélectionné.",
+                            );
+                            ui.close();
+                        }
+                    }
+                }
+                ui.separator();
+                if ui.button("Copier").clicked() {
+                    report(status, document.copy_selection().map(|_| ()), "Copié.");
+                    ui.close();
+                }
+                if ui.button("Dupliquer").clicked() {
+                    report(
+                        status,
+                        document.duplicate_selection().map(|_| ()),
+                        "Sélection dupliquée.",
+                    );
+                    ui.close();
+                }
+                if ui.button("Supprimer").clicked() {
+                    report(status, document.delete_selection(), "Sélection supprimée.");
+                    ui.close();
+                }
+            } else {
+                if document.clipboard().is_some() {
+                    if ui.button("Coller ici").clicked() {
+                        report(
+                            status,
+                            document.paste_clipboard(point).map(|_| ()),
+                            "Collé.",
+                        );
+                        ui.close();
+                    }
+                    ui.separator();
+                }
+                if ui.button("Tout sélectionner").clicked() {
+                    document.select_all();
+                    status.info("Tous les objets sont sélectionnés.");
+                    ui.close();
+                }
+                if ui.button("Ajuster la vue").clicked() {
+                    self.request_fit();
+                    ui.close();
+                }
+                ui.separator();
+                if ui.button("Annuler").clicked() {
+                    match document.undo() {
+                        Ok(true) => status.success("Dernière modification annulée."),
+                        Ok(false) => status.info("Aucune modification à annuler."),
+                        Err(error) => status.error(error.user_message()),
+                    }
+                    ui.close();
+                }
+                if ui.button("Rétablir").clicked() {
+                    match document.redo() {
+                        Ok(true) => status.success("Modification rétablie."),
+                        Ok(false) => status.info("Aucune modification à rétablir."),
+                        Err(error) => status.error(error.user_message()),
+                    }
+                    ui.close();
+                }
+            }
+        });
     }
 
     fn handle_click(
@@ -818,6 +1017,17 @@ impl CanvasState {
                     }
                 }
             }
+            Some(DragState::Marquee { start, current, .. }) => {
+                let min = GridPos::new(start.x.min(current.x), start.y.min(current.y));
+                let max = GridPos::new(start.x.max(current.x), start.y.max(current.y));
+                let rectangle = Rect::from_two_pos(
+                    self.viewport.grid_to_screen(rect, min),
+                    self.viewport.grid_to_screen(rect, max),
+                );
+                let color = if start.x <= current.x { ACCENT } else { HOVER };
+                painter.rect_filled(rectangle, 0.0, color.gamma_multiply(0.08));
+                painter.rect_stroke(rectangle, 0.0, Stroke::new(1.2, color), StrokeKind::Inside);
+            }
             None => {}
         }
 
@@ -981,6 +1191,80 @@ impl CanvasState {
                             &label.text,
                             FontId::proportional(13.0),
                             ACCENT.gamma_multiply(0.6),
+                        );
+                    }
+                }
+            }
+        }
+    }
+
+    fn paint_clipboard_ghost(
+        &self,
+        painter: &Painter,
+        rect: Rect,
+        document: &Document,
+        at: GridPos,
+    ) {
+        let Some(clipboard) = document.clipboard() else {
+            return;
+        };
+        let Some(delta) = at.checked_sub(clipboard.anchor()) else {
+            return;
+        };
+        let mut ghost = painter.clone();
+        ghost.set_opacity(0.5);
+        for item in clipboard.items() {
+            match item {
+                ClipboardItem::Symbol(symbol) => {
+                    if let Some(position) = symbol.at.checked_add(delta) {
+                        let mut preview = symbol.clone();
+                        preview.at = position;
+                        paint_symbol(
+                            &ghost,
+                            &preview,
+                            document.registry().get(&preview.kind),
+                            self.viewport.grid_to_screen(rect, position),
+                            self.viewport.scale(),
+                            GlyphColors {
+                                body: ACCENT,
+                                pin: ACCENT,
+                                label: ACCENT,
+                                value: ACCENT,
+                            },
+                            false,
+                        );
+                    }
+                }
+                ClipboardItem::Wire(wire) => {
+                    if let (Some(a), Some(b)) =
+                        (wire.a.checked_add(delta), wire.b.checked_add(delta))
+                    {
+                        ghost.line_segment(
+                            [
+                                self.viewport.grid_to_screen(rect, a),
+                                self.viewport.grid_to_screen(rect, b),
+                            ],
+                            Stroke::new(2.5, ACCENT.gamma_multiply(0.7)),
+                        );
+                    }
+                }
+                ClipboardItem::Junction(junction) => {
+                    if let Some(position) = junction.at.checked_add(delta) {
+                        ghost.circle_filled(
+                            self.viewport.grid_to_screen(rect, position),
+                            4.0,
+                            ACCENT.gamma_multiply(0.7),
+                        );
+                    }
+                }
+                ClipboardItem::Label(label) => {
+                    if let Some(position) = label.at.checked_add(delta) {
+                        ghost.text(
+                            self.viewport.grid_to_screen(rect, position),
+                            Align2::LEFT_BOTTOM,
+                            &label.text,
+                            FontId::proportional(13.0),
+                            ACCENT,
                         );
                     }
                 }
@@ -1158,6 +1442,13 @@ impl Default for CanvasState {
     }
 }
 
+fn report(status: &mut Status, result: Result<(), ActionError>, success: &str) {
+    match result {
+        Ok(()) => status.success(success),
+        Err(error) => status.error(error.user_message()),
+    }
+}
+
 fn paint_symbol_outline(
     painter: &Painter,
     document: &Document,
@@ -1309,6 +1600,158 @@ mod tests {
             document.selection().iter().copied().collect::<Vec<_>>(),
             vec![ObjectRef::Symbol(resistor.id)]
         );
+    }
+
+    #[test]
+    fn canvas_marquee_selects_in_both_directions() {
+        let context = egui::Context::default();
+        let mut canvas = CanvasState::new();
+        let mut document = Document::new();
+        document
+            .add_symbol(editor_core::SymbolKind::Resistor, GridPos::new(0, 0))
+            .unwrap();
+        document
+            .add_symbol(editor_core::SymbolKind::Resistor, GridPos::new(4, 0))
+            .unwrap();
+        document.clear_selection();
+        let mut status = Status::new_info("");
+        let tool = crate::ui::Tool::Select;
+        frame(
+            &context,
+            &mut canvas,
+            &mut document,
+            &mut status,
+            &tool,
+            Vec::new(),
+        );
+        let start = canvas
+            .viewport()
+            .grid_to_screen(screen(), GridPos::new(-3, -3));
+        let end = canvas
+            .viewport()
+            .grid_to_screen(screen(), GridPos::new(3, 3));
+        frame(
+            &context,
+            &mut canvas,
+            &mut document,
+            &mut status,
+            &tool,
+            vec![
+                Event::PointerMoved(start),
+                Event::PointerButton {
+                    pos: start,
+                    button: PointerButton::Primary,
+                    pressed: true,
+                    modifiers: Modifiers::default(),
+                },
+            ],
+        );
+        frame(
+            &context,
+            &mut canvas,
+            &mut document,
+            &mut status,
+            &tool,
+            vec![Event::PointerMoved(end)],
+        );
+        frame(
+            &context,
+            &mut canvas,
+            &mut document,
+            &mut status,
+            &tool,
+            vec![Event::PointerButton {
+                pos: end,
+                button: PointerButton::Primary,
+                pressed: false,
+                modifiers: Modifiers::default(),
+            }],
+        );
+        assert_eq!(document.selection().len(), 1);
+        assert!(document
+            .selection()
+            .iter()
+            .all(|object| matches!(object, ObjectRef::Symbol(_))));
+
+        let start = canvas
+            .viewport()
+            .grid_to_screen(screen(), GridPos::new(7, 3));
+        let end = canvas
+            .viewport()
+            .grid_to_screen(screen(), GridPos::new(4, -3));
+        frame(
+            &context,
+            &mut canvas,
+            &mut document,
+            &mut status,
+            &tool,
+            vec![
+                Event::PointerMoved(start),
+                Event::PointerButton {
+                    pos: start,
+                    button: PointerButton::Primary,
+                    pressed: true,
+                    modifiers: Modifiers::default(),
+                },
+            ],
+        );
+        frame(
+            &context,
+            &mut canvas,
+            &mut document,
+            &mut status,
+            &tool,
+            vec![Event::PointerMoved(end)],
+        );
+        frame(
+            &context,
+            &mut canvas,
+            &mut document,
+            &mut status,
+            &tool,
+            vec![Event::PointerButton {
+                pos: end,
+                button: PointerButton::Primary,
+                pressed: false,
+                modifiers: Modifiers::default(),
+            }],
+        );
+        assert_eq!(document.selection().len(), 1);
+        assert!(document
+            .selection()
+            .iter()
+            .any(|object| matches!(object, ObjectRef::Symbol(_))));
+    }
+
+    #[test]
+    fn canvas_paste_preview_places_the_clipboard() {
+        let context = egui::Context::default();
+        let mut canvas = CanvasState::new();
+        let mut document = Document::new();
+        let symbol = document
+            .add_symbol(editor_core::SymbolKind::Resistor, GridPos::new(0, 0))
+            .unwrap();
+        document.select_only(Some(ObjectRef::Symbol(symbol)));
+        document.copy_selection().unwrap();
+        let mut status = Status::new_info("");
+        let tool = crate::ui::Tool::Select;
+        frame(
+            &context,
+            &mut canvas,
+            &mut document,
+            &mut status,
+            &tool,
+            Vec::new(),
+        );
+        canvas.begin_paste();
+        let at = canvas
+            .viewport()
+            .grid_to_screen(screen(), GridPos::new(2, 2));
+        click(&context, &mut canvas, &mut document, &mut status, &tool, at);
+        assert_eq!(document.schematic().symbols().count(), 2);
+        assert!(canvas.is_pasting());
+        canvas.cancel_interaction();
+        assert!(!canvas.is_pasting());
     }
 
     #[test]
