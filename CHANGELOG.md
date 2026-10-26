@@ -6,6 +6,8 @@ sémantique.
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-10-26
+
 ### Added
 
 - Gouvernance Git, workflow de branches et conventions de commits.

@@ -7,8 +7,9 @@ sont séparés, testables sans navigateur et compilables pour
 
 ## État
 
-Les dix étapes du projet sont livrées : 229 tests natifs, clippy strict, cible
-WASM, benchmarks, exemples, CI et distribution web.
+Version **0.2.0**. Les dix étapes du projet et les lots G1 à G8 sont livrés :
+229 tests natifs, clippy strict, cible WASM, benchmarks, exemples, CI et
+distribution web.
 
 - **Cœur** : unités SI, netlist validée, MNA dense, DC, transitoire à pas fixe,
   AC petits signaux, Newton avec continuations, audit d'énergie.
