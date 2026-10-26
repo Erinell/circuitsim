@@ -1,9 +1,11 @@
 //! Interactive schematic canvas with pan, zoom, placement, and dragging.
 
-use editor_core::{GridPos, ObjectRef, Symbol, SymbolId};
+use std::collections::BTreeSet;
+
+use editor_core::{GridPos, ObjectRef, Orientation, SnapTarget, Symbol, SymbolId, WireId};
 use eframe::egui::{
-    self, Align2, Color32, CursorIcon, FontId, Painter, PointerButton, Pos2, Rect, Sense, Stroke,
-    StrokeKind, Ui, Vec2,
+    self, Align2, Color32, CursorIcon, FontId, Key, Painter, PointerButton, Pos2, Rect, Sense,
+    Stroke, StrokeKind, Ui, Vec2,
 };
 
 use crate::document::Document;
@@ -24,16 +26,28 @@ pub struct CanvasState {
     viewport: Viewport,
     drag: Option<DragState>,
     wire_start: Option<GridPos>,
+    wire_prefer_horizontal: bool,
+    placement_orientation: Orientation,
+    placement_mirrored: bool,
     hover: Option<ObjectRef>,
+    hover_net: BTreeSet<ObjectRef>,
+    snap_target: Option<SnapTarget>,
+    last_pointer_grid: Option<GridPos>,
     fit_requested: bool,
     label_dialog: Option<LabelDialog>,
 }
 
 #[derive(Clone, Debug)]
-struct DragState {
-    start: GridPos,
-    current: GridPos,
-    objects: Vec<ObjectRef>,
+enum DragState {
+    Objects {
+        start: GridPos,
+        current: GridPos,
+    },
+    Segment {
+        wire: WireId,
+        start: GridPos,
+        current: GridPos,
+    },
 }
 
 /// Pending label name dialog.
@@ -51,7 +65,13 @@ impl CanvasState {
             viewport: Viewport::new(),
             drag: None,
             wire_start: None,
+            wire_prefer_horizontal: true,
+            placement_orientation: Orientation::R0,
+            placement_mirrored: false,
             hover: None,
+            hover_net: BTreeSet::new(),
+            snap_target: None,
+            last_pointer_grid: None,
             fit_requested: true,
             label_dialog: None,
         }
@@ -71,6 +91,34 @@ impl CanvasState {
     pub fn cancel_interaction(&mut self) {
         self.drag = None;
         self.wire_start = None;
+        self.wire_prefer_horizontal = true;
+        self.placement_orientation = Orientation::R0;
+        self.placement_mirrored = false;
+    }
+
+    /// Returns the last snapped pointer position, if any.
+    pub const fn last_pointer_grid(&self) -> Option<GridPos> {
+        self.last_pointer_grid
+    }
+
+    /// Rotates the placement ghost.
+    pub fn rotate_placement(&mut self) {
+        self.placement_orientation = self.placement_orientation.next();
+    }
+
+    /// Mirrors the placement ghost.
+    pub fn mirror_placement(&mut self) {
+        self.placement_mirrored = !self.placement_mirrored;
+    }
+
+    /// Returns the current placement orientation.
+    pub const fn placement_orientation(&self) -> Orientation {
+        self.placement_orientation
+    }
+
+    /// Returns the current placement mirror state.
+    pub const fn placement_mirrored(&self) -> bool {
+        self.placement_mirrored
     }
 
     /// Returns true while the label name dialog is open.
@@ -112,24 +160,45 @@ impl CanvasState {
         if interactive {
             self.handle_viewport(ui, &response, rect);
         }
-        let hovered_point = ui
+        let raw_point = ui
             .input(|input| input.pointer.hover_pos())
             .filter(|position| rect.contains(*position))
             .and_then(|position| self.viewport.screen_to_grid(rect, position));
-        self.hover = hovered_point.and_then(|point| document.object_at(point));
+        self.snap_target = if matches!(tool, crate::ui::Tool::Wire | crate::ui::Tool::Place(_)) {
+            raw_point.and_then(|point| document.nearest_snap(point))
+        } else {
+            None
+        };
+        let focus_point = self.snap_target.map_or(raw_point, |target| Some(target.at));
+        self.last_pointer_grid = focus_point;
+        self.hover = raw_point.and_then(|point| document.object_at(point));
+        self.hover_net = raw_point
+            .filter(|point| {
+                document.pin_at(*point).is_some()
+                    || matches!(
+                        document.object_at(*point),
+                        Some(ObjectRef::Wire(_) | ObjectRef::Label(_) | ObjectRef::Junction(_))
+                    )
+            })
+            .and_then(|point| document.net_objects_at(point))
+            .unwrap_or_default();
 
         if interactive {
-            self.handle_input(ui, &response, rect, document, tool, status, hovered_point);
+            self.handle_placement_keys(ui, tool);
+            self.handle_input(ui, &response, rect, document, tool, status, focus_point);
         }
-        let hovered_point = ui
-            .input(|input| input.pointer.hover_pos())
-            .filter(|position| rect.contains(*position))
-            .and_then(|position| self.viewport.screen_to_grid(rect, position));
+        let hovered_point = focus_point.or_else(|| {
+            ui.input(|input| input.pointer.hover_pos())
+                .filter(|position| rect.contains(*position))
+                .and_then(|position| self.viewport.screen_to_grid(rect, position))
+        });
 
         self.paint_grid(&painter, rect);
         self.paint_document(&painter, rect, document);
         self.paint_hover(&painter, rect, document);
-        self.paint_previews(&painter, rect, document, tool, hovered_point);
+        let shift = ui.input(|input| input.modifiers.shift);
+        self.paint_previews(&painter, rect, document, tool, hovered_point, shift);
+        self.paint_snap(&painter, rect);
         self.paint_empty_state(&painter, rect, document);
         self.paint_tool_badge(&painter, rect, tool);
         self.set_cursor(ui, &response, tool);
@@ -145,6 +214,12 @@ impl CanvasState {
         let Some(dialog) = self.label_dialog.as_mut() else {
             return;
         };
+        let names = document
+            .existing_net_names()
+            .into_iter()
+            .filter(|name| name != "0")
+            .take(8)
+            .collect::<Vec<_>>();
         let mut submit = false;
         let mut cancel = false;
         egui::Window::new("Nommer le net")
@@ -165,6 +240,17 @@ impl CanvasState {
                 }
                 if let Some(error) = &dialog.error {
                     ui.colored_label(Color32::from_rgb(240, 128, 128), error);
+                }
+                if !names.is_empty() {
+                    ui.label(egui::RichText::new("Nets existants").small().color(MUTED));
+                    ui.horizontal_wrapped(|ui| {
+                        for name in &names {
+                            if ui.small_button(name).clicked() {
+                                dialog.text.clone_from(name);
+                                dialog.focus = true;
+                            }
+                        }
+                    });
                 }
                 ui.label(
                     egui::RichText::new("Le nom est coupé autour des espaces extérieurs.")
@@ -232,6 +318,18 @@ impl CanvasState {
         }
     }
 
+    fn handle_placement_keys(&mut self, ui: &Ui, tool: &crate::ui::Tool) {
+        if !matches!(tool, crate::ui::Tool::Place(_)) {
+            return;
+        }
+        if ui.input(|input| input.key_pressed(Key::R)) {
+            self.rotate_placement();
+        }
+        if ui.input(|input| input.key_pressed(Key::F)) {
+            self.mirror_placement();
+        }
+    }
+
     #[allow(clippy::too_many_arguments)]
     fn handle_input(
         &mut self,
@@ -243,13 +341,14 @@ impl CanvasState {
         status: &mut Status,
         hovered_point: Option<GridPos>,
     ) {
-        let (primary_pressed, primary_released, primary_down, shift, latest_pos) =
+        let (primary_pressed, primary_released, primary_down, shift, alt, latest_pos) =
             ui.input(|input| {
                 (
                     input.pointer.primary_pressed(),
                     input.pointer.primary_released(),
                     input.pointer.primary_down(),
                     input.modifiers.shift,
+                    input.modifiers.alt,
                     input.pointer.hover_pos(),
                 )
             });
@@ -259,21 +358,37 @@ impl CanvasState {
 
         if response.hovered() && primary_pressed && matches!(tool, crate::ui::Tool::Select) {
             if let Some(point) = hovered_point {
+                if alt {
+                    match document.select_net_at(point) {
+                        Ok(count) => {
+                            status.success(format!("{count} objet(s) du net sélectionné(s)."))
+                        }
+                        Err(error) => status.error(error.user_message()),
+                    }
+                    self.drag = None;
+                    return;
+                }
                 if let Some(object) = document.object_at(point) {
                     if shift {
                         document.toggle_selection(object);
                     } else if !document.selection().contains(&object) {
                         document.select_only(Some(object));
                     }
-                    if document.selection().contains(&object) {
-                        self.drag = Some(DragState {
-                            start: point,
-                            current: point,
-                            objects: document.selection().iter().copied().collect(),
-                        });
+                    self.drag = if document.selection().contains(&object) {
+                        Some(match object {
+                            ObjectRef::Wire(wire) => DragState::Segment {
+                                wire,
+                                start: point,
+                                current: point,
+                            },
+                            _ => DragState::Objects {
+                                start: point,
+                                current: point,
+                            },
+                        })
                     } else {
-                        self.drag = None;
-                    }
+                        None
+                    };
                 } else {
                     if !shift {
                         document.clear_selection();
@@ -286,22 +401,50 @@ impl CanvasState {
         if primary_down {
             if let Some(drag) = self.drag.as_mut() {
                 if let Some(point) = latest_point {
-                    drag.current = point;
+                    match drag {
+                        DragState::Objects { current, .. } | DragState::Segment { current, .. } => {
+                            *current = point;
+                        }
+                    }
                 }
             }
         }
 
         if primary_released {
             if let Some(drag) = self.drag.take() {
-                let end = latest_point.unwrap_or(drag.current);
-                let delta = GridPos::new(
-                    end.x.saturating_sub(drag.start.x),
-                    end.y.saturating_sub(drag.start.y),
-                );
-                if delta != GridPos::default() {
-                    match document.move_selection(delta) {
-                        Ok(()) => status.success("Sélection déplacée."),
-                        Err(error) => status.error(error.user_message()),
+                match drag {
+                    DragState::Objects { start, current } => {
+                        let end = latest_point.unwrap_or(current);
+                        let delta = GridPos::new(
+                            end.x.saturating_sub(start.x),
+                            end.y.saturating_sub(start.y),
+                        );
+                        if delta != GridPos::default() {
+                            match document.move_selection(delta) {
+                                Ok(()) => status.success("Sélection déplacée."),
+                                Err(error) => status.error(error.user_message()),
+                            }
+                        }
+                    }
+                    DragState::Segment {
+                        wire,
+                        start,
+                        current,
+                    } => {
+                        let end = latest_point.unwrap_or(current);
+                        let delta = document.wire(wire).map_or(GridPos::default(), |segment| {
+                            if segment.is_horizontal() {
+                                GridPos::new(0, end.y.saturating_sub(start.y))
+                            } else {
+                                GridPos::new(end.x.saturating_sub(start.x), 0)
+                            }
+                        });
+                        if delta != GridPos::default() {
+                            match document.move_wire_segment(wire, delta) {
+                                Ok(()) => status.success("Segment déplacé."),
+                                Err(error) => status.error(error.user_message()),
+                            }
+                        }
                     }
                 }
             }
@@ -309,7 +452,7 @@ impl CanvasState {
 
         if response.clicked_by(PointerButton::Primary) {
             if let Some(point) = hovered_point {
-                self.handle_click(point, document, tool, status);
+                self.handle_click(point, document, tool, status, shift);
             }
         }
     }
@@ -320,25 +463,62 @@ impl CanvasState {
         document: &mut Document,
         tool: &crate::ui::Tool,
         status: &mut Status,
+        shift: bool,
     ) {
         match tool {
             crate::ui::Tool::Select => {}
-            crate::ui::Tool::Place(kind) => match document.add_symbol(kind.clone(), point) {
-                Ok(_) => status.success(format!(
-                    "{} ajouté à ({}, {}).",
-                    symbol_kind_name(kind),
-                    point.x,
-                    point.y
-                )),
-                Err(error) => status.error(error.user_message()),
-            },
+            crate::ui::Tool::Place(kind) => {
+                let insertable = document
+                    .registry()
+                    .get(kind)
+                    .is_some_and(|definition| definition.pins.len() == 2);
+                if let Some(ObjectRef::Wire(wire)) = document.object_at(point) {
+                    if insertable {
+                        match document.insert_symbol_on_wire(kind.clone(), wire, point) {
+                            Ok(_) => {
+                                status.success(format!(
+                                    "{} inséré en série à ({}, {}).",
+                                    symbol_kind_name(kind),
+                                    point.x,
+                                    point.y
+                                ));
+                                return;
+                            }
+                            Err(error) => {
+                                status.error(error.user_message());
+                                return;
+                            }
+                        }
+                    }
+                }
+                match document.add_symbol_oriented(
+                    kind.clone(),
+                    point,
+                    self.placement_orientation,
+                    self.placement_mirrored,
+                ) {
+                    Ok(_) => status.success(format!(
+                        "{} ajouté à ({}, {}).",
+                        symbol_kind_name(kind),
+                        point.x,
+                        point.y
+                    )),
+                    Err(error) => status.error(error.user_message()),
+                }
+            }
             crate::ui::Tool::Wire => {
                 if let Some(start) = self.wire_start {
                     if start == point {
                         self.wire_start = None;
                         status.info("Fil annulé : extrémités identiques.");
                     } else {
-                        match document.add_wire(start, point) {
+                        let prefer_horizontal = if shift {
+                            !self.wire_prefer_horizontal
+                        } else {
+                            self.wire_prefer_horizontal
+                        };
+                        let path = document.route_path(start, point, prefer_horizontal);
+                        match document.add_wire_path(&path) {
                             Ok(_) => {
                                 self.wire_start = None;
                                 status.success("Fil ajouté.");
@@ -358,7 +538,9 @@ impl CanvasState {
             crate::ui::Tool::Label => {
                 self.label_dialog = Some(LabelDialog {
                     at: point,
-                    text: "NET".to_owned(),
+                    text: document
+                        .net_name_at(point)
+                        .unwrap_or_else(|| "NET".to_owned()),
                     error: None,
                     focus: true,
                 });
@@ -431,7 +613,8 @@ impl CanvasState {
         for wire in document.schematic().wires() {
             let selected = document.selection().contains(&ObjectRef::Wire(wire.id));
             let hovered = self.hover == Some(ObjectRef::Wire(wire.id));
-            if hovered && !selected {
+            let net_hovered = self.hover_net.contains(&ObjectRef::Wire(wire.id));
+            if (hovered || net_hovered) && !selected {
                 painter.line_segment(
                     [
                         self.viewport.grid_to_screen(rect, wire.a),
@@ -448,14 +631,14 @@ impl CanvasState {
                 Stroke::new(
                     if selected {
                         4.0
-                    } else if hovered {
+                    } else if hovered || net_hovered {
                         3.0
                     } else {
                         2.2
                     },
                     if selected {
                         ACCENT
-                    } else if hovered {
+                    } else if hovered || net_hovered {
                         HOVER
                     } else {
                         WIRE
@@ -467,16 +650,21 @@ impl CanvasState {
         for symbol in document.schematic().symbols() {
             let selected = document.selection().contains(&ObjectRef::Symbol(symbol.id));
             let hovered = self.hover == Some(ObjectRef::Symbol(symbol.id));
+            let net_hovered = self.hover_net.contains(&ObjectRef::Symbol(symbol.id));
             let body = if selected {
                 ACCENT
-            } else if hovered {
+            } else if hovered || net_hovered {
                 HOVER
             } else {
                 SYMBOL
             };
             let colors = GlyphColors {
                 body,
-                pin: if selected || hovered { body } else { PIN },
+                pin: if selected || hovered || net_hovered {
+                    body
+                } else {
+                    PIN
+                },
                 label: if selected { ACCENT } else { LABEL },
                 value: if selected { ACCENT } else { MUTED },
             };
@@ -491,7 +679,7 @@ impl CanvasState {
             );
             if selected {
                 paint_symbol_outline(painter, document, symbol, &self.viewport, rect, ACCENT, 1.7);
-            } else if hovered {
+            } else if hovered || net_hovered {
                 paint_symbol_outline(painter, document, symbol, &self.viewport, rect, HOVER, 1.2);
             }
         }
@@ -501,12 +689,17 @@ impl CanvasState {
                 .selection()
                 .contains(&ObjectRef::Junction(junction.id));
             let hovered = self.hover == Some(ObjectRef::Junction(junction.id));
+            let net_hovered = self.hover_net.contains(&ObjectRef::Junction(junction.id));
             let radius = (self.viewport.scale() * 0.28).clamp(3.0, 7.0)
-                * if selected || hovered { 1.25 } else { 1.0 };
+                * if selected || hovered || net_hovered {
+                    1.25
+                } else {
+                    1.0
+                };
             let position = self.viewport.grid_to_screen(rect, junction.at);
             let color = if selected {
                 ACCENT
-            } else if hovered {
+            } else if hovered || net_hovered {
                 HOVER
             } else {
                 WIRE
@@ -518,10 +711,11 @@ impl CanvasState {
         for label in document.schematic().labels() {
             let selected = document.selection().contains(&ObjectRef::Label(label.id));
             let hovered = self.hover == Some(ObjectRef::Label(label.id));
+            let net_hovered = self.hover_net.contains(&ObjectRef::Label(label.id));
             let position = self.viewport.grid_to_screen(rect, label.at);
             let color = if selected {
                 ACCENT
-            } else if hovered {
+            } else if hovered || net_hovered {
                 HOVER
             } else {
                 LABEL
@@ -581,97 +775,76 @@ impl CanvasState {
         document: &Document,
         tool: &crate::ui::Tool,
         hovered_point: Option<GridPos>,
+        shift: bool,
     ) {
-        if let Some(drag) = &self.drag {
-            let delta = GridPos::new(
-                drag.current.x.saturating_sub(drag.start.x),
-                drag.current.y.saturating_sub(drag.start.y),
-            );
-            if delta != GridPos::default() {
-                let mut ghost_painter = painter.clone();
-                ghost_painter.set_opacity(0.45);
-                for object in &drag.objects {
-                    match object {
-                        ObjectRef::Symbol(id) => {
-                            if let Some(symbol) = document.symbol(*id) {
-                                if let Some(at) = symbol.at.checked_add(delta) {
-                                    paint_symbol(
-                                        &ghost_painter,
-                                        symbol,
-                                        document.registry().get(&symbol.kind),
-                                        self.viewport.grid_to_screen(rect, at),
-                                        self.viewport.scale(),
-                                        GlyphColors {
-                                            body: ACCENT,
-                                            pin: ACCENT,
-                                            label: ACCENT,
-                                            value: ACCENT,
-                                        },
-                                        false,
-                                    );
-                                }
-                            }
-                        }
-                        ObjectRef::Wire(id) => {
-                            if let Some(wire) = document.wire(*id) {
-                                if let (Some(a), Some(b)) =
-                                    (wire.a.checked_add(delta), wire.b.checked_add(delta))
-                                {
-                                    painter.line_segment(
-                                        [
-                                            self.viewport.grid_to_screen(rect, a),
-                                            self.viewport.grid_to_screen(rect, b),
-                                        ],
-                                        Stroke::new(3.0, ACCENT.gamma_multiply(0.45)),
-                                    );
-                                }
-                            }
-                        }
-                        ObjectRef::Junction(id) => {
-                            if let Some(junction) = document.junction(*id) {
-                                if let Some(at) = junction.at.checked_add(delta) {
-                                    painter.circle_filled(
-                                        self.viewport.grid_to_screen(rect, at),
-                                        4.5,
-                                        ACCENT.gamma_multiply(0.5),
-                                    );
-                                }
-                            }
-                        }
-                        ObjectRef::Label(id) => {
-                            if let Some(label) = document.label(*id) {
-                                if let Some(at) = label.at.checked_add(delta) {
-                                    painter.text(
-                                        self.viewport.grid_to_screen(rect, at),
-                                        Align2::LEFT_BOTTOM,
-                                        &label.text,
-                                        FontId::proportional(13.0),
-                                        ACCENT.gamma_multiply(0.6),
-                                    );
-                                }
-                            }
+        match &self.drag {
+            Some(DragState::Objects { start, current }) => {
+                let delta = GridPos::new(
+                    current.x.saturating_sub(start.x),
+                    current.y.saturating_sub(start.y),
+                );
+                if delta != GridPos::default() {
+                    let mut ghost_painter = painter.clone();
+                    ghost_painter.set_opacity(0.45);
+                    for object in document.selection() {
+                        self.paint_ghost_object(&ghost_painter, rect, document, *object, delta);
+                    }
+                    self.paint_alignment_guides(painter, rect, document, delta);
+                }
+            }
+            Some(DragState::Segment {
+                wire,
+                start,
+                current,
+            }) => {
+                if let Some(segment) = document.wire(*wire) {
+                    let delta = if segment.is_horizontal() {
+                        GridPos::new(0, current.y.saturating_sub(start.y))
+                    } else {
+                        GridPos::new(current.x.saturating_sub(start.x), 0)
+                    };
+                    if delta != GridPos::default() {
+                        if let (Some(a), Some(b)) =
+                            (segment.a.checked_add(delta), segment.b.checked_add(delta))
+                        {
+                            painter.line_segment(
+                                [
+                                    self.viewport.grid_to_screen(rect, a),
+                                    self.viewport.grid_to_screen(rect, b),
+                                ],
+                                Stroke::new(3.0, ACCENT.gamma_multiply(0.6)),
+                            );
                         }
                     }
                 }
             }
+            None => {}
         }
 
         if let Some(start) = self.wire_start {
             if let Some(end) = hovered_point {
-                let start_screen = self.viewport.grid_to_screen(rect, start);
-                let end_screen = self.viewport.grid_to_screen(rect, end);
-                let color = ACCENT.gamma_multiply(0.9);
-                if start.x != end.x && start.y != end.y {
-                    let corner = self
-                        .viewport
-                        .grid_to_screen(rect, GridPos::new(end.x, start.y));
-                    painter.line_segment([start_screen, corner], Stroke::new(2.0, color));
-                    painter.line_segment([corner, end_screen], Stroke::new(2.0, color));
+                let prefer_horizontal = if shift {
+                    !self.wire_prefer_horizontal
                 } else {
-                    painter.line_segment([start_screen, end_screen], Stroke::new(2.0, color));
+                    self.wire_prefer_horizontal
+                };
+                let path = document.route_path(start, end, prefer_horizontal);
+                let color = ACCENT.gamma_multiply(0.9);
+                for pair in path.windows(2) {
+                    painter.line_segment(
+                        [
+                            self.viewport.grid_to_screen(rect, pair[0]),
+                            self.viewport.grid_to_screen(rect, pair[1]),
+                        ],
+                        Stroke::new(2.0, color),
+                    );
                 }
-                painter.circle_filled(start_screen, 4.0, color);
-                painter.circle_stroke(end_screen, 5.0, Stroke::new(1.5, color));
+                painter.circle_filled(self.viewport.grid_to_screen(rect, start), 4.0, color);
+                painter.circle_stroke(
+                    self.viewport.grid_to_screen(rect, end),
+                    5.0,
+                    Stroke::new(1.5, color),
+                );
             }
         }
 
@@ -683,8 +856,8 @@ impl CanvasState {
                         definition,
                         point,
                         "",
-                        editor_core::Orientation::R0,
-                        false,
+                        self.placement_orientation,
+                        self.placement_mirrored,
                     );
                     let mut ghost_painter = painter.clone();
                     ghost_painter.set_opacity(0.55);
@@ -702,6 +875,23 @@ impl CanvasState {
                         },
                         false,
                     );
+                    for pin in &definition.pins {
+                        if let Some(position) = preview.pin_position_of(pin) {
+                            painter.circle_stroke(
+                                self.viewport.grid_to_screen(rect, position),
+                                (self.viewport.scale() * 0.4).clamp(4.0, 8.0),
+                                Stroke::new(1.0, ACCENT.gamma_multiply(0.7)),
+                            );
+                        }
+                    }
+                }
+                if matches!(document.object_at(point), Some(ObjectRef::Wire(_)))
+                    && document
+                        .registry()
+                        .get(kind)
+                        .is_some_and(|definition| definition.pins.len() == 2)
+                {
+                    painter.circle_filled(self.viewport.grid_to_screen(rect, point), 4.0, ACCENT);
                 }
             }
         } else if let crate::ui::Tool::Junction = tool {
@@ -725,6 +915,146 @@ impl CanvasState {
                 );
             }
         }
+    }
+
+    fn paint_ghost_object(
+        &self,
+        painter: &Painter,
+        rect: Rect,
+        document: &Document,
+        object: ObjectRef,
+        delta: GridPos,
+    ) {
+        match object {
+            ObjectRef::Symbol(id) => {
+                if let Some(symbol) = document.symbol(id) {
+                    if let Some(at) = symbol.at.checked_add(delta) {
+                        paint_symbol(
+                            painter,
+                            symbol,
+                            document.registry().get(&symbol.kind),
+                            self.viewport.grid_to_screen(rect, at),
+                            self.viewport.scale(),
+                            GlyphColors {
+                                body: ACCENT,
+                                pin: ACCENT,
+                                label: ACCENT,
+                                value: ACCENT,
+                            },
+                            false,
+                        );
+                    }
+                }
+            }
+            ObjectRef::Wire(id) => {
+                if let Some(wire) = document.wire(id) {
+                    if let (Some(a), Some(b)) =
+                        (wire.a.checked_add(delta), wire.b.checked_add(delta))
+                    {
+                        painter.line_segment(
+                            [
+                                self.viewport.grid_to_screen(rect, a),
+                                self.viewport.grid_to_screen(rect, b),
+                            ],
+                            Stroke::new(3.0, ACCENT.gamma_multiply(0.45)),
+                        );
+                    }
+                }
+            }
+            ObjectRef::Junction(id) => {
+                if let Some(junction) = document.junction(id) {
+                    if let Some(at) = junction.at.checked_add(delta) {
+                        painter.circle_filled(
+                            self.viewport.grid_to_screen(rect, at),
+                            4.5,
+                            ACCENT.gamma_multiply(0.5),
+                        );
+                    }
+                }
+            }
+            ObjectRef::Label(id) => {
+                if let Some(label) = document.label(id) {
+                    if let Some(at) = label.at.checked_add(delta) {
+                        painter.text(
+                            self.viewport.grid_to_screen(rect, at),
+                            Align2::LEFT_BOTTOM,
+                            &label.text,
+                            FontId::proportional(13.0),
+                            ACCENT.gamma_multiply(0.6),
+                        );
+                    }
+                }
+            }
+        }
+    }
+
+    fn paint_alignment_guides(
+        &self,
+        painter: &Painter,
+        rect: Rect,
+        document: &Document,
+        delta: GridPos,
+    ) {
+        let moving = document
+            .selection()
+            .iter()
+            .filter_map(|object| match object {
+                ObjectRef::Symbol(id) => document.symbol(*id),
+                _ => None,
+            })
+            .filter_map(|symbol| symbol.at.checked_add(delta))
+            .collect::<Vec<_>>();
+        let fixed = document
+            .schematic()
+            .symbols()
+            .filter(|symbol| !document.selection().contains(&ObjectRef::Symbol(symbol.id)))
+            .map(|symbol| symbol.at)
+            .collect::<Vec<_>>();
+        let mut vertical = BTreeSet::new();
+        let mut horizontal = BTreeSet::new();
+        for a in &moving {
+            for b in &fixed {
+                if a.x == b.x {
+                    vertical.insert(a.x);
+                }
+                if a.y == b.y {
+                    horizontal.insert(a.y);
+                }
+            }
+        }
+        let color = ACCENT.gamma_multiply(0.22);
+        for x in vertical.into_iter().take(8) {
+            let screen = self.viewport.grid_to_screen(rect, GridPos::new(x, 0));
+            painter.line_segment(
+                [
+                    Pos2::new(screen.x, rect.top()),
+                    Pos2::new(screen.x, rect.bottom()),
+                ],
+                Stroke::new(1.0, color),
+            );
+        }
+        for y in horizontal.into_iter().take(8) {
+            let screen = self.viewport.grid_to_screen(rect, GridPos::new(0, y));
+            painter.line_segment(
+                [
+                    Pos2::new(rect.left(), screen.y),
+                    Pos2::new(rect.right(), screen.y),
+                ],
+                Stroke::new(1.0, color),
+            );
+        }
+    }
+
+    fn paint_snap(&self, painter: &Painter, rect: Rect) {
+        let Some(target) = self.snap_target else {
+            return;
+        };
+        let position = self.viewport.grid_to_screen(rect, target.at);
+        painter.circle_stroke(
+            position,
+            (self.viewport.scale() * 0.45).clamp(5.0, 9.0),
+            Stroke::new(1.4, HOVER),
+        );
     }
 
     fn paint_empty_state(&self, painter: &Painter, rect: Rect, document: &Document) {
@@ -759,12 +1089,12 @@ impl CanvasState {
             crate::ui::Tool::Select => "Glisser pour déplacer · Maj pour ajouter",
             crate::ui::Tool::Wire => {
                 if self.wire_start.is_some() {
-                    "Second clic : extrémité · Échap : annuler"
+                    "Second clic : extrémité · Maj : coude · Échap : annuler"
                 } else {
-                    "Premier clic : départ · Échap : outil sélection"
+                    "Départ broche/fil · Échap : outil sélection"
                 }
             }
-            crate::ui::Tool::Place(_) => "Clic : placer · Échap : outil sélection",
+            crate::ui::Tool::Place(_) => "Clic : placer (répétitif) · R/F : tourner/miroir · Échap",
             crate::ui::Tool::Junction => "Clic : jonction · Échap : outil sélection",
             crate::ui::Tool::Label => "Clic : nommer le net · Échap : outil sélection",
         };
@@ -886,9 +1216,18 @@ mod tests {
         tool: &crate::ui::Tool,
         events: Vec<Event>,
     ) {
+        let modifiers = events
+            .iter()
+            .rev()
+            .find_map(|event| match event {
+                Event::PointerButton { modifiers, .. } => Some(*modifiers),
+                _ => None,
+            })
+            .unwrap_or_default();
         let input = RawInput {
             screen_rect: Some(screen()),
             events,
+            modifiers,
             focused: true,
             ..Default::default()
         };
@@ -1124,6 +1463,118 @@ mod tests {
 
         assert_eq!(document.symbol(id).unwrap().at, target);
         assert!(document.selection().contains(&ObjectRef::Symbol(id)));
+    }
+
+    #[test]
+    fn canvas_alt_click_selects_a_whole_net() {
+        let context = egui::Context::default();
+        let mut canvas = CanvasState::new();
+        let mut document = Document::demo().unwrap();
+        let mut status = Status::new_info("");
+        let tool = crate::ui::Tool::Select;
+        frame(
+            &context,
+            &mut canvas,
+            &mut document,
+            &mut status,
+            &tool,
+            Vec::new(),
+        );
+        let at = canvas
+            .viewport()
+            .grid_to_screen(screen(), GridPos::new(-7, -8));
+        let modifiers = Modifiers {
+            alt: true,
+            ..Modifiers::default()
+        };
+        frame(
+            &context,
+            &mut canvas,
+            &mut document,
+            &mut status,
+            &tool,
+            vec![
+                Event::PointerMoved(at),
+                Event::PointerButton {
+                    pos: at,
+                    button: PointerButton::Primary,
+                    pressed: true,
+                    modifiers,
+                },
+            ],
+        );
+        frame(
+            &context,
+            &mut canvas,
+            &mut document,
+            &mut status,
+            &tool,
+            vec![Event::PointerButton {
+                pos: at,
+                button: PointerButton::Primary,
+                pressed: false,
+                modifiers,
+            }],
+        );
+        assert!(document.selection().len() > 2);
+        assert!(document
+            .selection()
+            .iter()
+            .any(|object| matches!(object, ObjectRef::Wire(_))));
+    }
+
+    #[test]
+    fn canvas_placement_on_wire_inserts_in_series() {
+        let context = egui::Context::default();
+        let mut canvas = CanvasState::new();
+        let mut document = Document::new();
+        document
+            .add_wire(GridPos::new(0, 0), GridPos::new(8, 0))
+            .unwrap();
+        let mut status = Status::new_info("");
+        let tool = crate::ui::Tool::Place(editor_core::SymbolKind::Resistor);
+        frame(
+            &context,
+            &mut canvas,
+            &mut document,
+            &mut status,
+            &tool,
+            Vec::new(),
+        );
+        let at = canvas
+            .viewport()
+            .grid_to_screen(screen(), GridPos::new(4, 0));
+        click(&context, &mut canvas, &mut document, &mut status, &tool, at);
+        assert_eq!(document.schematic().symbols().count(), 1);
+        assert_eq!(document.schematic().wires().count(), 2);
+    }
+
+    #[test]
+    fn canvas_rotated_placement_keeps_the_preview_orientation() {
+        let context = egui::Context::default();
+        let mut canvas = CanvasState::new();
+        let mut document = Document::new();
+        let mut status = Status::new_info("");
+        let tool = crate::ui::Tool::Place(editor_core::SymbolKind::Resistor);
+        frame(
+            &context,
+            &mut canvas,
+            &mut document,
+            &mut status,
+            &tool,
+            Vec::new(),
+        );
+        canvas.rotate_placement();
+        let at = screen().center();
+        click(&context, &mut canvas, &mut document, &mut status, &tool, at);
+        assert_eq!(
+            document
+                .schematic()
+                .symbols()
+                .next()
+                .map(|symbol| symbol.orientation),
+            Some(Orientation::R90)
+        );
     }
 
     #[test]
