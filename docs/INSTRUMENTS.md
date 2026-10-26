@@ -81,6 +81,11 @@ RMS   = sqrt(somme(x_i^2) / N)
 Un pas fixe rend la moyenne pertinente. Si un événement ajoute un échantillon
 exact, elle reste diagnostique et non une intégrale temporelle.
 
+Deux curseurs A/B alignés sur les échantillons donnent tA, tB, Δt, 1/Δt, les
+valeurs en A/B, leur écart, et min/max/RMS sur l’intervalle. Les calculs sont
+refaits à chaque image à partir des traces complètes ; aucun résultat du worker
+n’est modifié.
+
 ## 5. Spectre FFT
 
 Calcul dans `crates/app/src/analysis.rs` avec `rustfft` en `f64`, sans SIMD pour
@@ -115,6 +120,11 @@ reste en dB. Une magnitude nulle est omise. L'axe x stocke `log10(f)` et les
 graduations affichent Hz/kHz/MHz. Gain et phase partagent l'axe ; la phase est
 affichée entre -180° et +180°. Défaut RC : 1 Hz à 1 MHz, 101 points.
 
+Un clic sur l’un des deux graphes pose un marqueur de fréquence aligné sur le
+point AC le plus proche. Le marqueur est commun au gain et à la phase ; le
+panneau affiche fréquence, gain et phase. Il ne modifie ni le balayage ni le
+résultat.
+
 ## 7. Export CSV
 
 Point décimal, nombres en notation scientifique à 12 décimales, champs échappés
@@ -138,11 +148,12 @@ L'export ne sauvegarde pas le schéma.
 ## 8. Limites et tests
 
 Limites : worker dans le fil de l'interface, transitoire à pas fixe, FFT limitée
-et sans fenêtres alternatives, pas de curseurs/moyenne glissante/analyse
-harmonique, CSV seulement (pas PNG/SVG ni session), 100 000 pas et 10 000 points
-AC, résultats en mémoire avec avertissement s'ils deviennent antérieurs. Le
-rafraîchissement automatique relance le transitoire complet ; il n'y a pas de
-pause, de reprise ni d'incrémental.
+et sans fenêtres alternatives, pas de moyenne glissante/analyse harmonique, CSV
+seulement (pas PNG/SVG ni session), 100 000 pas et 10 000 points AC, résultats
+en mémoire avec avertissement s'ils deviennent antérieurs. Le rafraîchissement
+automatique relance le transitoire complet ; il n'y a pas de pause, de reprise
+ni d'incrémental. Les curseurs restent des repères d’échantillon, sans
+interpolation fine entre deux points.
 
 Les tests couvrent catalogue, échelon, limites, transitoire et AC via worker,
 mesures, FFT étiquetée, décimation, trois CSV, échappement, export natif UTF-8 et

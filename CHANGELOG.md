@@ -35,6 +35,9 @@ sémantique.
 - Rafraîchissement automatique optionnel après modification, avec délai.
 - Tensions des nets superposées au canevas et badge d’état du dernier
   échantillon, avec signalement d’un résultat antérieur.
+- Deux curseurs temporels A/B sur la portée, avec Δt, 1/Δt, valeurs, min, max et
+  RMS sur l’intervalle.
+- Marqueur de fréquence sur le Bode, avec gain et phase au point choisi.
 
 ### Changed
 

@@ -112,11 +112,13 @@ affiche alors le dernier échantillon et un badge `t = … · à jour/antérieur
 - **Portée** : champs Début/Arrêt/Pas, échelon de source (initiale, instant,
   finale), signaux avec boutons **Toutes tensions**/**Aucun**. Les courbes
   suivent l'ordre trié. Mesures min/max, crête-à-crête, moyenne, RMS et nombre
-  d'échantillons.
+  d'échantillons. Deux curseurs A/B se placent par clic, avec Δt, 1/Δt, valeurs,
+  min, max et RMS sur l'intervalle ; un clic droit ou `Maj` force le curseur B.
 - **Spectre** : réutilise le dernier transitoire, choisit un signal et affiche
   pic non continu, fréquence et résolution.
 - **Bode** : analyse AC logarithmique, source, amplitude, sortie ; gain et phase
-  partagent l'axe des fréquences.
+  partagent l'axe des fréquences. Un clic pose un marqueur de fréquence et
+  affiche le gain et la phase au point choisi.
 - **Export CSV** : copie ou enregistre/télécharge toutes les valeurs de l'onglet
   actif ; le nom proposé dépend de l'onglet.
 
@@ -163,16 +165,16 @@ qu'après validation. Une action refusée ne change ni contenu, ni révision, ni
 d'identifiants. Collections et rendu sont ordonnés.
 
 Limites : worker dans le fil de l'interface, tests navigateur non automatisés,
-transitoire à pas fixe, FFT plafonnée, pas de curseurs/PNG/persistance de projet,
+transitoire à pas fixe, FFT plafonnée, pas de PNG/persistance de projet,
 opamp sans alimentation/pôle, pas de thème clair ni de mobile spécifique, fils
 non extensibles par extrémité. Les panneaux sont masquables et redimensionnables,
 mais il n'y a pas de dockage libre ni de disposition persistée. Les valeurs
 simulées de l’inspecteur et du canevas proviennent du dernier transitoire ; il
-n’y a pas encore de pause, de reprise ni de curseur temporel. Le câblage à
-double-clic et la persistance des favoris restent aux lots suivants.
+n’y a pas encore de pause ni de reprise. Le câblage à double-clic et la
+persistance des favoris restent aux lots suivants.
 
 Tests : `cargo test -p circuitsim-app` couvre document, vue, navigation,
 mini-carte, édition, palette, propriétés, historique, presse-papiers, sélection
-rectangle, séries E, ERC, canevas headless, dispositions, instruments, worker,
-FFT, Bode, CSV et export. Détails dans [TESTING.md](TESTING.md) ; recette web
-dans [DELIVERY.md](DELIVERY.md).
+rectangle, séries E, ERC, canevas headless, dispositions, curseurs, marqueur
+Bode, instruments, worker, FFT, Bode, CSV et export. Détails dans
+[TESTING.md](TESTING.md) ; recette web dans [DELIVERY.md](DELIVERY.md).

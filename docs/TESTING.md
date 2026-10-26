@@ -34,7 +34,7 @@ l'installe séparément.
 
 ## 3. Suite et couverture
 
-Au 26 octobre 2026, `cargo test --workspace` exécute **226 tests** :
+Au 26 octobre 2026, `cargo test --workspace` exécute **228 tests** :
 
 | Groupe | Tests | Points clés |
 | --- | ---: | --- |
@@ -43,7 +43,7 @@ Au 26 octobre 2026, `cargo test --workspace` exécute **226 tests** :
 | `sim-core` transitoire | 16 | RC/RL, événements, diode, opamp, énergie, limites |
 | `sim-core` AC | 15 | RC/RL/RLC, phase, diode, opamp, balayages, erreurs |
 | `editor-core` | 47 | grille, symboles, schéma, historique, ERC, extraction, JSON, séries E, snap/routage |
-| `circuitsim-app` | 87 | document, vue, navigation, mini-carte, UI, inspecteur, historique, presse-papiers, simulation interactive, instruments, worker, FFT, Bode, CSV |
+| `circuitsim-app` | 89 | document, vue, navigation, mini-carte, UI, inspecteur, historique, presse-papiers, simulation interactive, curseurs, instruments, worker, FFT, Bode, CSV |
 | `worker-protocol` | 11 | trames, version, netlist, erreurs, transports |
 | `worker` | 13 | coalescence, cadence, révisions, DC/transitoire/AC |
 | `editor_invariants` | 2 | proptest undo/redo et extraction |
@@ -60,8 +60,9 @@ limites UI, mesures, pic FFT, trois CSV et export UTF-8 ; insertion en série,
 déplacement de segment, alignement/distribution, sélection de net et rectangle,
 presse-papiers, duplication, rotation/miroir de groupe, valeurs simulées,
 recherche floue, placement sur canevas, zoom/pan, cadrage de sélection,
-mini-carte, dispositions, superposition des tensions et debounce du
-rafraîchissement automatique.
+mini-carte, dispositions, superposition des tensions, debounce du
+rafraîchissement automatique, curseurs A/B, mesures d’intervalle et marqueur
+Bode.
 
 Deux propriétés proptest utilisent 64 cas dans les invariants : undo/redo
 restaure exactement les contenus et l’historique final ; deux extractions du même
