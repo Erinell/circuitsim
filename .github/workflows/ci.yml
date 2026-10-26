@@ -41,13 +41,16 @@ jobs:
       - name: Cache Cargo artifacts
         uses: Swatinem/rust-cache@v2
 
-      - name: Install Trunk
+      - name: Install Trunk and cargo-deny
         uses: taiki-e/install-action@v2
         with:
-          tool: trunk@0.21.14
+          tool: trunk@0.21.14,cargo-deny@0.20.2
 
       - name: Format, clippy and tests
         run: cargo xtask check
+
+      - name: Check licenses
+        run: cargo deny check licenses
 
       - name: Check WASM target
         run: cargo xtask wasm-check

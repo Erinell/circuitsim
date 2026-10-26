@@ -69,6 +69,28 @@ documents spécialisés.
     un runner partagé. Voir [TESTING.md](TESTING.md) et
     [PERFORMANCE.md](PERFORMANCE.md).
 
+## Licence et dépendances
+
+Le projet est sous **MIT OR Apache-2.0**. Ce choix est compatible avec le
+standard Rust, l’écosystème de dépendances et la distribution WASM. Les textes
+sont à la racine ; les métadonnées SPDX sont héritées par chaque crate.
+
+Les exceptions permissives suivantes sont autorisées dans `deny.toml` et
+documentées ici :
+
+| Licence | Dépendances concernées | Décision |
+| --- | --- | --- |
+| `BSL-1.0` | `clipboard-win`, `error-code` | permissive, compatible |
+| `CC0-1.0` | `hexf-parse` | domaine public, compatible |
+| `0BSD` | `adler2` | permissive, compatible |
+| `Unlicense` | `aho-corasick`, `memchr`, `walkdir`, `byteorder-lite` | alternative MIT retenue quand disponible |
+| `Apache-2.0 WITH LLVM-exception` | `rustix`, `linux-raw-sys`, `wasip2`, `wit-bindgen` | compatible avec Apache-2.0 |
+| `OFL-1.1`, `Ubuntu-font-1.0` | `epaint_default_fonts` | polices embarquées compatibles |
+
+Les alternatives `GPL-2.0-only` de `self_cell` et `LGPL-2.1-or-later` de `r-efi`
+ne sont pas utilisées ; les branches MIT/Apache sont retenues. Toute nouvelle
+licence hors liste exige une décision explicite avant ajout.
+
 ## Décisions différées
 
 - Web Worker dédié et transport `SharedArrayBuffer`.

@@ -21,6 +21,7 @@ web et la recette navigateur sont vérifiés séparément.
 | `cargo run --example custom_mosfet` | composant personnalisé |
 | `cargo bench --workspace` | benchmarks Criterion |
 | `cargo bench --workspace --no-run` | compilation des benchmarks |
+| `cargo deny check licenses` | compatibilité des licences |
 
 `cargo xtask check` est la référence avant livraison ; exécuter
 `cargo xtask wasm-check` après toute modification du cœur, du worker ou de l'app.
@@ -87,6 +88,7 @@ manuellement. Il installe Rust, les composants, la cible WASM et Trunk, puis :
 
 ```text
 cargo xtask check
+cargo deny check licenses
 cargo xtask wasm-check
 cargo bench -p sim-core --bench solvers -- --quick --noplot
 cargo bench -p editor-core --bench extraction -- --quick --noplot
