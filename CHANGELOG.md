@@ -6,6 +6,22 @@ sémantique.
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-10-26
+
+### Added
+
+- Fenêtre native maximisée et fenêtres d’aide, de démarrage et d’accessibilité centrées.
+- Déplacement de segment préservant les connexions par rajout de courts embouts.
+- Redimensionnement des extrémités libres de fils.
+- Fils plus épais et animation du courant issue du dernier transitoire.
+- Sondes voltmètre, ampèremètre et ohmmètre plaçables, listées avec affichage et tracé optionnels.
+- Transitoire temps réel sans plage d’arrêt, avec vitesse, pause et fenêtre glissante.
+
+### Changed
+
+- Les valeurs de tension ne sont plus superposées aux labels du canevas.
+- Le panneau Instruments remplace les champs Début/Arrêt par une session temps réel.
+
 ## [0.2.0] - 2026-10-26
 
 ### Added

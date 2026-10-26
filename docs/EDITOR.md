@@ -120,8 +120,16 @@ annulables en une action.
   segments nuls ou déjà présents sont ignorés ; un chemin sans nouveau segment
   est refusé.
 - **Déplacement de segment** : un segment se déplace perpendiculairement. Les
-  fils perpendiculaires partageant ses extrémités suivent ; un fil colinéaire,
-  une jonction ou un label sur le segment est refusé.
+  points de connexion du segment (broches, labels, jonctions, extrémités de fils)
+  restent en place et de courts embouts perpendiculaires les relient au segment
+  déplacé. La topologie reste donc connectée sans déplacement implicite des
+  composants.
+- **Extrémité libre** : une extrémité sans broche, label, jonction ou autre fil
+  peut être déplacée sur l’axe du fil. Une extrémité connectée est refusée
+  (`CannotResizeWire`).
+- **Sondes** : `Voltmeter`, `Ammeter` et `Ohmmeter` sont des symboles à une
+  broche exclus de la netlist. Ils servent de repères de mesure et ne modifient
+  ni les nœuds ni les composants simulés.
 - **Alignement et distribution** : les objets sélectionnés sont alignés sur une
   arête ou un centre ; la distribution conserve les extrêmes et espace les
   centres.

@@ -13,5 +13,5 @@ pub use dc::{solve_dc, DcError, DcOptions, DcResult, NewtonStrategy};
 pub use mna::MnaError;
 pub use transient::{
     simulate_transient, ComponentEnergy, EnergyAudit, TransientAction, TransientError,
-    TransientEvent, TransientOptions, TransientResult, TransientSample,
+    TransientEvent, TransientOptions, TransientResult, TransientSample, TransientSession,
 };

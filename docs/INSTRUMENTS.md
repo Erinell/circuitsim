@@ -23,10 +23,11 @@ job en cours. Le service tourne dans le fil de l'interface ; worker dédié et
 modification du schéma, avec un avertissement s'il est antérieur.
 
 Le transitoire peut être lancé depuis le panneau, par **Simuler** dans la barre
-d'outils, `Ctrl+Entrée` ou `F5`. L'option **Auto** replanifie un calcul 0,35 s
-après une modification acceptée ; une révision déjà tentée n'est pas réessayée
-en boucle. Le dernier échantillon alimente l'inspecteur et la superposition des
-tensions sur le canevas.
+d'outils, `Ctrl+Entrée` ou `F5`. La portée utilise maintenant une **session
+temps réel** : aucun arrêt n'est demandé, le pas fixe est conservé, la vitesse
+de lecture et la pause sont réglables. Une modification du schéma peut relancer
+automatiquement la session si l'option **Auto** est active. Le dernier
+échantillon alimente l'inspecteur, les sondes et la superposition des courants.
 
 ## 2. Catalogue et sélection
 
@@ -42,9 +43,10 @@ portée est un `BTreeSet`, donc l'ordre des courbes et lignes CSV est stable.
 
 ## 3. Transitoire et échelon
 
-Les champs de temps acceptent `5m`, `10u`, etc. L'arrêt doit être strictement
-postérieur au début, le pas strictement positif, et l'interface refuse plus de
-100 000 intervalles.
+Les champs de temps acceptent `5m`, `10u`, etc. Seul le **pas de calcul** reste
+configurable dans le mode temps réel ; la session n’a pas de borne d’arrêt. La
+vitesse multiplie le temps simulé par seconde réelle, et la pause fige la
+fenêtre glissante sans perdre les échantillons.
 
 L'échelon de source :
 
@@ -58,15 +60,18 @@ La source du document n'est jamais modifiée. L'option fonctionne pour une sourc
 de tension ou de courant ; les autres formes d'onde ne sont pas paramétrées.
 
 Le dernier échantillon est exposé comme `LiveValues` : tensions par nom de net,
-courants de branche par référence, révision du document et instant. Le canevas y
-ajoute les tensions des nets et un badge d'état ; l'inspecteur en dérive les
-tensions de broches, le courant et la puissance.
+courants de branche par référence, révision du document et instant. L’inspecteur
+en dérive les tensions de broches, le courant et la puissance. Les sondes
+placées sur le schéma alimentent la liste **Sondes** et les bulles du canevas :
+voltmètre sur un fil, ampèremètre et ohmmètre sur un composant.
 
 ## 4. Portée et mesures
 
 Chaque signal devient une `Trace` de points `[temps_s, valeur_SI]` en ordre
-croissant. Le rendu décime à 4 096 points en conservant les extrémités ; mesures
-et export utilisent toutes les valeurs. Les couleurs suivent un huit-uplet fixe.
+croissant. En temps réel, la portée ne conserve que les 500 derniers
+échantillons pour l’affichage, alors que le tampon complet alimente le spectre.
+Le rendu décime à 4 096 points en conservant les extrémités ; mesures et export
+utilisent les valeurs disponibles. Les couleurs suivent un huit-uplet fixe.
 
 Mesures sur les échantillons, sans pondération temporelle supplémentaire :
 
@@ -147,13 +152,12 @@ L'export ne sauvegarde pas le schéma.
 
 ## 8. Limites et tests
 
-Limites : worker dans le fil de l'interface, transitoire à pas fixe, FFT limitée
-et sans fenêtres alternatives, pas de moyenne glissante/analyse harmonique, CSV
-seulement (pas PNG/SVG ni session), 100 000 pas et 10 000 points AC, résultats
-en mémoire avec avertissement s'ils deviennent antérieurs. Le rafraîchissement
-automatique relance le transitoire complet ; il n'y a pas de pause, de reprise
-ni d'incrémental. Les curseurs restent des repères d’échantillon, sans
-interpolation fine entre deux points.
+Limites : worker et session temps réel dans le fil de l'interface, transitoire
+à pas fixe, FFT limitée et sans fenêtres alternatives, pas de moyenne
+glissante/analyse harmonique, CSV seulement (pas PNG/SVG ni session), 100 000
+échantillons temps réel en mémoire et 10 000 points AC, résultats en mémoire
+avec avertissement s'ils deviennent antérieurs. La session peut être mise en
+pause mais pas reprise depuis un état sauvegardé.
 
 Les tests couvrent catalogue, échelon, limites, transitoire et AC via worker,
 mesures, FFT étiquetée, décimation, trois CSV, échappement, export natif UTF-8 et

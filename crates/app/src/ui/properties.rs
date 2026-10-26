@@ -7,7 +7,7 @@ use eframe::egui::{self, Color32, Grid, Key, RichText, TextEdit, Ui};
 use sim_core::netlist::ParamValue;
 use sim_core::units::{format_si_precision, Unit};
 
-use crate::analysis::{LiveValues, SymbolLive};
+use crate::analysis::{probe_readings, LiveValues, ProbeReading, SymbolLive};
 use crate::document::{
     format_parameter, parameter_error_message, parameter_label, parameter_unit, parse_parameter,
     Document,
@@ -203,7 +203,13 @@ pub fn show(
             .symbol
             .as_ref()
             .and_then(|draft| document.symbol(draft.id))
+            .filter(|symbol| !symbol.kind.is_measurement())
             .map(|symbol| live.symbol(document, symbol));
+        let probe_info = state.symbol.as_ref().and_then(|draft| {
+            probe_readings(document, live)
+                .into_iter()
+                .find(|probe| probe.id == draft.id)
+        });
         let series = &mut state.series;
         let action = state
             .symbol
@@ -213,6 +219,7 @@ pub fn show(
                     ui,
                     draft,
                     live_info.as_ref(),
+                    probe_info.as_ref(),
                     live,
                     document.revision(),
                     series,
@@ -366,6 +373,7 @@ fn show_symbol(
     ui: &mut Ui,
     draft: &mut SymbolDraft,
     live_info: Option<&SymbolLive>,
+    probe_info: Option<&ProbeReading>,
     live: &LiveValues,
     revision: u64,
     series: &mut Series,
@@ -548,6 +556,31 @@ fn show_symbol(
             .small()
             .color(MUTED),
         );
+    }
+
+    if let Some(probe) = probe_info {
+        ui.add_space(10.0);
+        ui.label(RichText::new("Sonde").strong());
+        ui.label(format!(
+            "{} · {}",
+            probe.label,
+            symbol_kind_name(&probe.kind)
+        ));
+        let value = probe.value.map_or_else(
+            || "—".to_owned(),
+            |value| format_si_precision(value, probe.unit.unwrap_or(Unit::Volt), 4),
+        );
+        ui.label(format!("Valeur : {value}"));
+        if let Some(net) = &probe.net {
+            ui.label(RichText::new(format!("Net : {net}")).small().color(MUTED));
+        }
+        if let Some(target) = &probe.target {
+            ui.label(
+                RichText::new(format!("Composant : {target}"))
+                    .small()
+                    .color(MUTED),
+            );
+        }
     }
 
     if let Some(info) = live_info {

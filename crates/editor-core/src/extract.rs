@@ -100,6 +100,9 @@ pub fn extract_netlist(
 
     let mut pins = Vec::new();
     for symbol in schematic.symbols() {
+        if symbol.kind.is_measurement() {
+            continue;
+        }
         let def = registry
             .get(&symbol.kind)
             .ok_or_else(|| ExtractError::UnknownSymbolKind {
@@ -521,6 +524,9 @@ pub fn extract_netlist(
     }
 
     for symbol in schematic.symbols() {
+        if symbol.kind.is_measurement() {
+            continue;
+        }
         let def = registry
             .get(&symbol.kind)
             .ok_or_else(|| ExtractError::UnknownSymbolKind {
@@ -579,6 +585,9 @@ fn component_kind(kind: &SymbolKind) -> ComponentKind {
         SymbolKind::Led => ComponentKind::Led,
         SymbolKind::Zener => ComponentKind::Zener,
         SymbolKind::OpAmp => ComponentKind::OpAmp,
+        SymbolKind::Voltmeter | SymbolKind::Ammeter | SymbolKind::Ohmmeter => {
+            ComponentKind::Custom(kind.key().to_owned())
+        }
         SymbolKind::Custom(name) => ComponentKind::Custom(name.clone()),
     }
 }

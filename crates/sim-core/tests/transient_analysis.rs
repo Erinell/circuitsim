@@ -3,7 +3,7 @@ use sim_core::netlist::{
 };
 use sim_core::{
     simulate_transient, DcError, DcOptions, MnaError, NewtonStrategy, TransientAction,
-    TransientError, TransientEvent, TransientOptions,
+    TransientError, TransientEvent, TransientOptions, TransientSession,
 };
 
 fn params(entries: &[(&str, ParamValue)]) -> ParamMap {
@@ -109,6 +109,33 @@ fn rl_netlist() -> (Netlist, ComponentId, NodeId, ComponentId, NodeId) {
         )
         .unwrap();
     (builder.build().unwrap(), source, output, inductor, ground)
+}
+
+#[test]
+fn incremental_session_matches_a_full_transient() {
+    let (netlist, source, output, _, _) = rc_netlist();
+    let mut options = TransientOptions {
+        start_time: 0.0,
+        stop_time: 1e-3,
+        step: 1e-5,
+        max_steps: 1_000,
+        solver: DcOptions::default(),
+        events: vec![source_event(0.0, source, 5.0)],
+    };
+    let full = simulate_transient(&netlist, options.clone()).unwrap();
+    options.stop_time = f64::MAX;
+    let mut session = TransientSession::new(&netlist, &options).unwrap();
+    let mut samples = session.drain_samples();
+    for _ in 0..100 {
+        samples.push(session.step().unwrap());
+    }
+    assert_eq!(samples.len(), full.samples.len());
+    for (incremental, complete) in samples.iter().zip(&full.samples) {
+        assert!((incremental.time - complete.time).abs() < 1e-15);
+        let left = incremental.node_voltage(output).unwrap();
+        let right = complete.node_voltage(output).unwrap();
+        assert!((left - right).abs() < 1e-12);
+    }
 }
 
 #[test]

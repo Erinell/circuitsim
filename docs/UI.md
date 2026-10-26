@@ -36,7 +36,13 @@ fixes redimensionnables ; aucun dockage libre n'est proposé.
 
 Le canevas s'ajuste au contenu au démarrage et via **Ajuster**/`Home`. **Cadrer
 sél.**/`Ctrl+Home` cadre la sélection. La grille est entière avec un pas visuel
-adaptatif. La mini-carte du coin inférieur droit montre le contenu, la sélection
+adaptatif. La fenêtre native s'ouvre maximisée ; les fenêtres **Démarrage**,
+**Aide** et **Accessibilité** sont centrées.
+
+Les fils sont épaissis et affichent, après simulation, un flux de points animé
+dans le sens du courant estimé. **Vue → Courant animé** masque ce flux. Une
+extrémité libre d'un fil peut être tirée le long de son axe pour l'allonger ou le
+raccourcir ; les extrémités connectées ne sont pas redimensionnables. La mini-carte du coin inférieur droit montre le contenu, la sélection
 et la fenêtre visible ; un clic y recentre la vue.
 
 ## 2. Interactions
@@ -46,7 +52,9 @@ et la fenêtre visible ; un clic y recentre la vue.
 - `Alt` + clic : sélectionne le net complet.
 - Rectangle gauche→droite : objets entièrement inclus ; droite→gauche : touchés.
 - Glisser un symbole/label/jonction : déplace la sélection d'un delta entier.
-- Glisser un fil : déplace le segment perpendiculairement.
+- Glisser un fil : déplace le segment perpendiculairement ; les connexions sont
+  préservées par des embouts perpendiculaires.
+- Glisser une extrémité libre : allonge ou raccourcit le fil sur son axe.
 - `Ctrl+A` : tout sélectionner ; `Échap` : annuler l'outil, le collage ou la sélection.
 - `Ctrl+C`, `Ctrl+V`, `Ctrl+D` : copier, coller avec aperçu, dupliquer.
 - `Ctrl+Entrée` ou `F5` : relancer le transitoire.
@@ -125,11 +133,16 @@ d’outils et `Ctrl+Entrée`/`F5` relancent le transitoire courant. L’option
 **Auto** recalcule après une modification avec un délai de 0,35 s ; le canevas
 affiche alors le dernier échantillon et un badge `t = … · à jour/antérieur`.
 
-- **Portée** : champs Début/Arrêt/Pas, échelon de source (initiale, instant,
-  finale), signaux avec boutons **Toutes tensions**/**Aucun**. Les courbes
-  suivent l'ordre trié. Mesures min/max, crête-à-crête, moyenne, RMS et nombre
-  d'échantillons. Deux curseurs A/B se placent par clic, avec Δt, 1/Δt, valeurs,
-  min, max et RMS sur l'intervalle ; un clic droit ou `Maj` force le curseur B.
+- **Portée temps réel** : pas de calcul, échelon de source, vitesse de lecture,
+  pause/reprise. La session avance sans plage d’arrêt et la fenêtre glisse sur
+  les derniers échantillons. Mesures min/max, crête-à-crête, moyenne, RMS et
+  nombre d’échantillons. Deux curseurs A/B se placent par clic, avec Δt, 1/Δt,
+  valeurs, min, max et RMS sur l’intervalle ; un clic droit ou `Maj` force B.
+- **Sondes** : les composants **Voltmètre**, **Ampèremètre** et **Ohmmètre** sont
+  placés depuis la palette. La liste des sondes apparaît dans la colonne des
+  contrôles, à côté du graphique, avec **Afficher** (valeur sur le canevas) et
+  **Graphique** (tracé quand le signal existe). Le voltmètre se pose sur un fil ;
+  l’ampèremètre et l’ohmmètre mesurent le composant sous la sonde.
 - **Spectre** : réutilise le dernier transitoire, choisit un signal et affiche
   pic non continu, fréquence et résolution.
 - **Bode** : analyse AC logarithmique, source, amplitude, sortie ; gain et phase
@@ -181,13 +194,12 @@ qu'après validation. Une action refusée ne change ni contenu, ni révision, ni
 `next_id`. L'undo restaure les objets complets mais pas le compteur
 d'identifiants. Collections et rendu sont ordonnés.
 
-Limites : worker dans le fil de l'interface, tests navigateur non automatisés,
-transitoire à pas fixe, FFT plafonnée, pas de PNG/persistance de projet,
-opamp sans alimentation/pôle, pas de thème clair ni de mobile spécifique, fils
-non extensibles par extrémité. Les panneaux sont masquables et redimensionnables,
-mais il n'y a pas de dockage libre ni de disposition persistée. Les valeurs
-simulées de l’inspecteur et du canevas proviennent du dernier transitoire ; il
-n’y a pas encore de pause ni de reprise. Les préférences d’affichage sont
+Limites : worker et session temps réel dans le fil de l'interface, tests
+navigateur non automatisés, transitoire à pas fixe, FFT plafonnée, pas de
+PNG/persistance de projet, opamp sans alimentation/pôle, pas de thème clair ni
+de mobile spécifique, fils non extensibles par une extrémité connectée. Les
+panneaux sont masquables et redimensionnables, mais il n'y a pas de dockage
+libre ni de disposition persistée. Les préférences d’affichage sont
 session-locales ; le câblage à double-clic et la persistance des favoris restent
 aux lots suivants.
 

@@ -421,6 +421,22 @@ fn paint_body(painter: &Painter, symbol: &Symbol, center: Pos2, scale: f32, stro
                 stroke,
             );
         }
+        SymbolKind::Voltmeter | SymbolKind::Ammeter | SymbolKind::Ohmmeter => {
+            painter.circle_stroke(center, scale * 0.9, stroke);
+            let (letter, color) = match symbol.kind {
+                SymbolKind::Voltmeter => ("V", Color32::from_rgb(255, 190, 92)),
+                SymbolKind::Ammeter => ("A", Color32::from_rgb(120, 210, 220)),
+                SymbolKind::Ohmmeter => ("Ω", Color32::from_rgb(112, 210, 155)),
+                _ => ("", stroke.color),
+            };
+            painter.text(
+                center,
+                Align2::CENTER_CENTER,
+                letter,
+                FontId::proportional((scale * 1.05).clamp(9.0, 18.0)),
+                color,
+            );
+        }
         SymbolKind::Custom(_) => {
             line_local(
                 painter,

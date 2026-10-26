@@ -1,18 +1,18 @@
 //! Interactive schematic canvas with pan, zoom, placement, and dragging.
 
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 
-use editor_core::{
-    ExtractedNet, GridPos, ObjectRef, Orientation, SnapTarget, Symbol, SymbolId, WireId,
-};
+use editor_core::{GridPos, ObjectRef, Orientation, SnapTarget, Symbol, SymbolId, WireId};
 use eframe::egui::{
     self, Align2, Color32, CursorIcon, FontId, Key, Painter, PointerButton, Pos2, Rect, Sense,
     Stroke, StrokeKind, Ui, Vec2,
 };
 use sim_core::units::{format_si_precision, Unit};
 
-use crate::analysis::LiveValues;
-use crate::document::{ActionError, ClipboardItem, Document, SelectionChange, SelectionMode};
+use crate::analysis::{LiveValues, ProbeReading};
+use crate::document::{
+    ActionError, ClipboardItem, Document, SelectionChange, SelectionMode, WireEnd,
+};
 use crate::ui::glyph::{paint_symbol, GlyphColors};
 use crate::ui::{
     symbol_kind_name, Status, ACCENT, CANVAS_BACKGROUND, HOVER, LABEL, MUTED, PIN, SYMBOL, WIRE,
@@ -29,8 +29,7 @@ const MINIMAP_WIDTH: f32 = 152.0;
 const MINIMAP_HEIGHT: f32 = 112.0;
 const MINIMAP_MARGIN: f32 = 12.0;
 const ZOOM_STEP: f32 = 1.25;
-const POSITIVE_VOLTAGE: Color32 = Color32::from_rgb(255, 190, 92);
-const NEGATIVE_VOLTAGE: Color32 = Color32::from_rgb(120, 210, 220);
+const ENDPOINT_RADIUS: f32 = 11.0;
 const LIVE_BADGE: Color32 = Color32::from_rgba_premultiplied(20, 30, 44, 228);
 
 /// Canvas interaction state that survives between frames.
@@ -50,7 +49,7 @@ pub struct CanvasState {
     pending_fit: Option<(GridPos, GridPos)>,
     last_rect: Option<Rect>,
     minimap_visible: bool,
-    net_voltages: bool,
+    current_flow: bool,
     label_dialog: Option<LabelDialog>,
 }
 
@@ -62,6 +61,12 @@ enum DragState {
     },
     Segment {
         wire: WireId,
+        start: GridPos,
+        current: GridPos,
+    },
+    WireEndpoint {
+        wire: WireId,
+        end: WireEnd,
         start: GridPos,
         current: GridPos,
     },
@@ -99,7 +104,7 @@ impl CanvasState {
             pending_fit: None,
             last_rect: None,
             minimap_visible: true,
-            net_voltages: true,
+            current_flow: true,
             label_dialog: None,
         }
     }
@@ -207,14 +212,14 @@ impl CanvasState {
         self.minimap_visible = visible;
     }
 
-    /// Returns whether net voltages are overlaid on the canvas.
-    pub const fn net_voltages_visible(&self) -> bool {
-        self.net_voltages
+    /// Returns whether current flow is animated on wires.
+    pub const fn current_flow_visible(&self) -> bool {
+        self.current_flow
     }
 
-    /// Shows or hides the net-voltage overlay.
-    pub fn set_net_voltages_visible(&mut self, visible: bool) {
-        self.net_voltages = visible;
+    /// Shows or hides the animated current flow.
+    pub fn set_current_flow_visible(&mut self, visible: bool) {
+        self.current_flow = visible;
     }
 
     /// Returns true while the label name dialog is open.
@@ -228,6 +233,7 @@ impl CanvasState {
     }
 
     /// Draws and handles the canvas for one frame.
+    #[allow(clippy::too_many_arguments)]
     pub fn show(
         &mut self,
         ui: &mut Ui,
@@ -236,6 +242,9 @@ impl CanvasState {
         status: &mut Status,
         interactive: bool,
         live: &LiveValues,
+        probes: &[ProbeReading],
+        visible_probes: &BTreeSet<SymbolId>,
+        flow_time: f64,
     ) {
         let available = ui.available_size();
         if available.x < 2.0 || available.y < 2.0 {
@@ -296,10 +305,11 @@ impl CanvasState {
 
         self.paint_grid(&painter, rect);
         self.paint_document(&painter, rect, document);
-        self.paint_hover(&painter, rect, document);
-        if self.net_voltages {
-            self.paint_net_voltages(&painter, rect, document, live);
+        if self.current_flow {
+            self.paint_current_flow(&painter, rect, document, live, flow_time);
         }
+        self.paint_wire_handles(&painter, rect, document);
+        self.paint_hover(&painter, rect, document);
         let shift = ui.input(|input| input.modifiers.shift);
         self.paint_previews(&painter, rect, document, tool, hovered_point, shift);
         if self.paste_preview {
@@ -312,6 +322,7 @@ impl CanvasState {
         self.paint_tool_badge(&painter, rect, tool);
         self.paint_simulation_badge(&painter, rect, document, live);
         self.paint_minimap(&painter, rect, document);
+        self.paint_probe_values(&painter, rect, document, probes, visible_probes);
         self.set_cursor(ui, &response, tool);
         if interactive {
             self.context_menu(&response, document, status);
@@ -513,7 +524,17 @@ impl CanvasState {
                 } else {
                     SelectionChange::Replace
                 };
-                if let Some(object) = document.object_at(point) {
+                if let Some((wire, end, start)) =
+                    self.free_endpoint_near(rect, latest_pos, document)
+                {
+                    document.select_only(Some(ObjectRef::Wire(wire)));
+                    self.drag = Some(DragState::WireEndpoint {
+                        wire,
+                        end,
+                        start,
+                        current: start,
+                    });
+                } else if let Some(object) = document.object_at(point) {
                     match change {
                         SelectionChange::Replace => {
                             if !document.selection().contains(&object) {
@@ -555,6 +576,7 @@ impl CanvasState {
                     match drag {
                         DragState::Objects { current, .. }
                         | DragState::Segment { current, .. }
+                        | DragState::WireEndpoint { current, .. }
                         | DragState::Marquee { current, .. } => {
                             *current = point;
                         }
@@ -595,6 +617,20 @@ impl CanvasState {
                         if delta != GridPos::default() {
                             match document.move_wire_segment(wire, delta) {
                                 Ok(()) => status.success("Segment déplacé."),
+                                Err(error) => status.error(error.user_message()),
+                            }
+                        }
+                    }
+                    DragState::WireEndpoint {
+                        wire,
+                        end,
+                        start,
+                        current,
+                    } => {
+                        let target = latest_point.unwrap_or(current);
+                        if target != start {
+                            match document.move_wire_endpoint(wire, end, target) {
+                                Ok(()) => status.success("Extrémité du fil déplacée."),
                                 Err(error) => status.error(error.user_message()),
                             }
                         }
@@ -750,6 +786,26 @@ impl CanvasState {
                 }
             }
         });
+    }
+
+    fn free_endpoint_near(
+        &self,
+        rect: Rect,
+        pointer: Option<Pos2>,
+        document: &Document,
+    ) -> Option<(WireId, WireEnd, GridPos)> {
+        let pointer = pointer?;
+        let mut best: Option<(f32, WireId, WireEnd, GridPos)> = None;
+        for (wire, end, point) in document.free_wire_endpoints() {
+            let screen = self.viewport.grid_to_screen(rect, point);
+            let distance = (screen - pointer).length();
+            if distance <= ENDPOINT_RADIUS
+                && best.is_none_or(|(best_distance, _, _, _)| distance < best_distance)
+            {
+                best = Some((distance, wire, end, point));
+            }
+        }
+        best.map(|(_, wire, end, point)| (wire, end, point))
     }
 
     fn handle_click(
@@ -915,7 +971,7 @@ impl CanvasState {
                         self.viewport.grid_to_screen(rect, wire.a),
                         self.viewport.grid_to_screen(rect, wire.b),
                     ],
-                    Stroke::new(5.0, HOVER.gamma_multiply(0.25)),
+                    Stroke::new(7.0, HOVER.gamma_multiply(0.25)),
                 );
             }
             painter.line_segment(
@@ -925,11 +981,11 @@ impl CanvasState {
                 ],
                 Stroke::new(
                     if selected {
-                        4.0
+                        5.2
                     } else if hovered || net_hovered {
-                        3.0
+                        4.2
                     } else {
-                        2.2
+                        3.2
                     },
                     if selected {
                         ACCENT
@@ -1033,58 +1089,6 @@ impl CanvasState {
         }
     }
 
-    fn paint_net_voltages(
-        &self,
-        painter: &Painter,
-        rect: Rect,
-        document: &Document,
-        live: &LiveValues,
-    ) {
-        if live.is_empty() || self.viewport.scale() < 10.0 {
-            return;
-        }
-        let Some(extraction) = document.extraction() else {
-            return;
-        };
-        let maximum = live
-            .node_voltages
-            .values()
-            .fold(0.0_f64, |current, value| current.max(value.abs()));
-        let stale = live.document_revision != document.revision();
-        for net in &extraction.nets {
-            let name = net.name.as_str();
-            if name == "0" {
-                continue;
-            }
-            let Some(value) = live.voltage(name) else {
-                continue;
-            };
-            let Some(position) = net_overlay_position(document, net) else {
-                continue;
-            };
-            let labeled = net.labels.iter().any(|id| document.label(*id).is_some());
-            let color = if stale {
-                voltage_color(value, maximum).gamma_multiply(0.55)
-            } else {
-                voltage_color(value, maximum)
-            };
-            let text = if labeled {
-                format_si_precision(value, Unit::Volt, 3)
-            } else {
-                format!("{name} {}", format_si_precision(value, Unit::Volt, 3))
-            };
-            let galley = painter.layout_no_wrap(text, FontId::monospace(10.5), color);
-            let anchor = self.viewport.grid_to_screen(rect, position) + Vec2::new(0.0, -7.0);
-            let text_rect = Align2::CENTER_BOTTOM.anchor_size(anchor, galley.size());
-            painter.rect_filled(
-                text_rect.expand(3.0),
-                3.0,
-                Color32::from_rgba_premultiplied(12, 18, 28, 185),
-            );
-            painter.galley(text_rect.min, galley, color);
-        }
-    }
-
     fn paint_simulation_badge(
         &self,
         painter: &Painter,
@@ -1118,6 +1122,73 @@ impl CanvasState {
             StrokeKind::Inside,
         );
         painter.galley(badge.min + Vec2::new(8.0, 4.0), galley, color);
+    }
+
+    fn paint_current_flow(
+        &self,
+        painter: &Painter,
+        rect: Rect,
+        document: &Document,
+        live: &LiveValues,
+        now: f64,
+    ) {
+        if live.is_empty() || self.viewport.scale() < 8.0 {
+            return;
+        }
+        let Some(extraction) = document.extraction() else {
+            return;
+        };
+        let flows = net_flows(document, live);
+        if flows.is_empty() {
+            return;
+        }
+        let spacing = 1.15_f32;
+        for net in &extraction.nets {
+            let Some(flow) = flows.get(net.name.as_str()) else {
+                continue;
+            };
+            let speed = 2.0 + (flow.strength * 1_000.0).ln_1p().clamp(0.0, 6.0) * 0.6;
+            let phase = (now * speed).rem_euclid(f64::from(spacing)) as f32;
+            for id in &net.wires {
+                let Some(wire) = document.wire(*id) else {
+                    continue;
+                };
+                let distance_a = wire.a.manhattan_distance(flow.source);
+                let distance_b = wire.b.manhattan_distance(flow.source);
+                let forward = (distance_a <= distance_b) == flow.away;
+                let (start, end) = if forward {
+                    (wire.a, wire.b)
+                } else {
+                    (wire.b, wire.a)
+                };
+                let length = start.manhattan_distance(end) as f32;
+                if length <= f32::EPSILON {
+                    continue;
+                }
+                let start_screen = self.viewport.grid_to_screen(rect, start);
+                let end_screen = self.viewport.grid_to_screen(rect, end);
+                let mut traveled = phase;
+                while traveled < length {
+                    let ratio = traveled / length;
+                    let position = start_screen + (end_screen - start_screen) * ratio;
+                    painter.circle_filled(position, 2.2, HOVER.gamma_multiply(0.92));
+                    traveled += spacing;
+                }
+            }
+        }
+    }
+
+    fn paint_wire_handles(&self, painter: &Painter, rect: Rect, document: &Document) {
+        for (wire, _, point) in document.free_wire_endpoints() {
+            let relevant = document.selection().contains(&ObjectRef::Wire(wire))
+                || self.hover == Some(ObjectRef::Wire(wire));
+            if !relevant {
+                continue;
+            }
+            let screen = self.viewport.grid_to_screen(rect, point);
+            painter.circle_filled(screen, 4.5, CANVAS_BACKGROUND);
+            painter.circle_stroke(screen, 4.5, Stroke::new(1.8, HOVER));
+        }
     }
 
     fn paint_hover(&self, painter: &Painter, rect: Rect, document: &Document) {
@@ -1198,6 +1269,33 @@ impl CanvasState {
                             );
                         }
                     }
+                }
+            }
+            Some(DragState::WireEndpoint {
+                wire, end, current, ..
+            }) => {
+                if let Some(segment) = document.wire(*wire) {
+                    let fixed = match end {
+                        WireEnd::A => segment.b,
+                        WireEnd::B => segment.a,
+                    };
+                    let target = if segment.is_horizontal() {
+                        GridPos::new(current.x, segment.a.y)
+                    } else {
+                        GridPos::new(segment.a.x, current.y)
+                    };
+                    painter.line_segment(
+                        [
+                            self.viewport.grid_to_screen(rect, fixed),
+                            self.viewport.grid_to_screen(rect, target),
+                        ],
+                        Stroke::new(3.2, ACCENT.gamma_multiply(0.55)),
+                    );
+                    painter.circle_stroke(
+                        self.viewport.grid_to_screen(rect, target),
+                        6.0,
+                        Stroke::new(1.6, ACCENT),
+                    );
                 }
             }
             Some(DragState::Marquee { start, current, .. }) => {
@@ -1544,6 +1642,43 @@ impl CanvasState {
         Some((area, transform))
     }
 
+    fn paint_probe_values(
+        &self,
+        painter: &Painter,
+        rect: Rect,
+        document: &Document,
+        probes: &[ProbeReading],
+        visible_probes: &BTreeSet<SymbolId>,
+    ) {
+        for probe in probes {
+            if !visible_probes.contains(&probe.id) {
+                continue;
+            }
+            let Some(symbol) = document.symbol(probe.id) else {
+                continue;
+            };
+            let text = probe.value.map_or_else(
+                || "—".to_owned(),
+                |value| format_si_precision(value, probe.unit.unwrap_or(Unit::Volt), 3),
+            );
+            let color = match probe.kind {
+                editor_core::SymbolKind::Voltmeter => ACCENT,
+                editor_core::SymbolKind::Ammeter => HOVER,
+                editor_core::SymbolKind::Ohmmeter => Color32::from_rgb(112, 210, 155),
+                _ => MUTED,
+            };
+            let galley = painter.layout_no_wrap(text, FontId::monospace(10.5), color);
+            let anchor = self.viewport.grid_to_screen(rect, symbol.at) + Vec2::new(0.0, 16.0);
+            let text_rect = Align2::CENTER_TOP.anchor_size(anchor, galley.size());
+            painter.rect_filled(
+                text_rect.expand(3.0),
+                3.0,
+                Color32::from_rgba_premultiplied(12, 18, 28, 185),
+            );
+            painter.galley(text_rect.min, galley, color);
+        }
+    }
+
     fn paint_minimap(&self, painter: &Painter, rect: Rect, document: &Document) {
         let Some((area, transform)) = self.minimap_geometry(rect, document) else {
             return;
@@ -1636,7 +1771,9 @@ impl CanvasState {
             crate::ui::Tool::Label => "Label",
         };
         let hint = match tool {
-            crate::ui::Tool::Select => "Glisser pour déplacer · Maj pour ajouter",
+            crate::ui::Tool::Select => {
+                "Glisser pour déplacer · extrémité libre : redimensionner · Maj pour ajouter"
+            }
             crate::ui::Tool::Wire => {
                 if self.wire_start.is_some() {
                     "Second clic : extrémité · Maj : coude · Échap : annuler"
@@ -1708,41 +1845,69 @@ impl Default for CanvasState {
     }
 }
 
-fn net_overlay_position(document: &Document, net: &ExtractedNet) -> Option<GridPos> {
-    if net.name.as_str() == "0" {
-        return None;
-    }
-    if let Some(label) = net
-        .labels
-        .iter()
-        .filter_map(|id| document.label(*id))
-        .min_by_key(|label| label.id)
-    {
-        return Some(label.at);
-    }
-    net.wires
-        .iter()
-        .filter_map(|id| document.wire(*id))
-        .max_by_key(|wire| (wire.length(), wire.id.0))
-        .map(|wire| {
-            GridPos::new(
-                (wire.a.x + wire.b.x).div_euclid(2),
-                (wire.a.y + wire.b.y).div_euclid(2),
-            )
-        })
+struct NetFlow {
+    source: GridPos,
+    away: bool,
+    strength: f64,
 }
 
-fn voltage_color(value: f64, maximum: f64) -> Color32 {
-    if value == 0.0 || !value.is_finite() || maximum <= f64::MIN_POSITIVE {
-        return MUTED;
+fn net_flows(document: &Document, live: &LiveValues) -> BTreeMap<String, NetFlow> {
+    let mut flows: BTreeMap<String, NetFlow> = BTreeMap::new();
+    for symbol in document.schematic().symbols() {
+        if symbol.kind.is_measurement() {
+            continue;
+        }
+        let Some(definition) = document.registry().get(&symbol.kind) else {
+            continue;
+        };
+        if definition.pins.len() != 2 {
+            continue;
+        }
+        let observed = live.symbol(document, symbol);
+        let current = observed.current.or_else(|| {
+            (symbol.kind == editor_core::SymbolKind::CurrentSource)
+                .then(|| {
+                    symbol
+                        .params
+                        .get("dc")
+                        .and_then(sim_core::netlist::ParamValue::as_number)
+                })
+                .flatten()
+        });
+        let Some(current) = current else {
+            continue;
+        };
+        for (index, injection) in [-current, current].into_iter().enumerate() {
+            if !injection.is_finite() {
+                continue;
+            }
+            let strength = injection.abs();
+            if strength <= f64::MIN_POSITIVE {
+                continue;
+            }
+            let Some(pin) = observed.pins.get(index) else {
+                continue;
+            };
+            let Some(net) = pin.net.as_deref() else {
+                continue;
+            };
+            let Some(position) = symbol.pin_position_of(&definition.pins[index]) else {
+                continue;
+            };
+            let candidate = NetFlow {
+                source: position,
+                away: injection > 0.0,
+                strength,
+            };
+            match flows.get(net) {
+                Some(existing) if existing.strength >= strength => {}
+                _ => {
+                    flows.insert(net.to_owned(), candidate);
+                }
+            }
+        }
     }
-    let strength = (value.abs() / maximum).clamp(0.0, 1.0) as f32;
-    let base = if value < 0.0 {
-        NEGATIVE_VOLTAGE
-    } else {
-        POSITIVE_VOLTAGE
-    };
-    base.gamma_multiply(0.55 + 0.45 * strength)
+    flows
 }
 
 fn report(status: &mut Status, result: Result<(), ActionError>, success: &str) {
@@ -1829,7 +1994,17 @@ mod tests {
             egui::CentralPanel::default()
                 .frame(Frame::NONE)
                 .show(ui, |ui| {
-                    canvas.show(ui, document, tool, status, true, &LiveValues::default());
+                    canvas.show(
+                        ui,
+                        document,
+                        tool,
+                        status,
+                        true,
+                        &LiveValues::default(),
+                        &[],
+                        &BTreeSet::new(),
+                        0.0,
+                    );
                 });
         });
     }
@@ -2058,26 +2233,32 @@ mod tests {
     }
 
     #[test]
-    fn live_overlay_prefers_net_labels_and_ignores_ground() {
+    fn current_flow_uses_simulated_currents() {
         let document = Document::demo().unwrap();
-        let extraction = document.extraction().unwrap();
-        let vin = extraction
-            .nets
-            .iter()
-            .find(|net| net.name.as_str() == "VIN")
+        let resistor = document
+            .schematic()
+            .symbols()
+            .find(|symbol| symbol.kind == editor_core::SymbolKind::Resistor)
             .unwrap();
-        assert_eq!(
-            net_overlay_position(&document, vin),
-            Some(GridPos::new(-6, -8))
-        );
-        let ground = extraction
-            .nets
-            .iter()
-            .find(|net| net.name.as_str() == "0")
-            .unwrap();
-        assert_eq!(net_overlay_position(&document, ground), None);
-        assert_eq!(voltage_color(0.0, 5.0), MUTED);
-        assert_ne!(voltage_color(5.0, 5.0), voltage_color(-5.0, 5.0));
+        let live = LiveValues {
+            document_revision: document.revision(),
+            time: Some(1e-3),
+            node_voltages: [
+                ("VIN".to_owned(), 5.0),
+                ("OUT".to_owned(), 2.5),
+                ("0".to_owned(), 0.0),
+            ]
+            .into_iter()
+            .collect(),
+            branch_currents: BTreeMap::new(),
+        };
+        let flows = net_flows(&document, &live);
+        assert!(flows.contains_key("VIN"));
+        assert!(flows.contains_key("OUT"));
+        assert!(flows.get("VIN").is_some_and(|flow| flow.strength > 0.0));
+        assert!(document
+            .symbol(resistor.id)
+            .is_some_and(|symbol| symbol.kind == editor_core::SymbolKind::Resistor));
     }
 
     #[test]

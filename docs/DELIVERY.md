@@ -8,8 +8,8 @@
 | Web | `cargo xtask web-build` | `dist/` |
 | Bibliothèques | `cargo build --release` | crates du workspace |
 
-Sous Windows, le binaire de référence mesure environ 9,6 Mo. La distribution web
-contient `index.html`, un module JS d'environ 78 ko et un wasm d'environ 5,9 Mo
+Sous Windows, le binaire de référence mesure environ 9,7 Mo. La distribution web
+contient `index.html`, un module JS d'environ 78 ko et un wasm d'environ 6,0 Mo
 après `wasm-opt`. `dist/` est ignoré par Git et publié par la CI sous l'artefact
 `circuitsim-web`. Licence : `MIT OR Apache-2.0` à la racine.
 
@@ -62,7 +62,7 @@ SVG intégrée et un thème sombre sans requête externe.
 
 | Contrôle | Résultat |
 | --- | --- |
-| `cargo xtask check` | format, clippy strict, 229 tests |
+| `cargo xtask check` | format, clippy strict, 234 tests |
 | `cargo deny check licenses` | licences compatibles |
 | `cargo xtask wasm-check` | bibliothèques, worker, app compilés pour WASM |
 | `cargo bench --workspace --no-run` | benchmarks compilés |

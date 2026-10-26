@@ -110,28 +110,35 @@ Les raccourcis sont ignorés lorsqu’un champ texte a le focus, à l’exceptio
   premier coude (horizontal ou vertical).
 - `Échap` annule le fil courant. Un second clic sur la même position l’annule
   aussi.
-- Un fil sélectionné peut être glissé perpendiculairement. Les fils
-  perpendiculaires partageant une extrémité suivent le déplacement ; une
-  topologie ambiguë (T, jonction ou label sur le segment) est refusée sans
-  modification.
+- Un fil sélectionné peut être glissé perpendiculairement. Toutes les
+  connexions du segment sont conservées : les fils perpendiculaires restent en
+  place et de courts embouts relient leurs anciennes positions au segment
+  déplacé. Aucune connexion n’est perdue silencieusement.
+- Une extrémité libre peut être tirée le long de l’axe pour allonger ou
+  raccourcir le fil. Une extrémité connectée est refusée avec un message.
+- Les fils sont plus épais ; après simulation, des points animés montrent le
+  courant estimé. `Vue → Courant animé` masque ce flux.
 - Un clic sur une broche ou un fil met en évidence le net complet. `Alt` + clic
   sélectionne tous ses objets.
 
 ## 8. Simulation interactive
 
-- **Simuler** dans la barre d’outils, `Ctrl+Entrée` ou `F5` relancent le
-  transitoire avec les réglages courants, sans ouvrir le panneau Instruments.
-- L’option **Auto** du panneau Instruments relance le calcul 0,35 s après une
-  modification acceptée. Le bouton reste désactivé pendant un calcul, sans
-  extraction valide ou si le worker est indisponible.
-- Le dernier échantillon est superposé aux nets du canevas : valeur seule sur un
-  net déjà nommé, nom et valeur sinon. Les tensions positives et négatives ont
-  des couleurs distinctes ; l’option **Vue → Tensions des nets** masque
-  l’ensemble.
-- Un badge en haut à droite indique `t = … · à jour` ou `antérieur`. Le panneau
-  Inspecteur reprend les tensions par broche, le courant et la puissance.
+- **Simuler** dans la barre d’outils, `Ctrl+Entrée` ou `F5` démarrent une session
+  temps réel sans plage d’arrêt, sans ouvrir le panneau Instruments.
+- Le pas de calcul reste réglable. La vitesse multiplie le temps simulé par
+  seconde réelle ; **Pause** fige la session et **Reprendre** la relance.
+- La portée affiche une fenêtre glissante des derniers échantillons. Le tampon
+  peut être mis en pause sans perdre les données ; il est plafonné en mémoire.
+- L’option **Auto** relance la session 0,35 s après une modification acceptée.
+- Les tensions ne sont plus superposées aux labels du canevas. Un badge indique
+  `t = … · à jour` ou `antérieur`, et l’inspecteur reprend les tensions par
+  broche, le courant et la puissance.
+- Les sondes **Voltmètre**, **Ampèremètre** et **Ohmmètre** se placent depuis la
+  palette. Leur liste apparaît à côté du graphique avec **Afficher** et
+  **Graphique**. Le voltmètre se pose sur un fil ; l’ampèremètre et l’ohmmètre
+  mesurent le composant sous la sonde.
 - Une modification du schéma ne détruit pas le dernier résultat : il reste
-  visible, marqué comme antérieur, jusqu’au prochain calcul manuel ou
+  visible, marqué comme antérieur, jusqu’au prochain démarrage manuel ou
   automatique.
 - Le calcul reste synchrone dans le fil de l’interface ; le worker dédié et
   `SharedArrayBuffer` restent hors périmètre.

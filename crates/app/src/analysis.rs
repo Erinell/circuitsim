@@ -2,7 +2,7 @@
 
 use std::collections::BTreeMap;
 
-use editor_core::{Extraction, Symbol, SymbolKind};
+use editor_core::{Extraction, Symbol, SymbolId, SymbolKind};
 use rustfft::num_complex::Complex;
 use rustfft::FftPlanner;
 use sim_core::netlist::{
@@ -11,7 +11,7 @@ use sim_core::netlist::{
 use sim_core::units::{format_si_precision, parse_si, Unit};
 use sim_core::{
     AcExcitation, AcOptions, AcResult, AcSweep, DcOptions, TransientAction, TransientEvent,
-    TransientOptions, TransientResult,
+    TransientOptions, TransientResult, TransientSample,
 };
 use thiserror::Error;
 use worker::protocol::{
@@ -385,6 +385,114 @@ pub struct PinLive {
     pub voltage: Option<f64>,
 }
 
+/// Measurement reported by a placed probe.
+#[derive(Clone, Debug, PartialEq)]
+pub struct ProbeReading {
+    /// Probe symbol identifier.
+    pub id: SymbolId,
+    /// Probe reference such as `VM1`.
+    pub label: String,
+    /// Probe kind.
+    pub kind: SymbolKind,
+    /// Net observed by a voltmeter.
+    pub net: Option<String>,
+    /// Component observed by an ammeter or ohmmeter.
+    pub target: Option<String>,
+    /// Measured value in SI units.
+    pub value: Option<f64>,
+    /// Physical unit of the value.
+    pub unit: Option<Unit>,
+}
+
+impl ProbeReading {
+    /// Returns the signal that can be plotted for this probe.
+    pub fn signal(&self) -> Option<SignalId> {
+        match self.kind {
+            SymbolKind::Voltmeter => self.net.clone().map(SignalId::Voltage),
+            SymbolKind::Ammeter => self.target.clone().map(SignalId::Current),
+            _ => None,
+        }
+    }
+}
+
+/// Computes all probe readings from the last transient sample.
+pub fn probe_readings(
+    document: &crate::document::Document,
+    live: &LiveValues,
+) -> Vec<ProbeReading> {
+    document
+        .schematic()
+        .symbols()
+        .filter(|symbol| symbol.kind.is_measurement())
+        .map(|probe| {
+            let net = document.electrical_net_name_at(probe.at);
+            let target = document.component_at(probe.at);
+            let (value, unit, target_label) = match probe.kind {
+                SymbolKind::Voltmeter => (
+                    net.as_deref().and_then(|name| live.voltage(name)),
+                    Some(Unit::Volt),
+                    None,
+                ),
+                SymbolKind::Ammeter => {
+                    let current = target.and_then(|target| live.symbol(document, target).current);
+                    (
+                        current,
+                        Some(Unit::Ampere),
+                        target.map(|target| target.label.clone()),
+                    )
+                }
+                SymbolKind::Ohmmeter => {
+                    let resistance = target.and_then(|target| {
+                        let fixed = match target.kind {
+                            SymbolKind::Resistor => target
+                                .params
+                                .get("resistance")
+                                .and_then(ParamValue::as_number),
+                            SymbolKind::Switch => {
+                                let closed = target
+                                    .params
+                                    .get("closed")
+                                    .and_then(ParamValue::as_bool)
+                                    .unwrap_or(false);
+                                target
+                                    .params
+                                    .get(if closed { "ron" } else { "roff" })
+                                    .and_then(ParamValue::as_number)
+                            }
+                            _ => None,
+                        };
+                        fixed.or_else(|| {
+                            let observed = live.symbol(document, target);
+                            let voltage = match (observed.pins.first(), observed.pins.get(1)) {
+                                (Some(first), Some(second)) => first.voltage.zip(second.voltage),
+                                _ => None,
+                            }?;
+                            let current = observed.current?;
+                            (current.abs() > f64::MIN_POSITIVE)
+                                .then_some((voltage.0 - voltage.1) / current)
+                        })
+                    });
+                    (
+                        resistance,
+                        Some(Unit::Ohm),
+                        target.map(|target| target.label.clone()),
+                    )
+                }
+                _ => (None, None, None),
+            };
+            ProbeReading {
+                id: probe.id,
+                label: probe.label.clone(),
+                kind: probe.kind.clone(),
+                net,
+                target: target_label,
+                value,
+                unit,
+            }
+        })
+        .collect()
+}
+
 impl LiveValues {
     /// Returns true when no sample is available.
     pub fn is_empty(&self) -> bool {
@@ -519,6 +627,9 @@ pub enum SimulationError {
     /// The selected source disappeared from the netlist.
     #[error("la source « {0} » n'existe plus dans la netlist")]
     MissingSource(String),
+    /// The real-time transient session failed.
+    #[error("simulation transitoire : {0}")]
+    Transient(String),
     /// The selected signal or net disappeared from the netlist.
     #[error("le signal « {0} » n'existe plus dans le résultat")]
     MissingSignal(String),
@@ -938,15 +1049,108 @@ impl Trace {
     }
 }
 
-/// Extracts the requested transient signals from one worker result.
-pub fn transient_traces(
-    result: &TransientResult,
+/// Prepared real-time transient session.
+#[derive(Debug)]
+pub struct RealtimeSetup {
+    /// Netlist snapshot with the source step applied.
+    pub netlist: Netlist,
+    /// Name and revision mapping.
+    pub context: RunContext,
+    /// Fixed-step options with an open horizon.
+    pub options: TransientOptions,
+}
+
+/// Builds an open-ended transient session from the current settings.
+pub fn prepare_realtime(
+    extraction: &Extraction,
+    settings: &TransientSettings,
+    document_revision: u64,
+) -> Result<RealtimeSetup, SimulationError> {
+    let step = parse_time("pas de calcul", &settings.step)?;
+    if step <= 0.0 {
+        return Err(SimulationError::InvalidField {
+            field: "pas de calcul",
+            message: "le pas doit être strictement positif".to_owned(),
+        });
+    }
+    let mut netlist = extraction.netlist.clone();
+    let mut events = Vec::new();
+    if settings.step_enabled {
+        let label = settings
+            .source
+            .as_ref()
+            .ok_or(SimulationError::MissingStepSource)?;
+        let component_id = {
+            let component = netlist
+                .components
+                .iter()
+                .find(|component| &component.label == label)
+                .ok_or_else(|| SimulationError::MissingSource(label.clone()))?;
+            if !matches!(
+                component.kind,
+                ComponentKind::VoltageSource | ComponentKind::CurrentSource
+            ) {
+                return Err(SimulationError::NotSource(label.clone()));
+            }
+            component.id
+        };
+        let initial_value = parse_number("valeur initiale", &settings.initial_value)?;
+        let final_value = parse_number("valeur finale", &settings.final_value)?;
+        let event_time = parse_time("instant de l'échelon", &settings.event_time)?;
+        if event_time < 0.0 {
+            return Err(SimulationError::InvalidField {
+                field: "instant de l'échelon",
+                message: "l'instant doit être positif ou nul".to_owned(),
+            });
+        }
+        if let Some(target) = netlist
+            .components
+            .iter_mut()
+            .find(|component| component.id == component_id)
+        {
+            target
+                .params
+                .insert("dc".to_owned(), ParamValue::Number(initial_value));
+        }
+        events.push(TransientEvent {
+            time: event_time,
+            action: TransientAction::SetSourceValue {
+                component: component_id,
+                value: final_value,
+            },
+        });
+        netlist.validate()?;
+    }
+    let context = RunContext {
+        document_revision,
+        nodes: node_map(&netlist),
+        components: component_map(&netlist),
+        input_amplitude: None,
+        nominal_step: Some(step),
+    };
+    Ok(RealtimeSetup {
+        netlist,
+        context,
+        options: TransientOptions {
+            start_time: 0.0,
+            stop_time: f64::MAX,
+            step,
+            max_steps: MAX_TRANSIENT_STEPS,
+            solver: DcOptions::default(),
+            events,
+        },
+    })
+}
+
+/// Extracts traces from an arbitrary sample buffer.
+pub fn transient_traces_from_samples(
+    samples: &[TransientSample],
     context: &RunContext,
     signals: &[SignalId],
 ) -> Result<Vec<Trace>, SimulationError> {
     let mut traces = Vec::with_capacity(signals.len());
     for signal in signals {
-        let mut points = Vec::with_capacity(result.samples.len());
+        let mut points = Vec::with_capacity(samples.len());
         match signal {
             SignalId::Voltage(name) => {
                 let node = context
@@ -954,7 +1158,7 @@ pub fn transient_traces(
                     .get(name)
                     .copied()
                     .ok_or_else(|| SimulationError::MissingSignal(signal.label()))?;
-                for sample in &result.samples {
+                for sample in samples {
                     if let Some(value) = sample.node_voltage(node) {
                         points.push([sample.time, value]);
                     }
@@ -966,7 +1170,7 @@ pub fn transient_traces(
                     .get(name)
                     .copied()
                     .ok_or_else(|| SimulationError::MissingSignal(signal.label()))?;
-                for sample in &result.samples {
+                for sample in samples {
                     if let Some(value) = sample.branch_current(component) {
                         points.push([sample.time, value]);
                     }
@@ -982,6 +1186,15 @@ pub fn transient_traces(
         });
     }
     Ok(traces)
+}
+
+/// Extracts the requested transient signals from one worker result.
+pub fn transient_traces(
+    result: &TransientResult,
+    context: &RunContext,
+    signals: &[SignalId],
+) -> Result<Vec<Trace>, SimulationError> {
+    transient_traces_from_samples(&result.samples, context, signals)
 }
 
 /// Summary values computed from one waveform.
@@ -1313,6 +1526,7 @@ fn csv_number(value: f64) -> String {
 mod tests {
     use super::*;
     use crate::document::Document;
+    use editor_core::GridPos;
     use sim_core::netlist::NodeKind;
 
     fn demo_extraction() -> Extraction {
@@ -1326,6 +1540,43 @@ mod tests {
             .cloned()
             .map(SignalId::Voltage)
             .collect()
+    }
+
+    #[test]
+    fn probe_symbols_report_voltage_current_and_resistance() {
+        let mut document = Document::demo().unwrap();
+        let voltmeter = document
+            .add_symbol(SymbolKind::Voltmeter, GridPos::new(-6, -8))
+            .unwrap();
+        let ammeter = document
+            .add_symbol(SymbolKind::Ammeter, GridPos::new(-2, -8))
+            .unwrap();
+        let ohmmeter = document
+            .add_symbol(SymbolKind::Ohmmeter, GridPos::new(-2, -8))
+            .unwrap();
+        let live = LiveValues {
+            document_revision: document.revision(),
+            time: Some(1e-3),
+            node_voltages: [
+                ("VIN".to_owned(), 5.0),
+                ("OUT".to_owned(), 2.5),
+                ("0".to_owned(), 0.0),
+            ]
+            .into_iter()
+            .collect(),
+            branch_currents: BTreeMap::new(),
+        };
+        let readings = probe_readings(&document, &live);
+        let voltage = readings.iter().find(|probe| probe.id == voltmeter).unwrap();
+        assert_eq!(voltage.net.as_deref(), Some("VIN"));
+        assert_eq!(voltage.value, Some(5.0));
+        let current = readings.iter().find(|probe| probe.id == ammeter).unwrap();
+        assert_eq!(current.target.as_deref(), Some("R1"));
+        assert!((current.value.unwrap() - 2.5e-3).abs() < 1e-12);
+        let resistance = readings.iter().find(|probe| probe.id == ohmmeter).unwrap();
+        assert_eq!(resistance.value, Some(1_000.0));
+        assert!(readings.iter().all(|probe| probe.kind.is_measurement()));
+        assert!(document.extraction().is_some());
     }
 
     #[test]

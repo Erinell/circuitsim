@@ -2952,7 +2952,7 @@ SOFTWARE.
 
 Used by:
 
-- `circuitsim-harness 0.2.0`
+- `circuitsim-harness 0.3.0`
 
 ```text
 MIT License
@@ -2983,12 +2983,12 @@ SOFTWARE.
 
 Used by:
 
-- `circuitsim-app 0.2.0`
-- `editor-core 0.2.0`
-- `worker-protocol 0.2.0`
-- `sim-core 0.2.0`
-- `worker 0.2.0`
-- `xtask 0.2.0`
+- `circuitsim-app 0.3.0`
+- `editor-core 0.3.0`
+- `worker-protocol 0.3.0`
+- `sim-core 0.3.0`
+- `worker 0.3.0`
+- `xtask 0.3.0`
 - `accesskit 0.24.1`
 - `anes 0.1.6`
 - `ecolor 0.35.0`
