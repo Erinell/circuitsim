@@ -39,7 +39,7 @@ cargo deny check licenses
 - `crates/*/benches`, `examples/` : benchmarks Criterion et exemples.
 - `tests/`, `src/lib.rs` : intégration et proptest.
 - `.github/workflows/ci.yml`, `xtask/` : CI et automatisation.
-- `docs/` : architecture, décisions, éditeur, UX, simulation, protocole, tests,
+- `docs/` : architecture, décisions, éditeur, simulation, protocole, tests,
   performances, livraison, Git et licences.
 
 ## Contrats de données
@@ -132,7 +132,7 @@ Le MOSFET reste un exemple d'extension (`examples/custom_mosfet.rs`) ; les types
 | Jalon | État |
 | --- | --- |
 | Étapes 1–10, tag `v0.1.0` | terminé |
-| G1 Git, licence, gouvernance | en cours |
+| G1 Git, licence, gouvernance | terminé |
 | G2 placement et câblage | à faire |
 | G3 sélection et édition | à faire |
 | G4 navigation et disposition | à faire |
