@@ -63,6 +63,7 @@ SVG intégrée et un thème sombre sans requête externe.
 | Contrôle | Résultat |
 | --- | --- |
 | `cargo xtask check` | format, clippy strict, 187 tests |
+| `cargo deny check licenses` | licences compatibles |
 | `cargo xtask wasm-check` | bibliothèques, worker, app compilés pour WASM |
 | `cargo bench --workspace --no-run` | benchmarks compilés |
 | Benchmarks rapides | solveurs, extraction, FFT, CSV mesurés |

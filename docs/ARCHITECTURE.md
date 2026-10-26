@@ -114,9 +114,10 @@ gain fini et saturation.
 ## 8. Qualité et livraison
 
 La suite compte 187 tests natifs, dont deux propriétés proptest. La CI exécute
-formatage, clippy strict, tests, WASM, benchmarks rapides, exemples, build natif
-release et build web. Les budgets de performance sont documentés mais non
-bloquants.
+formatage, clippy strict, tests, `cargo deny check licenses`, WASM, benchmarks
+rapides, exemples, build natif release et build web. Les budgets de performance
+sont documentés mais non bloquants. Voir [LICENSING.md](LICENSING.md) et
+[GIT_WORKFLOW.md](GIT_WORKFLOW.md).
 
 Documents associés : [DECISIONS.md](DECISIONS.md) pour les arbitrages,
 [NUMERICS.md](NUMERICS.md) pour les équations, [PROTOCOL.md](PROTOCOL.md) pour le
