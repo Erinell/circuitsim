@@ -15,7 +15,7 @@ use crate::ui::command_palette::{CommandAction, CommandPalette};
 use crate::ui::history;
 use crate::ui::instruments::InstrumentsState;
 use crate::ui::palette::PaletteState;
-use crate::ui::properties::InspectorState;
+use crate::ui::properties::{InspectorState, SymbolDialog};
 use crate::ui::{self, Status, Tool};
 
 /// Root application state.
@@ -28,6 +28,7 @@ pub struct CircuitApp {
     inspector: InspectorState,
     instruments: InstrumentsState,
     palette: CommandPalette,
+    symbol_dialog: Option<SymbolDialog>,
     status: Status,
     auto: AutoRefresh,
     preferences: DisplayPreferences,
@@ -193,6 +194,7 @@ impl CircuitApp {
             inspector: InspectorState::default(),
             instruments: InstrumentsState::new(),
             palette: CommandPalette::default(),
+            symbol_dialog: None,
             status,
             auto: AutoRefresh::default(),
             preferences,
@@ -623,6 +625,7 @@ impl CircuitApp {
             && !self.show_help
             && !self.show_onboarding
             && !self.show_preferences
+            && self.symbol_dialog.is_none()
             && !self.palette.is_open();
         let live = self.instruments.live_values();
         let readings = probe_readings(&self.document, &live);
@@ -652,6 +655,19 @@ impl CircuitApp {
             &visible,
             flow_time,
         );
+        if let Some(id) = self.canvas.take_property_request() {
+            self.symbol_dialog = SymbolDialog::new(&self.document, id);
+        }
+    }
+
+    fn symbol_dialog_window(&mut self, context: &Context) {
+        let Some(dialog) = self.symbol_dialog.as_mut() else {
+            return;
+        };
+        let live = self.instruments.live_values();
+        if !dialog.show(context, &mut self.document, &mut self.status, &live) {
+            self.symbol_dialog = None;
+        }
     }
 
     fn undo(&mut self) {
@@ -1391,6 +1407,7 @@ impl eframe::App for CircuitApp {
         self.help_window(ui.ctx());
         self.onboarding_window(ui.ctx());
         self.preferences_window(ui.ctx());
+        self.symbol_dialog_window(ui.ctx());
     }
 }
 
