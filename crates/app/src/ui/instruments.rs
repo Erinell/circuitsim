@@ -75,6 +75,7 @@ pub struct InstrumentsState {
     pending: Option<AnalysisKind>,
     error: Option<String>,
     selection_initialized: bool,
+    auto_refresh: bool,
     export_path: String,
 }
 
@@ -98,6 +99,7 @@ impl InstrumentsState {
             pending: None,
             error: None,
             selection_initialized: false,
+            auto_refresh: false,
             export_path: default_export_path(),
         }
     }
@@ -131,6 +133,47 @@ impl InstrumentsState {
             node_voltages,
             branch_currents,
         }
+    }
+
+    /// Returns true when a transient analysis can be submitted.
+    pub fn can_simulate(&self, document: &Document) -> bool {
+        self.can_run(document)
+    }
+
+    /// Returns true while an analysis is pending.
+    pub const fn is_busy(&self) -> bool {
+        self.pending.is_some()
+    }
+
+    /// Returns the document revision of the last transient result.
+    pub fn transient_revision(&self) -> Option<u64> {
+        self.transient_run
+            .as_ref()
+            .map(|run| run.context.document_revision)
+    }
+
+    /// Returns the time of the last transient sample.
+    pub fn transient_time(&self) -> Option<f64> {
+        let run = self.transient_run.as_ref()?;
+        let AnalysisResult::Transient(result) = &run.result else {
+            return None;
+        };
+        result.samples.last().map(|sample| sample.time)
+    }
+
+    /// Returns whether edits trigger an automatic transient refresh.
+    pub const fn auto_refresh(&self) -> bool {
+        self.auto_refresh
+    }
+
+    /// Enables or disables automatic transient refresh.
+    pub fn set_auto_refresh(&mut self, enabled: bool) {
+        self.auto_refresh = enabled;
+    }
+
+    /// Runs the configured transient immediately.
+    pub fn run_transient_now(&mut self, document: &Document, now: f64, status: &mut Status) {
+        self.run_transient(document, now, status);
     }
 
     /// Draws the bottom instrument panel.
@@ -191,6 +234,27 @@ impl InstrumentsState {
                     RichText::new(format!("Calcul {} en cours…", analysis_name(kind)))
                         .small()
                         .color(MUTED),
+                );
+            }
+            ui.separator();
+            let mut auto = self.auto_refresh;
+            if ui
+                .checkbox(&mut auto, "Auto")
+                .on_hover_text(
+                    "Recalcule le transitoire après une modification, avec un court délai.",
+                )
+                .changed()
+            {
+                self.auto_refresh = auto;
+            }
+            if let Some(time) = self.transient_time() {
+                ui.label(
+                    RichText::new(format!(
+                        "t = {}",
+                        format_si_precision(time, Unit::Second, 4)
+                    ))
+                    .small()
+                    .color(MUTED),
                 );
             }
             if self
@@ -1337,6 +1401,10 @@ mod tests {
         assert!(state.pending.is_none());
         assert!(state.error.is_none());
         assert!(state.transient_run.is_some());
+        assert_eq!(state.transient_revision(), Some(document.revision()));
+        assert!(state.transient_time().is_some_and(|time| time > 0.0));
+        assert!(!state.is_busy());
+        assert!(state.can_simulate(&document));
         let (filename, csv) = state.export_payload().unwrap().unwrap();
         assert_eq!(filename, "circuitsim-portee.csv");
         assert!(csv.starts_with("signal,unit,time_s,value\n"));

@@ -22,6 +22,12 @@ job en cours. Le service tourne dans le fil de l'interface ; worker dédié et
 `SharedArrayBuffer` restent à brancher. Un résultat reste consultable après une
 modification du schéma, avec un avertissement s'il est antérieur.
 
+Le transitoire peut être lancé depuis le panneau, par **Simuler** dans la barre
+d'outils, `Ctrl+Entrée` ou `F5`. L'option **Auto** replanifie un calcul 0,35 s
+après une modification acceptée ; une révision déjà tentée n'est pas réessayée
+en boucle. Le dernier échantillon alimente l'inspecteur et la superposition des
+tensions sur le canevas.
+
 ## 2. Catalogue et sélection
 
 `SignalCatalog::from_extraction` produit trois listes triées :
@@ -50,6 +56,11 @@ L'échelon de source :
 
 La source du document n'est jamais modifiée. L'option fonctionne pour une source
 de tension ou de courant ; les autres formes d'onde ne sont pas paramétrées.
+
+Le dernier échantillon est exposé comme `LiveValues` : tensions par nom de net,
+courants de branche par référence, révision du document et instant. Le canevas y
+ajoute les tensions des nets et un badge d'état ; l'inspecteur en dérive les
+tensions de broches, le courant et la puissance.
 
 ## 4. Portée et mesures
 
@@ -129,7 +140,9 @@ L'export ne sauvegarde pas le schéma.
 Limites : worker dans le fil de l'interface, transitoire à pas fixe, FFT limitée
 et sans fenêtres alternatives, pas de curseurs/moyenne glissante/analyse
 harmonique, CSV seulement (pas PNG/SVG ni session), 100 000 pas et 10 000 points
-AC, résultats en mémoire avec avertissement s'ils deviennent antérieurs.
+AC, résultats en mémoire avec avertissement s'ils deviennent antérieurs. Le
+rafraîchissement automatique relance le transitoire complet ; il n'y a pas de
+pause, de reprise ni d'incrémental.
 
 Les tests couvrent catalogue, échelon, limites, transitoire et AC via worker,
 mesures, FFT étiquetée, décimation, trois CSV, échappement, export natif UTF-8 et

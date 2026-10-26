@@ -49,6 +49,8 @@ et la fenêtre visible ; un clic y recentre la vue.
 - Glisser un fil : déplace le segment perpendiculairement.
 - `Ctrl+A` : tout sélectionner ; `Échap` : annuler l'outil, le collage ou la sélection.
 - `Ctrl+C`, `Ctrl+V`, `Ctrl+D` : copier, coller avec aperçu, dupliquer.
+- `Ctrl+Entrée` ou `F5` : relancer le transitoire.
+- `Ctrl+Z`, `Ctrl+Y` : annuler, rétablir.
 - Molette : zoom centré sous le curseur (8–80 px/case).
 - `+`/`-` : zoom autour du centre ; `0` : zoom 100 %.
 - `Ctrl+0` : retour à l'origine et au zoom par défaut.
@@ -82,7 +84,8 @@ brouillon jusqu'à **Appliquer** ou `Entrée`.
   ou boutons `−`/`+`.
 - Grandeurs simulées : dernier échantillon transitoire, tensions par broche et
   par net, courant et puissance lorsque calculables. Un résultat antérieur est
-  signalé.
+  signalé. Les tensions des nets sont aussi superposées au canevas lorsque
+  l’option **Tensions des nets** est active.
 - Historique nommé repliable : chaque entrée indique son état ; un clic ramène
   le schéma à cet état, dans le passé ou le futur.
 
@@ -101,7 +104,10 @@ d'extraction bloque les nets et les analyses.
 Les contrôles acceptent `5m`, `10u`, etc. Le bouton de lancement est désactivé
 sans extraction valide, pendant une analyse ou si le worker est indisponible.
 Les résultats conservent la révision et les noms du document ; un résultat
-antérieur est signalé mais reste consultable.
+antérieur est signalé mais reste consultable. Le bouton **Simuler** de la barre
+d’outils et `Ctrl+Entrée`/`F5` relancent le transitoire courant. L’option
+**Auto** recalcule après une modification avec un délai de 0,35 s ; le canevas
+affiche alors le dernier échantillon et un badge `t = … · à jour/antérieur`.
 
 - **Portée** : champs Début/Arrêt/Pas, échelon de source (initiale, instant,
   finale), signaux avec boutons **Toutes tensions**/**Aucun**. Les courbes
@@ -131,6 +137,7 @@ les formats de fichiers sont dans [INSTRUMENTS.md](INSTRUMENTS.md).
 | `Maj` pendant un fil | changer le coude |
 | `Alt` + clic | sélectionner le net complet |
 | `Ctrl+C`, `Ctrl+V`, `Ctrl+D` | copier, coller, dupliquer |
+| `Ctrl+Entrée`, `F5` | relancer le transitoire |
 | `Alt+↑`, `Alt+↓` | cycler la série E du paramètre |
 | `Suppr`, `Retour arrière` | supprimer |
 | `Ctrl+Z`, `Ctrl+Y` / `Ctrl+Maj+Z` | annuler, rétablir |
@@ -160,7 +167,8 @@ transitoire à pas fixe, FFT plafonnée, pas de curseurs/PNG/persistance de proj
 opamp sans alimentation/pôle, pas de thème clair ni de mobile spécifique, fils
 non extensibles par extrémité. Les panneaux sont masquables et redimensionnables,
 mais il n'y a pas de dockage libre ni de disposition persistée. Les valeurs
-simulées de l’inspecteur proviennent du dernier transitoire ; le câblage à
+simulées de l’inspecteur et du canevas proviennent du dernier transitoire ; il
+n’y a pas encore de pause, de reprise ni de curseur temporel. Le câblage à
 double-clic et la persistance des favoris restent aux lots suivants.
 
 Tests : `cargo test -p circuitsim-app` couvre document, vue, navigation,

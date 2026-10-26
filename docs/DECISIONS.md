@@ -66,14 +66,20 @@ documents spécialisés.
     justifie pas le risque d’états incohérents, et le canevas garde toujours la
     priorité. La mini-carte est une projection pure testée dans `view.rs`. Voir
     [UI.md](UI.md).
+13. **Simulation interactive par transitoire complet.** Le bouton **Simuler** et
+    l’option **Auto** réutilisent le transitoire existant, avec un délai de
+    0,35 s et une seule tentative par révision. Aucun solveur n’est déplacé dans
+    le fil de l’interface et aucun résultat partiel n’est affiché. Le dernier
+    échantillon alimente le canevas et l’inspecteur. Voir
+    [INSTRUMENTS.md](INSTRUMENTS.md).
 
 ## Tests et périmètre
 
-13. **Composants personnalisés représentés, pas simulés.** Le registre,
+14. **Composants personnalisés représentés, pas simulés.** Le registre,
     l'extraction, le JSON et la netlist acceptent `Custom`; les solveurs le
     refusent avec `MnaError::UnsupportedComponent` jusqu'à l'ajout d'un modèle
     dans `sim-core`. Voir [COMPONENTS.md](COMPONENTS.md).
-14. **Tests natifs, benchmarks et CI.** Les tests ne demandent ni navigateur ni
+15. **Tests natifs, benchmarks et CI.** Les tests ne demandent ni navigateur ni
     ngspice ; les propriétés proptest affichent leur graine. La CI vérifie
     format, clippy, tests, WASM, benchmarks rapides, exemples et builds
     natif/web. Les budgets Criterion sont des seuils de revue, non bloquants sur
