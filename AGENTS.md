@@ -139,12 +139,12 @@ Le MOSFET reste un exemple d'extension (`examples/custom_mosfet.rs`) ; les types
 | G5 simulation interactive | terminé |
 | G6 ergonomie du scope | terminé |
 | G7 onboarding et accessibilité | terminé |
-| G8 finalisation `v0.2.0` | à faire |
+| G8 finalisation `v0.2.0` | terminé |
 
 ## Limites finales
 
 - Worker dans le fil de l'interface ; Web Worker/SAB à brancher.
 - Pas adaptatif ; excitations continues par événements.
 - AC sans capacité de jonction ; opamp sans alimentation, slew rate ni pôle.
-- FFT plafonnée, sans fenêtres alternatives ; export CSV seul, sans persistance/PNG/curseurs.
+- FFT plafonnée, sans fenêtres alternatives ; export CSV seul, sans persistance/PNG ; panneaux non dockables, préférences de session.
 - Budgets de performance documentés, non bloquants.
