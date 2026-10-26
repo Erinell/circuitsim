@@ -4,6 +4,7 @@ pub mod command;
 pub mod erc;
 pub mod extract;
 pub mod grid;
+pub mod interaction;
 pub mod naming;
 pub mod schematic;
 pub mod serialize;
@@ -14,6 +15,9 @@ pub use command::{Command, EditError};
 pub use erc::{ErcCode, ErcIssue, ErcReport, ErcSeverity};
 pub use extract::{extract_netlist, ExtractError, ExtractedNet, Extraction, PinKey};
 pub use grid::{GridPos, Orientation, SegmentRelation};
+pub use interaction::{
+    nearest_snap, route_wire, GridRect, SnapKind, SnapTarget, DEFAULT_SNAP_RADIUS,
+};
 pub use schematic::{
     Junction, JunctionId, NetLabel, NetLabelId, ObjectRef, Schematic, SchematicError, Wire,
     WireGeometryError, WireId,
