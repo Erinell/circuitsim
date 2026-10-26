@@ -109,7 +109,7 @@ Le MOSFET reste un exemple d'extension (`examples/custom_mosfet.rs`) ; les types
 | Sujet | Documents |
 | --- | --- |
 | Architecture et dépendances | `ARCHITECTURE.md`, `DECISIONS.md` |
-| Éditeur et interactions | `EDITOR.md`, `UX.md` |
+| Éditeur et interactions | `EDITOR.md`, `UI.md` |
 | Netlist, unités, composants | `NETLIST.md`, `COMPONENTS.md` |
 | Simulation et numérique | `SIMULATION.md`, `NUMERICS.md` |
 | Protocole worker | `PROTOCOL.md` |
