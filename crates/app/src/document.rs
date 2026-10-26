@@ -149,6 +149,63 @@ pub enum DistributionAxis {
     Vertical,
 }
 
+/// Rectangle selection rule.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum SelectionMode {
+    /// Objects must lie entirely inside the rectangle.
+    Enclosing,
+    /// Objects may intersect the rectangle.
+    Touching,
+}
+
+/// How a rectangle updates the current selection.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum SelectionChange {
+    /// Replace the selection.
+    Replace,
+    /// Add matching objects to the selection.
+    Add,
+    /// Toggle matching objects.
+    Toggle,
+}
+
+/// One object stored in the internal clipboard.
+#[derive(Clone, Debug, PartialEq)]
+pub enum ClipboardItem {
+    /// A placed symbol.
+    Symbol(Symbol),
+    /// A wire segment.
+    Wire(Wire),
+    /// An explicit junction.
+    Junction(Junction),
+    /// A net label.
+    Label(NetLabel),
+}
+
+/// Internal clipboard with a normalized paste anchor.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Clipboard {
+    items: Vec<ClipboardItem>,
+    anchor: GridPos,
+}
+
+impl Clipboard {
+    /// Returns the copied objects in deterministic order.
+    pub fn items(&self) -> &[ClipboardItem] {
+        &self.items
+    }
+
+    /// Returns the top-left grid position of the copied content.
+    pub const fn anchor(&self) -> GridPos {
+        self.anchor
+    }
+
+    /// Returns true when nothing was copied.
+    pub fn is_empty(&self) -> bool {
+        self.items.is_empty()
+    }
+}
+
 /// Editable schematic, history, selection, and cached extraction.
 pub struct Document {
     schematic: Schematic,
@@ -157,6 +214,7 @@ pub struct Document {
     extraction: Option<Extraction>,
     extraction_error: Option<String>,
     selected: BTreeSet<ObjectRef>,
+    clipboard: Option<Clipboard>,
     revision: u64,
     dirty: bool,
 }
@@ -171,6 +229,7 @@ impl Document {
             extraction: None,
             extraction_error: None,
             selected: BTreeSet::new(),
+            clipboard: None,
             revision: 0,
             dirty: false,
         };
@@ -262,6 +321,27 @@ impl Document {
         self.history.can_redo()
     }
 
+    /// Returns the named history entries, applied first.
+    pub fn history_items(&self) -> Vec<editor_core::HistoryItem> {
+        self.history.history()
+    }
+
+    /// Returns the number of currently applied commands.
+    pub fn history_position(&self) -> usize {
+        self.history.undo_len()
+    }
+
+    /// Jumps to a named history state.
+    pub fn undo_to(&mut self, applied_commands: usize) -> Result<bool, ActionError> {
+        let changed = self
+            .history
+            .undo_to(&mut self.schematic, applied_commands)?;
+        if changed {
+            self.after_change();
+        }
+        Ok(changed)
+    }
+
     /// Returns a placed symbol.
     pub fn symbol(&self, id: SymbolId) -> Option<&Symbol> {
         self.schematic.symbol(id)
@@ -349,6 +429,217 @@ impl Document {
     /// Clears the selection.
     pub fn clear_selection(&mut self) {
         self.selected.clear();
+    }
+
+    /// Returns the internal clipboard, if any.
+    pub const fn clipboard(&self) -> Option<&Clipboard> {
+        self.clipboard.as_ref()
+    }
+
+    /// Selects objects inside a grid rectangle.
+    pub fn select_in_rect(
+        &mut self,
+        a: GridPos,
+        b: GridPos,
+        mode: SelectionMode,
+        change: SelectionChange,
+    ) -> usize {
+        let min = GridPos::new(a.x.min(b.x), a.y.min(b.y));
+        let max = GridPos::new(a.x.max(b.x), a.y.max(b.y));
+        let mut hits = BTreeSet::new();
+        for object in self.schematic.object_refs() {
+            let Some((object_min, object_max)) = self.selection_bounds(object) else {
+                continue;
+            };
+            let matched = match mode {
+                SelectionMode::Enclosing => {
+                    object_min.x >= min.x
+                        && object_min.y >= min.y
+                        && object_max.x <= max.x
+                        && object_max.y <= max.y
+                }
+                SelectionMode::Touching => {
+                    object_min.x <= max.x
+                        && object_max.x >= min.x
+                        && object_min.y <= max.y
+                        && object_max.y >= min.y
+                }
+            };
+            if matched {
+                hits.insert(object);
+            }
+        }
+        match change {
+            SelectionChange::Replace => self.selected = hits.clone(),
+            SelectionChange::Add => self.selected.extend(hits.iter().copied()),
+            SelectionChange::Toggle => {
+                for object in &hits {
+                    self.toggle_selection(*object);
+                }
+            }
+        }
+        hits.len()
+    }
+
+    /// Copies the selection into the internal clipboard.
+    pub fn copy_selection(&mut self) -> Result<usize, ActionError> {
+        if self.selected.is_empty() {
+            return Err(ActionError::EmptySelection);
+        }
+        let mut items = Vec::with_capacity(self.selected.len());
+        let mut anchor: Option<GridPos> = None;
+        for object in &self.selected {
+            let item = self
+                .clipboard_item(*object)
+                .ok_or(ActionError::MissingObject)?;
+            let position = self
+                .clipboard_anchor(*object)
+                .ok_or(ActionError::MissingObject)?;
+            anchor = Some(anchor.map_or(position, |current| {
+                GridPos::new(current.x.min(position.x), current.y.min(position.y))
+            }));
+            items.push(item);
+        }
+        let Some(anchor) = anchor else {
+            return Err(ActionError::EmptySelection);
+        };
+        let count = items.len();
+        self.clipboard = Some(Clipboard { items, anchor });
+        Ok(count)
+    }
+
+    /// Pastes the clipboard with its anchor at the requested grid position.
+    pub fn paste_clipboard(&mut self, at: GridPos) -> Result<usize, ActionError> {
+        let clipboard = self.clipboard.clone().ok_or(ActionError::EmptySelection)?;
+        let delta = at
+            .checked_sub(clipboard.anchor)
+            .ok_or(ActionError::Edit(EditError::PositionOverflow))?;
+        let mut allocator = self.schematic.clone();
+        let mut used_labels = self
+            .schematic
+            .symbols()
+            .map(|symbol| symbol.label.clone())
+            .collect::<BTreeSet<_>>();
+        let mut commands = Vec::new();
+        let mut pasted = BTreeSet::new();
+        for item in clipboard.items {
+            match item {
+                ClipboardItem::Symbol(symbol) => {
+                    let mut new = symbol.clone();
+                    new.id = SymbolId(
+                        allocator
+                            .allocate_id()
+                            .map_err(|_| ActionError::IdSpaceExhausted)?,
+                    );
+                    new.at = symbol
+                        .at
+                        .checked_add(delta)
+                        .ok_or(ActionError::Edit(EditError::PositionOverflow))?;
+                    new.label = next_label_with(&new.kind, &mut used_labels)?;
+                    pasted.insert(ObjectRef::Symbol(new.id));
+                    commands.push(Command::AddSymbol(new));
+                }
+                ClipboardItem::Wire(wire) => {
+                    let id = WireId(
+                        allocator
+                            .allocate_id()
+                            .map_err(|_| ActionError::IdSpaceExhausted)?,
+                    );
+                    let a = wire
+                        .a
+                        .checked_add(delta)
+                        .ok_or(ActionError::Edit(EditError::PositionOverflow))?;
+                    let b = wire
+                        .b
+                        .checked_add(delta)
+                        .ok_or(ActionError::Edit(EditError::PositionOverflow))?;
+                    let new = Wire::new(id, a, b)?;
+                    pasted.insert(ObjectRef::Wire(id));
+                    commands.push(Command::AddWire(new));
+                }
+                ClipboardItem::Junction(junction) => {
+                    let id = JunctionId(
+                        allocator
+                            .allocate_id()
+                            .map_err(|_| ActionError::IdSpaceExhausted)?,
+                    );
+                    let at = junction
+                        .at
+                        .checked_add(delta)
+                        .ok_or(ActionError::Edit(EditError::PositionOverflow))?;
+                    if self.schematic.junctions().any(|existing| existing.at == at) {
+                        return Err(ActionError::Duplicate);
+                    }
+                    pasted.insert(ObjectRef::Junction(id));
+                    commands.push(Command::AddJunction(Junction::new(id, at)));
+                }
+                ClipboardItem::Label(label) => {
+                    let id = NetLabelId(
+                        allocator
+                            .allocate_id()
+                            .map_err(|_| ActionError::IdSpaceExhausted)?,
+                    );
+                    let at = label
+                        .at
+                        .checked_add(delta)
+                        .ok_or(ActionError::Edit(EditError::PositionOverflow))?;
+                    let new = NetLabel::new(id, at, label.text)?;
+                    pasted.insert(ObjectRef::Label(id));
+                    commands.push(Command::AddLabel(new));
+                }
+            }
+        }
+        if commands.is_empty() {
+            return Err(ActionError::EmptySelection);
+        }
+        let count = commands.len();
+        self.execute(single_or_composite(commands))?;
+        self.selected = pasted;
+        Ok(count)
+    }
+
+    /// Copies and immediately pastes the selection with a small offset.
+    pub fn duplicate_selection(&mut self) -> Result<usize, ActionError> {
+        self.copy_selection()?;
+        let anchor = self
+            .clipboard
+            .as_ref()
+            .map(Clipboard::anchor)
+            .ok_or(ActionError::EmptySelection)?;
+        let at = anchor
+            .checked_add(GridPos::new(2, 2))
+            .ok_or(ActionError::Edit(EditError::PositionOverflow))?;
+        self.paste_clipboard(at)
+    }
+
+    fn clipboard_item(&self, object: ObjectRef) -> Option<ClipboardItem> {
+        match object {
+            ObjectRef::Symbol(id) => self.symbol(id).cloned().map(ClipboardItem::Symbol),
+            ObjectRef::Wire(id) => self.wire(id).cloned().map(ClipboardItem::Wire),
+            ObjectRef::Junction(id) => self.junction(id).cloned().map(ClipboardItem::Junction),
+            ObjectRef::Label(id) => self.label(id).cloned().map(ClipboardItem::Label),
+        }
+    }
+
+    fn clipboard_anchor(&self, object: ObjectRef) -> Option<GridPos> {
+        match object {
+            ObjectRef::Symbol(id) => self.symbol(id).map(|symbol| symbol.at),
+            ObjectRef::Wire(id) => self.wire(id).map(|wire| wire.a),
+            ObjectRef::Junction(id) => self.junction(id).map(|junction| junction.at),
+            ObjectRef::Label(id) => self.label(id).map(|label| label.at),
+        }
+    }
+
+    fn selection_bounds(&self, object: ObjectRef) -> Option<(GridPos, GridPos)> {
+        let (min, max) = self.object_bounds(object)?;
+        if matches!(object, ObjectRef::Symbol(_)) {
+            Some((
+                GridPos::new(min.x.saturating_sub(1), min.y.saturating_sub(1)),
+                GridPos::new(max.x.saturating_add(1), max.y.saturating_add(1)),
+            ))
+        } else {
+            Some((min, max))
+        }
     }
 
     /// Removes dangling references after undo, redo, or deletion.
@@ -587,24 +878,112 @@ impl Document {
         self.execute(Command::ReplaceSymbol { old, new })
     }
 
-    /// Rotates every selected symbol clockwise by one quarter turn.
+    /// Rotates every selected object clockwise around the selection centre.
     pub fn rotate_selection(&mut self) -> Result<(), ActionError> {
-        let commands = self.symbol_replacements(|symbol| {
-            let mut replacement = symbol.clone();
-            replacement.orientation = replacement.orientation.next();
-            replacement
-        })?;
+        let commands = self.group_transform(GroupTransform::Rotate)?;
+        if commands.is_empty() {
+            return Ok(());
+        }
         self.execute(single_or_composite(commands))
     }
 
-    /// Toggles the mirror flag of every selected symbol.
+    /// Mirrors every selected object across the selection vertical centre.
     pub fn mirror_selection(&mut self) -> Result<(), ActionError> {
-        let commands = self.symbol_replacements(|symbol| {
-            let mut replacement = symbol.clone();
-            replacement.mirrored = !replacement.mirrored;
-            replacement
-        })?;
+        let commands = self.group_transform(GroupTransform::Mirror)?;
+        if commands.is_empty() {
+            return Ok(());
+        }
         self.execute(single_or_composite(commands))
+    }
+
+    fn group_transform(&self, transform: GroupTransform) -> Result<Vec<Command>, ActionError> {
+        if self.selected.is_empty() {
+            return Err(ActionError::EmptySelection);
+        }
+        let (min, max) = self.group_bounds().ok_or(ActionError::EmptySelection)?;
+        let center = GridPos::new((min.x + max.x).div_euclid(2), (min.y + max.y).div_euclid(2));
+        let mut commands = Vec::new();
+        for object in &self.selected {
+            match object {
+                ObjectRef::Symbol(id) => {
+                    let symbol = self.symbol(*id).ok_or(ActionError::MissingObject)?;
+                    let mut new = symbol.clone();
+                    new.at = transform
+                        .point(symbol.at, center)
+                        .ok_or(ActionError::Edit(EditError::PositionOverflow))?;
+                    match transform {
+                        GroupTransform::Rotate => new.orientation = new.orientation.next(),
+                        GroupTransform::Mirror => new.mirrored = !new.mirrored,
+                    }
+                    if new != *symbol {
+                        commands.push(Command::ReplaceSymbol {
+                            old: symbol.clone(),
+                            new,
+                        });
+                    }
+                }
+                ObjectRef::Wire(id) => {
+                    let wire = self.wire(*id).ok_or(ActionError::MissingObject)?;
+                    let a = transform
+                        .point(wire.a, center)
+                        .ok_or(ActionError::Edit(EditError::PositionOverflow))?;
+                    let b = transform
+                        .point(wire.b, center)
+                        .ok_or(ActionError::Edit(EditError::PositionOverflow))?;
+                    let new = Wire::new(wire.id, a, b)?;
+                    if new != *wire {
+                        commands.push(Command::ReplaceWire {
+                            old: wire.clone(),
+                            new,
+                        });
+                    }
+                }
+                ObjectRef::Junction(id) => {
+                    let junction = self.junction(*id).ok_or(ActionError::MissingObject)?;
+                    let at = transform
+                        .point(junction.at, center)
+                        .ok_or(ActionError::Edit(EditError::PositionOverflow))?;
+                    let new = Junction::new(junction.id, at);
+                    if new != *junction {
+                        commands.push(Command::ReplaceJunction {
+                            old: junction.clone(),
+                            new,
+                        });
+                    }
+                }
+                ObjectRef::Label(id) => {
+                    let label = self.label(*id).ok_or(ActionError::MissingObject)?;
+                    let at = transform
+                        .point(label.at, center)
+                        .ok_or(ActionError::Edit(EditError::PositionOverflow))?;
+                    let new = NetLabel::new(label.id, at, label.text.clone())?;
+                    if new != *label {
+                        commands.push(Command::ReplaceLabel {
+                            old: label.clone(),
+                            new,
+                        });
+                    }
+                }
+            }
+        }
+        Ok(commands)
+    }
+
+    fn group_bounds(&self) -> Option<(GridPos, GridPos)> {
+        let mut min: Option<GridPos> = None;
+        let mut max: Option<GridPos> = None;
+        for object in &self.selected {
+            let Some((object_min, object_max)) = self.object_bounds(*object) else {
+                continue;
+            };
+            min = Some(min.map_or(object_min, |current| {
+                GridPos::new(current.x.min(object_min.x), current.y.min(object_min.y))
+            }));
+            max = Some(max.map_or(object_max, |current| {
+                GridPos::new(current.x.max(object_max.x), current.y.max(object_max.y))
+            }));
+        }
+        Some((min?, max?))
     }
 
     /// Moves every selected object by a grid delta.
@@ -696,7 +1075,9 @@ impl Document {
     }
 
     fn execute(&mut self, command: Command) -> Result<(), ActionError> {
-        self.history.execute(&mut self.schematic, command)?;
+        let label = history_label(&command);
+        self.history
+            .execute_named(&mut self.schematic, command, label)?;
         self.after_change();
         Ok(())
     }
@@ -718,30 +1099,6 @@ impl Document {
                 self.extraction = None;
                 self.extraction_error = Some(error.to_string());
             }
-        }
-    }
-
-    fn symbol_replacements(
-        &self,
-        mut edit: impl FnMut(&Symbol) -> Symbol,
-    ) -> Result<Vec<Command>, ActionError> {
-        let mut commands = Vec::new();
-        for symbol in self.selected.iter().filter_map(|object| match object {
-            ObjectRef::Symbol(id) => self.symbol(*id),
-            ObjectRef::Wire(_) | ObjectRef::Junction(_) | ObjectRef::Label(_) => None,
-        }) {
-            let new = edit(symbol);
-            if new != *symbol {
-                commands.push(Command::ReplaceSymbol {
-                    old: symbol.clone(),
-                    new,
-                });
-            }
-        }
-        if commands.is_empty() {
-            Err(ActionError::NoSymbolSelected)
-        } else {
-            Ok(commands)
         }
     }
 
@@ -1291,6 +1648,104 @@ fn strictly_between(point: GridPos, low: GridPos, high: GridPos) -> bool {
     }
 }
 
+/// Geometry transform applied to a whole selection.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum GroupTransform {
+    /// Clockwise quarter turn around the selection centre.
+    Rotate,
+    /// Mirror across the selection vertical centre.
+    Mirror,
+}
+
+impl GroupTransform {
+    fn point(self, point: GridPos, center: GridPos) -> Option<GridPos> {
+        let x = match self {
+            Self::Rotate => i64::from(center.x) + i64::from(center.y) - i64::from(point.y),
+            Self::Mirror => 2 * i64::from(center.x) - i64::from(point.x),
+        };
+        let y = match self {
+            Self::Rotate => i64::from(center.y) - i64::from(center.x) + i64::from(point.x),
+            Self::Mirror => i64::from(point.y),
+        };
+        Some(GridPos::new(i32::try_from(x).ok()?, i32::try_from(y).ok()?))
+    }
+}
+
+fn next_label_with(kind: &SymbolKind, used: &mut BTreeSet<String>) -> Result<String, ActionError> {
+    let prefix = label_prefix(kind);
+    let mut index = 1_u32;
+    loop {
+        let candidate = format!("{prefix}{index}");
+        if used.insert(candidate.clone()) {
+            return Ok(candidate);
+        }
+        index = index.checked_add(1).ok_or(ActionError::IdSpaceExhausted)?;
+    }
+}
+
+fn history_label(command: &Command) -> String {
+    match command {
+        Command::AddSymbol(symbol) => format!("Ajouter {}", symbol.label),
+        Command::RemoveSymbol(symbol) => format!("Supprimer {}", symbol.label),
+        Command::AddWire(_) => "Ajouter un fil".to_owned(),
+        Command::RemoveWire(_) => "Supprimer un fil".to_owned(),
+        Command::AddJunction(_) => "Ajouter une jonction".to_owned(),
+        Command::RemoveJunction(_) => "Supprimer une jonction".to_owned(),
+        Command::AddLabel(label) => format!("Ajouter le label {}", label.text),
+        Command::RemoveLabel(label) => format!("Supprimer le label {}", label.text),
+        Command::MoveObjects { objects, .. } => {
+            format!("Déplacer {} objet(s)", objects.len())
+        }
+        Command::ReplaceSymbol { new, .. } => format!("Modifier {}", new.label),
+        Command::ReplaceWire { .. } => "Déplacer un fil".to_owned(),
+        Command::ReplaceJunction { .. } => "Déplacer une jonction".to_owned(),
+        Command::ReplaceLabel { new, .. } => format!("Renommer le label {}", new.text),
+        Command::Composite(commands) => composite_history_label(commands),
+    }
+}
+
+fn composite_history_label(commands: &[Command]) -> String {
+    let has_symbol = commands
+        .iter()
+        .any(|command| matches!(command, Command::AddSymbol(_)));
+    let removes_wire = commands
+        .iter()
+        .any(|command| matches!(command, Command::RemoveWire(_)));
+    if has_symbol && removes_wire {
+        return "Insérer un composant".to_owned();
+    }
+    if commands
+        .iter()
+        .all(|command| matches!(command, Command::AddWire(_)))
+    {
+        return "Ajouter un chemin".to_owned();
+    }
+    if commands.iter().all(|command| {
+        matches!(
+            command,
+            Command::RemoveSymbol(_)
+                | Command::RemoveWire(_)
+                | Command::RemoveJunction(_)
+                | Command::RemoveLabel(_)
+        )
+    }) {
+        return "Supprimer une sélection".to_owned();
+    }
+    if commands.iter().all(|command| {
+        matches!(
+            command,
+            Command::MoveObjects { .. }
+                | Command::ReplaceSymbol { .. }
+                | Command::ReplaceWire { .. }
+                | Command::ReplaceJunction { .. }
+                | Command::ReplaceLabel { .. }
+        )
+    }) {
+        return "Transformer une sélection".to_owned();
+    }
+    format!("Modifier {} objets", commands.len())
+}
+
 fn label_prefix(kind: &SymbolKind) -> &'static str {
     match kind {
         SymbolKind::Resistor => "R",
@@ -1553,6 +2008,8 @@ mod tests {
     fn parameter_parsing_and_formatting_round_trip_engineering_values() {
         let value = parse_parameter("4k7").unwrap();
         assert!((value - 4_700.0).abs() < 1e-9);
+        let capacitance = parse_parameter("100n").unwrap();
+        assert!((capacitance - 100e-9).abs() < 1e-18);
         assert_eq!(
             format_parameter(4_700.0, Some(sim_core::units::Unit::Ohm)),
             "4.7 kΩ"
@@ -1673,6 +2130,124 @@ mod tests {
         assert!(document.existing_net_names().contains(&"OUT".to_owned()));
     }
 
+    #[test]
+    fn rectangle_selection_distinguishes_enclosing_and_touching() {
+        let mut document = Document::new();
+        document
+            .add_wire(GridPos::new(0, 0), GridPos::new(10, 0))
+            .unwrap();
+        document
+            .add_wire(GridPos::new(20, 0), GridPos::new(30, 0))
+            .unwrap();
+        let enclosing = document.select_in_rect(
+            GridPos::new(5, 0),
+            GridPos::new(15, 0),
+            SelectionMode::Enclosing,
+            SelectionChange::Replace,
+        );
+        assert_eq!(enclosing, 0);
+        let touching = document.select_in_rect(
+            GridPos::new(5, 0),
+            GridPos::new(15, 0),
+            SelectionMode::Touching,
+            SelectionChange::Replace,
+        );
+        assert_eq!(touching, 1);
+        document.select_in_rect(
+            GridPos::new(20, 0),
+            GridPos::new(30, 0),
+            SelectionMode::Enclosing,
+            SelectionChange::Add,
+        );
+        assert_eq!(document.selection().len(), 2);
+        document.select_in_rect(
+            GridPos::new(5, 0),
+            GridPos::new(15, 0),
+            SelectionMode::Touching,
+            SelectionChange::Toggle,
+        );
+        assert_eq!(document.selection().len(), 1);
+    }
+
+    #[test]
+    fn clipboard_copy_paste_and_duplicate_are_atomic() {
+        let mut document = Document::new();
+        let symbol = document
+            .add_symbol(SymbolKind::Resistor, GridPos::new(0, 0))
+            .unwrap();
+        document.select_only(Some(ObjectRef::Symbol(symbol)));
+        assert_eq!(document.copy_selection().unwrap(), 1);
+        assert_eq!(document.paste_clipboard(GridPos::new(10, 10)).unwrap(), 1);
+        let pasted = document
+            .schematic()
+            .symbols()
+            .find(|candidate| candidate.id != symbol)
+            .unwrap()
+            .clone();
+        assert_eq!(pasted.at, GridPos::new(10, 10));
+        assert_eq!(pasted.label, "R2");
+        assert!(document.selection().contains(&ObjectRef::Symbol(pasted.id)));
+        document.undo().unwrap();
+        assert_eq!(document.schematic().symbols().count(), 1);
+
+        document.select_only(Some(ObjectRef::Symbol(symbol)));
+        assert_eq!(document.duplicate_selection().unwrap(), 1);
+        assert_eq!(document.schematic().symbols().count(), 2);
+        document.undo().unwrap();
+        assert_eq!(document.schematic().symbols().count(), 1);
+    }
+
+    #[test]
+    fn group_rotation_and_mirror_transform_the_whole_selection() {
+        let mut document = Document::new();
+        let first = document
+            .add_symbol(SymbolKind::Resistor, GridPos::new(0, 0))
+            .unwrap();
+        let second = document
+            .add_symbol(SymbolKind::Resistor, GridPos::new(10, 0))
+            .unwrap();
+        document.select_all();
+        document.rotate_selection().unwrap();
+        assert_eq!(document.symbol(first).unwrap().at, GridPos::new(5, -5));
+        assert_eq!(document.symbol(second).unwrap().at, GridPos::new(5, 5));
+        assert_eq!(
+            document.symbol(first).unwrap().orientation,
+            Orientation::R90
+        );
+        document.undo().unwrap();
+        document.select_all();
+        document.mirror_selection().unwrap();
+        assert_eq!(document.symbol(first).unwrap().at, GridPos::new(10, 0));
+        assert_eq!(document.symbol(second).unwrap().at, GridPos::new(0, 0));
+        assert!(document.symbol(first).unwrap().mirrored);
+    }
+
+    #[test]
+    fn history_jump_restores_named_states() {
+        let mut document = Document::new();
+        let symbol = document
+            .add_symbol(SymbolKind::Resistor, GridPos::new(0, 0))
+            .unwrap();
+        document
+            .add_wire(GridPos::new(0, 0), GridPos::new(10, 0))
+            .unwrap();
+        document.select_only(Some(ObjectRef::Symbol(symbol)));
+        document.rotate_selection().unwrap();
+        assert_eq!(document.history_items().len(), 3);
+        assert_eq!(document.history_position(), 3);
+        document.undo_to(1).unwrap();
+        assert_eq!(document.history_position(), 1);
+        assert_eq!(document.schematic().wires().count(), 0);
+        assert_eq!(document.schematic().symbols().count(), 1);
+        document.undo_to(3).unwrap();
+        assert_eq!(document.history_position(), 3);
+        assert_eq!(document.schematic().wires().count(), 1);
+        assert_eq!(
+            document.symbol(symbol).unwrap().orientation,
+            Orientation::R90
+        );
+    }
+
     proptest! {
         #![proptest_config(ProptestConfig::with_cases(32))]
 
@@ -1692,6 +2267,31 @@ mod tests {
             document.undo().unwrap();
             prop_assert_eq!(document.schematic().wires().count(), 1);
             prop_assert!(document.schematic().validate().is_ok());
+        }
+
+        #[test]
+        fn pasted_selection_keeps_relative_geometry(
+            x in -20_i32..20,
+            y in -20_i32..20,
+            offset in 1_i32..10,
+        ) {
+            let mut document = Document::new();
+            let symbol = document
+                .add_symbol(SymbolKind::Resistor, GridPos::new(x, y))
+                .unwrap();
+            document.select_only(Some(ObjectRef::Symbol(symbol)));
+            document.copy_selection().unwrap();
+            let target = GridPos::new(x + offset, y + offset);
+            document.paste_clipboard(target).unwrap();
+            let pasted = document
+                .schematic()
+                .symbols()
+                .find(|candidate| candidate.id != symbol)
+                .unwrap();
+            prop_assert_eq!(pasted.at, target);
+            prop_assert!(document.schematic().validate().is_ok());
+            document.undo().unwrap();
+            prop_assert_eq!(document.schematic().symbols().count(), 1);
         }
     }
 
