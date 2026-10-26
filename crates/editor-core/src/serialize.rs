@@ -114,4 +114,46 @@ mod tests {
     fn rejects_malformed_json() {
         assert!(matches!(from_json("{"), Err(DocumentError::Json(_))));
     }
+
+    #[test]
+    fn loads_a_legacy_version_one_fixture() {
+        let json = r#"{
+            "schema_version": 1,
+            "schematic": {
+                "symbols": {
+                    "1": {
+                        "id": 1,
+                        "kind": "Resistor",
+                        "at": { "x": 0, "y": 0 },
+                        "orientation": "R0",
+                        "mirrored": false,
+                        "label": "R1",
+                        "params": {
+                            "resistance": { "kind": "number", "value": 1000.0 }
+                        }
+                    }
+                },
+                "wires": {
+                    "2": {
+                        "id": 2,
+                        "a": { "x": 0, "y": 0 },
+                        "b": { "x": 10, "y": 0 }
+                    }
+                },
+                "junctions": {},
+                "labels": {},
+                "next_id": 3
+            }
+        }"#;
+        let schematic = from_json(json).unwrap();
+        assert_eq!(schematic.symbols().count(), 1);
+        assert_eq!(schematic.wires().count(), 1);
+        assert_eq!(schematic.next_id(), 3);
+        assert_eq!(
+            schematic
+                .symbol(crate::symbol::SymbolId(1))
+                .map(|symbol| symbol.label.as_str()),
+            Some("R1")
+        );
+    }
 }

@@ -17,6 +17,16 @@ sémantique.
 - Déplacement de segments avec reroutage des voisins.
 - Surbrillance et sélection complète des nets, autocomplétion des labels.
 - Alignement et distribution de la sélection avec guides visuels.
+- Sélection rectangle avec modes inclusion/toucher, ajout `Maj` et bascule `Ctrl`.
+- Presse-papiers interne, collage avec aperçu fantôme, duplication `Ctrl+D` et
+  rotation/miroir de groupe.
+- Historique nommé avec sauts d’état et panneau dédié.
+- Saisie directe `4k7`/`100n` et cycle E12/E24/E96 à la molette, au clavier ou
+  par boutons dans l’inspecteur.
+- Inspecteur contextuel des tensions, courants et puissances du dernier
+  transitoire, avec signalement d’un résultat antérieur.
+- Menus contextuels spécifiques aux symboles, labels, fils, jonctions et au vide.
+- Aide `?` et infobulles des actions principales.
 
 ### Changed
 

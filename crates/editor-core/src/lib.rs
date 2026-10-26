@@ -8,6 +8,7 @@ pub mod interaction;
 pub mod naming;
 pub mod schematic;
 pub mod serialize;
+pub mod series;
 pub mod symbol;
 pub mod undo;
 
@@ -23,5 +24,6 @@ pub use schematic::{
     WireGeometryError, WireId,
 };
 pub use serialize::{from_json, to_json, DocumentError, SchematicFile, SCHEMA_VERSION};
+pub use series::{Series, E12, E24, E96};
 pub use symbol::{PinDef, Symbol, SymbolDef, SymbolError, SymbolId, SymbolKind, SymbolRegistry};
-pub use undo::UndoStack;
+pub use undo::{HistoryItem, UndoStack};

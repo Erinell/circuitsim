@@ -22,6 +22,14 @@ pub enum CommandAction {
     Redo,
     /// Delete the selection.
     Delete,
+    /// Copy the selection.
+    Copy,
+    /// Arm clipboard paste placement.
+    Paste,
+    /// Duplicate the selection.
+    Duplicate,
+    /// Select every object.
+    SelectAll,
     /// Rotate the selected symbols.
     Rotate,
     /// Mirror the selected symbols.
@@ -240,6 +248,14 @@ impl CommandPalette {
             );
         }
         if !document.selection().is_empty() {
+            push_match(&mut entries, query, "Copier", "Ctrl+C", CommandAction::Copy);
+            push_match(
+                &mut entries,
+                query,
+                "Dupliquer la sélection",
+                "Ctrl+D",
+                CommandAction::Duplicate,
+            );
             push_match(
                 &mut entries,
                 query,
@@ -250,6 +266,22 @@ impl CommandPalette {
             push_match(&mut entries, query, "Pivoter", "R", CommandAction::Rotate);
             push_match(&mut entries, query, "Miroir", "M", CommandAction::Mirror);
         }
+        if document.clipboard().is_some() {
+            push_match(
+                &mut entries,
+                query,
+                "Coller",
+                "Ctrl+V",
+                CommandAction::Paste,
+            );
+        }
+        push_match(
+            &mut entries,
+            query,
+            "Tout sélectionner",
+            "Ctrl+A",
+            CommandAction::SelectAll,
+        );
         if document.selection().len() >= 2 {
             for (label, alignment) in [
                 ("Aligner à gauche", Alignment::Left),

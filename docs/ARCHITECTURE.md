@@ -18,7 +18,7 @@ calculs, la topologie et la présentation soient testables indépendamment.
 | Crate | Rôle | Dépendances principales |
 | --- | --- | --- |
 | `sim-core` | unités, netlist, MNA, DC, transitoire, AC | `serde`, `thiserror`, `nalgebra` |
-| `editor-core` | schéma, commandes, undo, ERC, extraction, JSON, snap/routage | `sim-core`, `serde`, `serde_json` |
+| `editor-core` | schéma, commandes, historique nommé, undo, ERC, extraction, JSON, séries E, snap/routage | `sim-core`, `serde`, `serde_json` |
 | `worker-protocol` | trames, messages, erreurs, transport | `sim-core`, `postcard`, `serde` |
 | `worker` | file bornée, coalescence, analyses, pont WASM | `sim-core`, `worker-protocol`, `wasm-bindgen` |
 | `circuitsim-app` | egui, instruments, FFT, Bode, export, client worker | `editor-core`, `worker`, `egui_plot`, `rustfft` |
@@ -113,7 +113,7 @@ gain fini et saturation.
 
 ## 8. Qualité et livraison
 
-La suite compte 202 tests natifs, dont trois propriétés proptest. La CI exécute
+La suite compte 218 tests natifs, dont cinq propriétés proptest. La CI exécute
 formatage, clippy strict, tests, `cargo deny check licenses`, WASM, benchmarks
 rapides, exemples, build natif release et build web. Les budgets de performance
 sont documentés mais non bloquants. Voir [LICENSING.md](LICENSING.md) et

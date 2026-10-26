@@ -2,7 +2,7 @@
 
 use std::collections::BTreeMap;
 
-use editor_core::Extraction;
+use editor_core::{Extraction, Symbol, SymbolKind};
 use rustfft::num_complex::Complex;
 use rustfft::FftPlanner;
 use sim_core::netlist::{
@@ -348,6 +348,126 @@ pub struct CompletedRun {
     pub result: AnalysisResult,
     /// Net and component maps captured before execution.
     pub context: RunContext,
+}
+
+/// Values sampled from the most recent transient result for the inspector.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct LiveValues {
+    /// Document revision captured when the run was submitted.
+    pub document_revision: u64,
+    /// Time of the displayed sample.
+    pub time: Option<f64>,
+    /// Net voltages indexed by net name.
+    pub node_voltages: BTreeMap<String, f64>,
+    /// Branch currents indexed by component label.
+    pub branch_currents: BTreeMap<String, f64>,
+}
+
+/// Voltage and current observed on one symbol.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct SymbolLive {
+    /// Transformed pins with their net name and voltage.
+    pub pins: Vec<PinLive>,
+    /// Branch or resistor current when it can be derived.
+    pub current: Option<f64>,
+    /// Power when both voltage and current are known.
+    pub power: Option<f64>,
+}
+
+/// One symbol pin together with its net voltage.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct PinLive {
+    /// Pin name from the symbol definition.
+    pub name: String,
+    /// Electrical net attached to the pin.
+    pub net: Option<String>,
+    /// Voltage of the net in volts.
+    pub voltage: Option<f64>,
+}
+
+impl LiveValues {
+    /// Returns true when no sample is available.
+    pub fn is_empty(&self) -> bool {
+        self.time.is_none() && self.node_voltages.is_empty() && self.branch_currents.is_empty()
+    }
+
+    /// Returns a net voltage by name.
+    pub fn voltage(&self, net: &str) -> Option<f64> {
+        self.node_voltages.get(net).copied()
+    }
+
+    /// Returns a branch current by component label.
+    pub fn current(&self, label: &str) -> Option<f64> {
+        self.branch_currents.get(label).copied()
+    }
+
+    /// Resolves observed values for one placed symbol.
+    pub fn symbol(&self, document: &crate::document::Document, symbol: &Symbol) -> SymbolLive {
+        let Some(extraction) = document.extraction() else {
+            return SymbolLive::default();
+        };
+        let Some(definition) = document.registry().get(&symbol.kind) else {
+            return SymbolLive::default();
+        };
+        let mut pins = Vec::with_capacity(definition.pins.len());
+        for (index, pin) in definition.pins.iter().enumerate() {
+            let key = editor_core::PinKey {
+                symbol: symbol.id,
+                pin: u16::try_from(index).unwrap_or(u16::MAX),
+            };
+            let net = extraction.net_of_pin.get(&key).and_then(|node| {
+                extraction
+                    .nets
+                    .iter()
+                    .find(|net| net.node == *node)
+                    .map(|net| net.name.as_str().to_owned())
+            });
+            let voltage = net.as_deref().and_then(|name| self.voltage(name));
+            pins.push(PinLive {
+                name: pin.name.clone(),
+                net,
+                voltage,
+            });
+        }
+        let across = match (pins.first(), pins.get(1)) {
+            (Some(first), Some(second)) => match (first.voltage, second.voltage) {
+                (Some(a), Some(b)) => Some(a - b),
+                _ => None,
+            },
+            _ => None,
+        };
+        let current = self
+            .current(&symbol.label)
+            .or_else(|| across.and_then(|voltage| derive_current(symbol, voltage)));
+        let power = across
+            .zip(current)
+            .map(|(voltage, current)| voltage * current);
+        SymbolLive {
+            pins,
+            current,
+            power,
+        }
+    }
+}
+
+fn derive_current(symbol: &Symbol, voltage: f64) -> Option<f64> {
+    let resistance = match symbol.kind {
+        SymbolKind::Resistor => symbol
+            .params
+            .get("resistance")
+            .and_then(ParamValue::as_number),
+        SymbolKind::Switch => {
+            let closed = symbol
+                .params
+                .get("closed")
+                .and_then(ParamValue::as_bool)
+                .unwrap_or(false);
+            let key = if closed { "ron" } else { "roff" };
+            symbol.params.get(key).and_then(ParamValue::as_number)
+        }
+        _ => None,
+    }?;
+    (resistance.abs() > f64::MIN_POSITIVE).then_some(voltage / resistance)
 }
 
 /// Simulation error rendered in French by the interface.
@@ -1216,6 +1336,38 @@ mod tests {
         assert_eq!(catalog.sources.len(), 1);
         assert_eq!(catalog.sources[0].label, "V1");
         assert_eq!(catalog.default_voltage().as_deref(), Some("OUT"));
+    }
+
+    #[test]
+    fn live_values_derive_resistor_current_and_power() {
+        let document = Document::demo().unwrap();
+        let resistor = document
+            .schematic()
+            .symbols()
+            .find(|symbol| matches!(symbol.kind, SymbolKind::Resistor))
+            .unwrap();
+        let live = LiveValues {
+            document_revision: document.revision(),
+            time: Some(1e-3),
+            node_voltages: [
+                ("VIN".to_owned(), 5.0),
+                ("OUT".to_owned(), 2.5),
+                ("0".to_owned(), 0.0),
+            ]
+            .into_iter()
+            .collect(),
+            branch_currents: BTreeMap::new(),
+        };
+        let observed = live.symbol(&document, resistor);
+        assert_eq!(observed.pins.len(), 2);
+        assert!(observed
+            .pins
+            .iter()
+            .any(|pin| pin.net.as_deref() == Some("VIN")));
+        let current = observed.current.unwrap();
+        assert!((current - 2.5e-3).abs() < 1e-12);
+        let power = observed.power.unwrap();
+        assert!((power - 6.25e-3).abs() < 1e-12);
     }
 
     #[test]

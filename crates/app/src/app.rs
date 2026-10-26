@@ -6,6 +6,7 @@ use eframe::egui::{self, Align, Color32, Context, FontId, Key, Layout, RichText,
 use crate::document::{Alignment, DistributionAxis, Document};
 use crate::ui::canvas::CanvasState;
 use crate::ui::command_palette::{CommandAction, CommandPalette};
+use crate::ui::history;
 use crate::ui::instruments::InstrumentsState;
 use crate::ui::palette::PaletteState;
 use crate::ui::properties::InspectorState;
@@ -141,6 +142,31 @@ impl CircuitApp {
                     self.delete();
                 }
             });
+            ui.add_enabled_ui(!self.document.selection().is_empty(), |ui| {
+                if ui
+                    .button("Copier")
+                    .on_hover_text("Ctrl+C : copie interne")
+                    .clicked()
+                {
+                    self.copy();
+                }
+                if ui
+                    .button("Dupliquer")
+                    .on_hover_text("Ctrl+D : copie et colle avec décalage")
+                    .clicked()
+                {
+                    self.duplicate();
+                }
+            });
+            ui.add_enabled_ui(self.document.clipboard().is_some(), |ui| {
+                if ui
+                    .button("Coller")
+                    .on_hover_text("Ctrl+V : aperçu fantôme puis clic")
+                    .clicked()
+                {
+                    self.paste();
+                }
+            });
             ui.add_enabled_ui(self.document.selection().len() >= 2, |ui| {
                 ui.menu_button("Aligner", |ui| {
                     if ui.button("Gauche").clicked() {
@@ -257,6 +283,7 @@ impl CircuitApp {
     }
 
     fn inspector(&mut self, ui: &mut Ui) {
+        let live = self.instruments.live_values();
         egui::ScrollArea::vertical()
             .auto_shrink([false, false])
             .show(ui, |ui| {
@@ -265,7 +292,9 @@ impl CircuitApp {
                     &mut self.document,
                     &mut self.inspector,
                     &mut self.status,
+                    &live,
                 );
+                history::show(ui, &mut self.document, &mut self.status);
                 ui::erc::show(ui, &mut self.document, &mut self.status);
             });
     }
@@ -325,6 +354,41 @@ impl CircuitApp {
         }
     }
 
+    fn copy(&mut self) {
+        if self.document.selection().is_empty() {
+            self.status.info("Sélectionnez au moins un objet à copier.");
+            return;
+        }
+        match self.document.copy_selection() {
+            Ok(count) => self.status.success(format!("{count} objet(s) copié(s).")),
+            Err(error) => self.status.error(error.user_message()),
+        }
+    }
+
+    fn paste(&mut self) {
+        if self.document.clipboard().is_none() {
+            self.status.info("Le presse-papiers est vide.");
+            return;
+        }
+        self.canvas.begin_paste();
+        self.status
+            .info("Cliquez sur le canevas pour coller. Échap annule.");
+    }
+
+    fn duplicate(&mut self) {
+        if self.document.selection().is_empty() {
+            self.status
+                .info("Sélectionnez au moins un objet à dupliquer.");
+            return;
+        }
+        match self.document.duplicate_selection() {
+            Ok(count) => self
+                .status
+                .success(format!("{count} objet(s) dupliqué(s).")),
+            Err(error) => self.status.error(error.user_message()),
+        }
+    }
+
     fn align(&mut self, alignment: Alignment) {
         match self.document.align_selection(alignment) {
             Ok(()) => self.status.success("Sélection alignée."),
@@ -377,6 +441,13 @@ impl CircuitApp {
             CommandAction::Undo => self.undo(),
             CommandAction::Redo => self.redo(),
             CommandAction::Delete => self.delete(),
+            CommandAction::Copy => self.copy(),
+            CommandAction::Paste => self.paste(),
+            CommandAction::Duplicate => self.duplicate(),
+            CommandAction::SelectAll => {
+                self.document.select_all();
+                self.status.info("Tous les objets sont sélectionnés.");
+            }
             CommandAction::Rotate => self.rotate(),
             CommandAction::Mirror => self.mirror(),
             CommandAction::Align(alignment) => self.align(alignment),
@@ -411,7 +482,11 @@ impl CircuitApp {
             return;
         }
         if self.show_help {
-            if context.input(|input| input.key_pressed(Key::Escape)) {
+            if context.input(|input| {
+                input.key_pressed(Key::Escape)
+                    || input.key_pressed(Key::Questionmark)
+                    || (input.modifiers.shift && input.key_pressed(Key::Slash))
+            }) {
                 self.show_help = false;
             }
             return;
@@ -441,6 +516,25 @@ impl CircuitApp {
         if command && context.input(|input| input.key_pressed(Key::A)) {
             self.document.select_all();
             self.status.info("Tous les objets sont sélectionnés.");
+            return;
+        }
+        if command && context.input(|input| input.key_pressed(Key::C)) {
+            self.copy();
+            return;
+        }
+        if command && context.input(|input| input.key_pressed(Key::V)) {
+            self.paste();
+            return;
+        }
+        if command && context.input(|input| input.key_pressed(Key::D)) {
+            self.duplicate();
+            return;
+        }
+        if context.input(|input| {
+            input.key_pressed(Key::Questionmark)
+                || (input.modifiers.shift && input.key_pressed(Key::Slash))
+        }) {
+            self.show_help = true;
             return;
         }
         if escape {
@@ -515,6 +609,9 @@ impl CircuitApp {
                 ui.label("• Clic : sélectionner, placer ou ajouter un point de fil.");
                 ui.label("• Glisser : déplacer la sélection courante.");
                 ui.label("• Maj + clic : ajouter ou retirer un objet de la sélection.");
+                ui.label("• Ctrl + clic : inverser un objet dans la sélection.");
+                ui.label("• Rectangle gauche→droite : objets entièrement inclus.");
+                ui.label("• Rectangle droite→gauche : objets touchés.");
                 ui.label("• Clic milieu + glisser : déplacer la vue.");
                 ui.label("• Molette : zoom autour du curseur.");
                 ui.add_space(6.0);
@@ -531,11 +628,14 @@ impl CircuitApp {
                         shortcut(ui, "R / F en pose", "tourner / miroir de l’aperçu");
                         shortcut(ui, "Ctrl+K", "palette de commandes");
                         shortcut(ui, "Alt+clic", "sélectionner tout le net");
+                        shortcut(ui, "Ctrl+C / Ctrl+V", "copier / coller avec aperçu");
+                        shortcut(ui, "Ctrl+D", "dupliquer la sélection");
                         shortcut(ui, "Suppr", "supprimer la sélection");
                         shortcut(ui, "Ctrl+Z", "annuler");
                         shortcut(ui, "Ctrl+Y", "rétablir");
                         shortcut(ui, "Ctrl+A", "tout sélectionner");
-                        shortcut(ui, "Échap", "annuler l'outil ou la sélection");
+                        shortcut(ui, "Échap", "annuler l'outil, le collage ou la sélection");
+                        shortcut(ui, "?", "ouvrir ou fermer cette aide");
                         shortcut(ui, "Home", "ajuster la vue au schéma");
                     });
                 ui.add_space(6.0);
@@ -549,6 +649,15 @@ impl CircuitApp {
                     "Sur le canevas, Ctrl+K ouvre la palette de commandes. R et F orientent \
                      l’aperçu de placement ; Maj change le coude d’un fil. Alt+clic sélectionne \
                      le net complet et un composant déposé sur un fil s’insère en série.",
+                );
+                ui.label(
+                    "L’inspecteur affiche les valeurs simulées du dernier échantillon \
+                     transitoire. Les paramètres acceptent 4k7 ou 100n ; la molette et les \
+                     boutons −/+ parcourent la série E12, E24 ou E96 choisie.",
+                );
+                ui.label(
+                    "Le panneau Historique, dans l’inspecteur, ramène le schéma à un état \
+                     nommé. Un clic droit sur le canevas propose les actions de l’objet.",
                 );
                 ui.label(
                     "Les résultats restent affichés après une modification du schéma et sont \
@@ -631,7 +740,17 @@ fn configure_style(context: &Context) {
 
 fn tool_toggle(ui: &mut Ui, tool: &mut Tool, canvas: &mut CanvasState, target: Tool, label: &str) {
     let selected = *tool == target;
-    if ui.selectable_label(selected, label).clicked() && !selected {
+    let shortcut = match label {
+        "Sélection" => "V",
+        "Fil" => "W",
+        "Jonction" => "J",
+        "Label" => "L",
+        _ => "",
+    };
+    let response = ui
+        .selectable_label(selected, label)
+        .on_hover_text(format!("{label} ({shortcut})"));
+    if response.clicked() && !selected {
         *tool = target;
         canvas.cancel_interaction();
     }

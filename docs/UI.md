@@ -16,6 +16,7 @@ La distribution web utilise `index.html` et Trunk.
 | `export.rs` | fichier natif et téléchargement navigateur |
 | `ui/canvas.rs` | entrées souris, placement, câblage et peinture |
 | `ui/command_palette.rs` | recherche floue et actions clavier |
+| `ui/history.rs` | historique nommé et sauts d’état |
 | `ui/palette.rs`, `ui/glyph.rs` | composants, favoris/récents et symboles |
 | `ui/properties.rs`, `ui/erc.rs` | inspecteur, ERC et nets |
 | `ui/instruments.rs` | panneau de simulation et graphiques |
@@ -33,16 +34,20 @@ est entière avec un pas visuel adaptatif.
 ## 2. Interactions
 
 - Clic : sélectionne l'objet sous le curseur ou vide la sélection.
-- `Maj` + clic : ajoute/retire un objet ; `Alt` + clic : sélectionne le net.
+- `Maj` + clic : ajoute/retire un objet ; `Ctrl` + clic : inverse l'objet.
+- `Alt` + clic : sélectionne le net complet.
+- Rectangle gauche→droite : objets entièrement inclus ; droite→gauche : touchés.
 - Glisser un symbole/label/jonction : déplace la sélection d'un delta entier.
 - Glisser un fil : déplace le segment perpendiculairement.
-- `Ctrl+A` : tout sélectionner ; `Échap` : annuler l'outil ou la sélection.
+- `Ctrl+A` : tout sélectionner ; `Échap` : annuler l'outil, le collage ou la sélection.
+- `Ctrl+C`, `Ctrl+V`, `Ctrl+D` : copier, coller avec aperçu, dupliquer.
 - Molette : zoom centré sous le curseur (8–80 px/case).
 - Bouton milieu + glisser : déplacer la vue ; `Home` : ajuster.
 
 Priorité au clic : label, jonction, symbole, fil. Le survol d'un fil ou d'une
 broche met en évidence le net complet. Des guides apparaissent pendant le
-déplacement lorsque des symboles partagent une coordonnée.
+déplacement lorsque des symboles partagent une coordonnée. Le menu contextuel
+propose les actions propres à l’objet et, sur le vide, le collage et la vue.
 
 Le placement utilise la grille avec un label unique et reste actif pour des
 placements répétés. `R`/`F` orientent l’aperçu. Un composant à deux broches déposé
@@ -55,11 +60,19 @@ existants.
 ## 3. Propriétés et ERC
 
 L'inspecteur se synchronise sur `(révision, sélection)` et travaille sur un
-brouillon jusqu'à **Appliquer**.
+brouillon jusqu'à **Appliquer** ou `Entrée`.
 
 - Symbole : référence, orientation, miroir, paramètres typés.
 - Label : nom du net ; fil/jonction : géométrie en lecture seule.
 - Sélection multiple : compteurs et actions pivoter, miroir, supprimer.
+- Paramètres numériques : saisie directe `4k7`/`100n`, valeur normalisée
+  affichée, erreur locale, série E12/E24/E96 et cycle molette, `Alt+↑`/`Alt+↓`
+  ou boutons `−`/`+`.
+- Grandeurs simulées : dernier échantillon transitoire, tensions par broche et
+  par net, courant et puissance lorsque calculables. Un résultat antérieur est
+  signalé.
+- Historique nommé repliable : chaque entrée indique son état ; un clic ramène
+  le schéma à cet état, dans le passé ou le futur.
 
 Les nombres sont formatés en ingénierie et reparsés avant validation. Une valeur
 invalide, un nom vide ou une transformation hors grille laisse document,
@@ -102,16 +115,21 @@ les formats de fichiers sont dans [INSTRUMENTS.md](INSTRUMENTS.md).
 | `V`, `W`, `J`, `L` | Sélection, Fil, Jonction, Label |
 | `R`, `M` | pivoter, miroir |
 | `R`, `F` | orienter/miroiter l’aperçu de placement |
+| `Maj` / `Ctrl` + clic | ajouter / inverser dans la sélection |
 | `Maj` pendant un fil | changer le coude |
 | `Alt` + clic | sélectionner le net complet |
+| `Ctrl+C`, `Ctrl+V`, `Ctrl+D` | copier, coller, dupliquer |
+| `Alt+↑`, `Alt+↓` | cycler la série E du paramètre |
 | `Suppr`, `Retour arrière` | supprimer |
 | `Ctrl+Z`, `Ctrl+Y` / `Ctrl+Maj+Z` | annuler, rétablir |
 | `Ctrl+A` | tout sélectionner |
-| `Échap` | annuler l'outil ou la sélection |
+| `?` | aide et raccourcis |
+| `Échap` | annuler l'outil, le collage ou la sélection |
 | `Home` | ajuster la vue |
 
-Les raccourcis sont ignorés si un champ texte a le focus. Aucun raccourci global
-ne lance une simulation.
+Les raccourcis sont ignorés si un champ texte a le focus, à l’exception de
+`Ctrl+K` pour la palette de commandes. Aucun raccourci global ne lance une
+simulation.
 
 ## 6. Atomicité, limites et tests
 
@@ -123,10 +141,12 @@ d'identifiants. Collections et rendu sont ordonnés.
 Limites : worker dans le fil de l'interface, tests navigateur non automatisés,
 transitoire à pas fixe, FFT plafonnée, pas de curseurs/PNG/persistance de projet,
 opamp sans alimentation/pôle, pas de thème clair ni de mobile spécifique, fils
-non extensibles par extrémité. Les sélections rectangle, l’édition directe de
-valeur et le câblage à double-clic restent aux lots suivants.
+non extensibles par extrémité, panneaux non dockables. Les valeurs simulées de
+l’inspecteur proviennent du dernier transitoire ; le câblage à double-clic et la
+persistance des favoris restent aux lots suivants.
 
 Tests : `cargo test -p circuitsim-app` couvre document, vue, édition, palette,
-propriétés, ERC, canevas headless, instruments, worker, FFT, Bode, CSV et export.
+propriétés, historique, presse-papiers, sélection rectangle, séries E, ERC,
+canevas headless, instruments, worker, FFT, Bode, CSV et export.
 Détails dans [TESTING.md](TESTING.md) ; recette web dans
 [DELIVERY.md](DELIVERY.md).
