@@ -31,6 +31,10 @@ pub enum Command {
         old: Wire,
         new: Wire,
     },
+    ReplaceJunction {
+        old: Junction,
+        new: Junction,
+    },
     ReplaceLabel {
         old: NetLabel,
         new: NetLabel,
@@ -58,6 +62,26 @@ pub enum EditError {
 }
 
 impl Command {
+    /// Short technical summary used when no localized label is supplied.
+    pub const fn summary(&self) -> &'static str {
+        match self {
+            Self::AddSymbol(_) => "add symbol",
+            Self::RemoveSymbol(_) => "remove symbol",
+            Self::AddWire(_) => "add wire",
+            Self::RemoveWire(_) => "remove wire",
+            Self::AddJunction(_) => "add junction",
+            Self::RemoveJunction(_) => "remove junction",
+            Self::AddLabel(_) => "add label",
+            Self::RemoveLabel(_) => "remove label",
+            Self::MoveObjects { .. } => "move objects",
+            Self::ReplaceSymbol { .. } => "replace symbol",
+            Self::ReplaceWire { .. } => "replace wire",
+            Self::ReplaceJunction { .. } => "replace junction",
+            Self::ReplaceLabel { .. } => "replace label",
+            Self::Composite(_) => "composite edit",
+        }
+    }
+
     pub(crate) fn apply(&self, schematic: &mut Schematic) -> Result<(), EditError> {
         match self {
             Self::AddSymbol(symbol) => insert_symbol(schematic, symbol.clone()),
@@ -114,6 +138,7 @@ impl Command {
             }
             Self::ReplaceSymbol { old, new } => replace_symbol(schematic, old, new),
             Self::ReplaceWire { old, new } => replace_wire(schematic, old, new),
+            Self::ReplaceJunction { old, new } => replace_junction(schematic, old, new),
             Self::ReplaceLabel { old, new } => replace_label(schematic, old, new),
             Self::Composite(commands) => {
                 if commands.is_empty() {
@@ -184,6 +209,7 @@ impl Command {
             }
             Self::ReplaceSymbol { old, new } => replace_symbol(schematic, new, old),
             Self::ReplaceWire { old, new } => replace_wire(schematic, new, old),
+            Self::ReplaceJunction { old, new } => replace_junction(schematic, new, old),
             Self::ReplaceLabel { old, new } => replace_label(schematic, new, old),
             Self::Composite(commands) => {
                 for command in commands.iter().rev() {
@@ -286,6 +312,30 @@ fn replace_wire(schematic: &mut Schematic, old: &Wire, new: &Wire) -> Result<(),
         return Err(EditError::StaleCommand);
     }
     schematic.wires.insert(new.id, new.clone());
+    Ok(())
+}
+
+fn replace_junction(
+    schematic: &mut Schematic,
+    old: &Junction,
+    new: &Junction,
+) -> Result<(), EditError> {
+    if old.id != new.id {
+        return Err(EditError::InvalidCommand(
+            "replacement junction must keep the same identifier",
+        ));
+    }
+    if old == new {
+        return Err(EditError::InvalidCommand("replacement is a no-op"));
+    }
+    let current = schematic
+        .junctions
+        .get(&old.id)
+        .ok_or(EditError::NotFound(ObjectRef::Junction(old.id)))?;
+    if current != old {
+        return Err(EditError::StaleCommand);
+    }
+    schematic.junctions.insert(new.id, new.clone());
     Ok(())
 }
 

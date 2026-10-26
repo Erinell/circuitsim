@@ -3,11 +3,26 @@
 use crate::command::{Command, EditError};
 use crate::schematic::Schematic;
 
-/// Unlimited undo/redo history.
+/// Unlimited undo/redo history with stable, human-readable labels.
 #[derive(Clone, Debug, Default)]
 pub struct UndoStack {
-    done: Vec<Command>,
-    undone: Vec<Command>,
+    done: Vec<Entry>,
+    undone: Vec<Entry>,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+struct Entry {
+    label: String,
+    command: Command,
+}
+
+/// Read-only description of one history entry.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct HistoryItem {
+    /// Human-readable label shown in the history panel.
+    pub label: String,
+    /// True when the entry is currently applied to the schematic.
+    pub applied: bool,
 }
 
 impl UndoStack {
@@ -16,57 +31,104 @@ impl UndoStack {
         Self::default()
     }
 
-    /// Applies a command atomically and records it.
+    /// Applies a command atomically with its technical summary as label.
     pub fn execute(
         &mut self,
         schematic: &mut Schematic,
         command: Command,
     ) -> Result<(), EditError> {
+        let label = command.summary().to_owned();
+        self.execute_named(schematic, command, label)
+    }
+
+    /// Applies a command atomically and records a human-readable label.
+    pub fn execute_named(
+        &mut self,
+        schematic: &mut Schematic,
+        command: Command,
+        label: impl Into<String>,
+    ) -> Result<(), EditError> {
         let mut trial = schematic.clone();
         command.apply(&mut trial)?;
         trial.validate()?;
         *schematic = trial;
-        self.done.push(command);
+        self.done.push(Entry {
+            label: label.into(),
+            command,
+        });
         self.undone.clear();
         Ok(())
     }
 
     /// Reverts the most recent command. Returns false when history is empty.
     pub fn undo(&mut self, schematic: &mut Schematic) -> Result<bool, EditError> {
-        let Some(command) = self.done.last().cloned() else {
+        let Some(entry) = self.done.last().cloned() else {
             return Ok(false);
         };
         let mut trial = schematic.clone();
-        command.undo(&mut trial)?;
+        entry.command.undo(&mut trial)?;
         trial.validate()?;
         *schematic = trial;
         self.done.pop();
-        self.undone.push(command);
+        self.undone.push(entry);
         Ok(true)
     }
 
     /// Reapplies the most recently undone command. Returns false when empty.
     pub fn redo(&mut self, schematic: &mut Schematic) -> Result<bool, EditError> {
-        let Some(command) = self.undone.last().cloned() else {
+        let Some(entry) = self.undone.last().cloned() else {
             return Ok(false);
         };
         let mut trial = schematic.clone();
-        command.apply(&mut trial)?;
+        entry.command.apply(&mut trial)?;
         trial.validate()?;
         *schematic = trial;
         self.undone.pop();
-        self.done.push(command);
+        self.done.push(entry);
         Ok(true)
     }
 
-    /// Returns true when at least one command can be undone.
-    pub fn can_undo(&self) -> bool {
-        !self.done.is_empty()
+    /// Moves to a history state identified by the number of applied commands.
+    ///
+    /// Values above the reachable history are clamped. Returns true when the
+    /// schematic changed.
+    pub fn undo_to(
+        &mut self,
+        schematic: &mut Schematic,
+        applied_commands: usize,
+    ) -> Result<bool, EditError> {
+        let target = applied_commands.min(self.total_len());
+        if target == self.done.len() {
+            return Ok(false);
+        }
+        let mut history = self.clone();
+        let mut trial = schematic.clone();
+        while history.done.len() > target {
+            history.undo(&mut trial)?;
+        }
+        while history.done.len() < target {
+            if !history.redo(&mut trial)? {
+                break;
+            }
+        }
+        *self = history;
+        *schematic = trial;
+        Ok(true)
     }
 
-    /// Returns true when at least one command can be redone.
-    pub fn can_redo(&self) -> bool {
-        !self.undone.is_empty()
+    /// Returns applied entries first and undone entries in redo order.
+    pub fn history(&self) -> Vec<HistoryItem> {
+        self.done
+            .iter()
+            .map(|entry| HistoryItem {
+                label: entry.label.clone(),
+                applied: true,
+            })
+            .chain(self.undone.iter().rev().map(|entry| HistoryItem {
+                label: entry.label.clone(),
+                applied: false,
+            }))
+            .collect()
     }
 
     /// Number of commands available for undo.
@@ -77,6 +139,21 @@ impl UndoStack {
     /// Number of commands available for redo.
     pub fn redo_len(&self) -> usize {
         self.undone.len()
+    }
+
+    /// Total number of commands reachable by jumping through history.
+    pub fn total_len(&self) -> usize {
+        self.done.len() + self.undone.len()
+    }
+
+    /// Returns true when at least one command can be undone.
+    pub fn can_undo(&self) -> bool {
+        !self.done.is_empty()
+    }
+
+    /// Returns true when at least one command can be redone.
+    pub fn can_redo(&self) -> bool {
+        !self.undone.is_empty()
     }
 
     /// Returns true when no command is available in either direction.
@@ -290,5 +367,78 @@ mod tests {
             schematic.label(id).map(|label| label.text.as_str()),
             Some("OUT")
         );
+    }
+
+    #[test]
+    fn junction_edits_are_reversible() {
+        let mut schematic = Schematic::new();
+        let mut history = UndoStack::new();
+        let id = JunctionId(schematic.allocate_id().unwrap());
+        let junction = Junction::new(id, GridPos::new(1, 1));
+        history
+            .execute(&mut schematic, Command::AddJunction(junction.clone()))
+            .unwrap();
+        let moved = Junction::new(id, GridPos::new(4, 5));
+        history
+            .execute(
+                &mut schematic,
+                Command::ReplaceJunction {
+                    old: junction,
+                    new: moved.clone(),
+                },
+            )
+            .unwrap();
+        assert_eq!(schematic.junction(id), Some(&moved));
+        history.undo(&mut schematic).unwrap();
+        assert_eq!(
+            schematic.junction(id).map(|junction| junction.at),
+            Some(GridPos::new(1, 1))
+        );
+    }
+
+    #[test]
+    fn named_history_can_jump_in_both_directions() {
+        let mut schematic = Schematic::new();
+        let mut history = UndoStack::new();
+        let first = symbol(&mut schematic, "R1");
+        let second = symbol(&mut schematic, "R2");
+        history
+            .execute_named(&mut schematic, Command::AddSymbol(first), "Ajouter R1")
+            .unwrap();
+        history
+            .execute_named(&mut schematic, Command::AddSymbol(second), "Ajouter R2")
+            .unwrap();
+        assert_eq!(schematic.symbols().count(), 2);
+        assert_eq!(history.undo_len(), 2);
+        assert!(history.undo_to(&mut schematic, 0).unwrap());
+        assert!(schematic.is_empty());
+        assert_eq!(history.undo_len(), 0);
+        assert_eq!(history.redo_len(), 2);
+        assert!(history.undo_to(&mut schematic, 1).unwrap());
+        assert_eq!(schematic.symbols().count(), 1);
+        assert_eq!(history.undo_len(), 1);
+        assert!(history.undo_to(&mut schematic, 2).unwrap());
+        assert_eq!(schematic.symbols().count(), 2);
+        assert!(!history.undo_to(&mut schematic, 2).unwrap());
+    }
+
+    #[test]
+    fn history_items_keep_labels_and_application_state() {
+        let mut schematic = Schematic::new();
+        let mut history = UndoStack::new();
+        let first = symbol(&mut schematic, "R1");
+        history
+            .execute_named(&mut schematic, Command::AddSymbol(first), "Ajouter R1")
+            .unwrap();
+        history.undo(&mut schematic).unwrap();
+        let items = history.history();
+        assert_eq!(items.len(), 1);
+        assert_eq!(items[0].label, "Ajouter R1");
+        assert!(!items[0].applied);
+        history.redo(&mut schematic).unwrap();
+        let items = history.history();
+        assert_eq!(items[0].label, "Ajouter R1");
+        assert!(items[0].applied);
+        assert_eq!(history.total_len(), 1);
     }
 }
