@@ -232,6 +232,145 @@ pub fn simulate_transient(
     })
 }
 
+/// Incremental backward-Euler transient session.
+///
+/// The session owns the state between two fixed steps. The caller supplies the
+/// pacing; it is intended for real-time probes and never exposes a partial
+/// sample as a complete `TransientResult`.
+pub struct TransientSession {
+    working: Netlist,
+    circuit: MnaCircuit,
+    previous: DVector<f64>,
+    junction_voltages: Vec<f64>,
+    time: f64,
+    step: f64,
+    solver: DcOptions,
+    events: Vec<IndexedEvent>,
+    event_index: usize,
+    iterations: usize,
+    steps: usize,
+    initial_stored: BTreeMap<ComponentId, f64>,
+    absorbed: BTreeMap<ComponentId, f64>,
+    samples: Vec<TransientSample>,
+}
+
+impl TransientSession {
+    /// Creates a session and computes its initial operating point.
+    pub fn new(netlist: &Netlist, options: &TransientOptions) -> Result<Self, TransientError> {
+        validate_options(options)?;
+        let events = prepare_events(netlist, options)?;
+        let working = netlist.clone();
+        let circuit = MnaCircuit::from_netlist(&working)?;
+        let initial = solve_initial(&circuit, &options.solver)?;
+        let previous = initial.solution;
+        let junction_voltages = circuit.junction_voltages(&previous);
+        let initial_stored = stored_energies(&working, &circuit, &previous);
+        let sample = build_sample(&working, &circuit, &previous, options.start_time);
+        Ok(Self {
+            working,
+            circuit,
+            previous,
+            junction_voltages,
+            time: options.start_time,
+            step: options.step,
+            solver: options.solver.clone(),
+            events,
+            event_index: 0,
+            iterations: initial.iterations,
+            steps: 0,
+            initial_stored,
+            absorbed: BTreeMap::new(),
+            samples: vec![sample],
+        })
+    }
+
+    /// Returns the latest sample.
+    pub fn sample(&self) -> Option<&TransientSample> {
+        self.samples.last()
+    }
+
+    /// Removes and returns accumulated samples.
+    pub fn drain_samples(&mut self) -> Vec<TransientSample> {
+        std::mem::take(&mut self.samples)
+    }
+
+    /// Current simulated time.
+    pub const fn time(&self) -> f64 {
+        self.time
+    }
+
+    /// Advances exactly one fixed step.
+    pub fn step(&mut self) -> Result<TransientSample, TransientError> {
+        let time = self.time;
+        let next_time = time + self.step;
+        if !next_time.is_finite() || next_time <= time {
+            return Err(TransientError::InvalidOptions {
+                reason: "transient time overflow",
+            });
+        }
+
+        let mut changed = false;
+        while self.event_index < self.events.len()
+            && self.events[self.event_index].event.time <= time
+        {
+            let event = &self.events[self.event_index];
+            apply_action(&mut self.working, &event.event.action, event.original_index)?;
+            self.event_index += 1;
+            changed = true;
+        }
+        if changed {
+            self.circuit = MnaCircuit::from_netlist(&self.working)?;
+            self.junction_voltages = self.circuit.junction_voltages(&self.previous);
+        }
+
+        let step = next_time - time;
+        let mode = AssemblyMode::Transient {
+            previous: &self.previous,
+            step,
+        };
+        let outcome = solve_step(
+            &self.circuit,
+            &self.solver,
+            mode,
+            &self.previous,
+            &self.junction_voltages,
+            next_time,
+        )?;
+        self.iterations += outcome.iterations;
+        accumulate_interval(
+            &self.working,
+            &self.circuit,
+            &outcome.solution,
+            step,
+            &mut self.absorbed,
+        );
+        self.previous = outcome.solution;
+        self.junction_voltages = self.circuit.junction_voltages(&self.previous);
+        self.time = next_time;
+        self.steps += 1;
+        let sample = build_sample(&self.working, &self.circuit, &self.previous, next_time);
+        self.samples.push(sample.clone());
+        Ok(sample)
+    }
+
+    /// Finishes the session with a complete energy audit.
+    pub fn finish(self) -> TransientResult {
+        let final_stored = stored_energies(&self.working, &self.circuit, &self.previous);
+        let energy = build_energy_audit(
+            &self.working,
+            &self.absorbed,
+            &self.initial_stored,
+            &final_stored,
+        );
+        TransientResult {
+            samples: self.samples,
+            energy,
+            steps: self.steps,
+            iterations: self.iterations,
+        }
+    }
+}
+
 fn validate_options(options: &TransientOptions) -> Result<(), TransientError> {
     if !options.start_time.is_finite() || !options.stop_time.is_finite() {
         return Err(TransientError::InvalidOptions {
