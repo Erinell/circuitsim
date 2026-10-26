@@ -6,6 +6,25 @@ sémantique.
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-10-26
+
+### Added
+
+- Fenêtre de propriétés d’un composant ouverte par double-clic sur le canevas.
+- Basculement direct d’un interrupteur par un clic et halo d’allumage des LED.
+- Tracé rouge des fils portant une erreur ou un avertissement ERC.
+
+### Changed
+
+- Le déplacement d’un segment coupe ses extrémités au lieu de créer des embouts.
+- Le flux de courant suit le sens réel des injections et contraste avec les fils.
+- L’inspecteur est allégé : aides de saisie dans les infobulles et sections compactées.
+
+### Fixed
+
+- Le sens de l’animation du courant est déterminé par parcours du net depuis
+  l’injection dominante, avec priorité aux courants positifs.
+
 ## [0.3.0] - 2026-10-26
 
 ### Added

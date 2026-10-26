@@ -39,21 +39,26 @@ sél.**/`Ctrl+Home` cadre la sélection. La grille est entière avec un pas visu
 adaptatif. La fenêtre native s'ouvre maximisée ; les fenêtres **Démarrage**,
 **Aide** et **Accessibilité** sont centrées.
 
-Les fils sont épaissis et affichent, après simulation, un flux de points animé
-dans le sens du courant estimé. **Vue → Courant animé** masque ce flux. Une
+Les fils sont épaissis et affichent, après simulation, un flux de points jaunes
+à halo sombre qui suit le sens réel du courant du dernier transitoire.
+**Vue → Courant animé** masque ce flux. Un fil signalé par l'ERC (erreur ou
+avertissement) est tracé en rouge. Une LED rayonne lorsque sa tension directe
+dépasse son seuil, et un clic sur un interrupteur l'ouvre ou le ferme. Une
 extrémité libre d'un fil peut être tirée le long de son axe pour l'allonger ou le
 raccourcir ; les extrémités connectées ne sont pas redimensionnables. La mini-carte du coin inférieur droit montre le contenu, la sélection
 et la fenêtre visible ; un clic y recentre la vue.
 
 ## 2. Interactions
 
-- Clic : sélectionne l'objet sous le curseur ou vide la sélection.
+- Clic : sélectionne l'objet sous le curseur ou vide la sélection ; sur un
+  interrupteur, le clic bascule son état.
+- Double-clic sur un symbole : ouvre la fenêtre de propriétés du composant.
 - `Maj` + clic : ajoute/retire un objet ; `Ctrl` + clic : inverse l'objet.
 - `Alt` + clic : sélectionne le net complet.
 - Rectangle gauche→droite : objets entièrement inclus ; droite→gauche : touchés.
 - Glisser un symbole/label/jonction : déplace la sélection d'un delta entier.
-- Glisser un fil : déplace le segment perpendiculairement ; les connexions sont
-  préservées par des embouts perpendiculaires.
+- Glisser un fil : déplace le segment perpendiculairement et coupe ses
+  extrémités ; aucun fil supplémentaire n'est créé.
 - Glisser une extrémité libre : allonge ou raccourcit le fil sur son axe.
 - `Ctrl+A` : tout sélectionner ; `Échap` : annuler l'outil, le collage ou la sélection.
 - `Ctrl+C`, `Ctrl+V`, `Ctrl+D` : copier, coller avec aperçu, dupliquer.
@@ -98,14 +103,17 @@ Ces réglages sont appliqués à la session ; ils ne sont pas encore persistés.
 ## 4. Propriétés et ERC
 
 L'inspecteur se synchronise sur `(révision, sélection)` et travaille sur un
-brouillon jusqu'à **Appliquer** ou `Entrée`.
+brouillon jusqu'à **Appliquer** ou `Entrée`. Un double-clic sur un symbole ouvre
+la même édition dans une fenêtre centrée, qui se ferme après application ou avec
+`Échap`. Les aides de saisie sont regroupées dans les infobulles des champs ; le
+panneau ne conserve que les valeurs et les actions utiles.
 
 - Symbole : référence, orientation, miroir, paramètres typés.
 - Label : nom du net ; fil/jonction : géométrie en lecture seule.
 - Sélection multiple : compteurs et actions pivoter, miroir, supprimer.
-- Paramètres numériques : saisie directe `4k7`/`100n`, valeur normalisée
-  affichée, erreur locale, série E12/E24/E96 et cycle molette, `Alt+↑`/`Alt+↓`
-  ou boutons `−`/`+`.
+- Paramètres numériques : saisie directe `4k7`/`100n`, erreur locale, série
+  E12/E24/E96 et cycle molette, `Alt+↑`/`Alt+↓` ou boutons `−`/`+`. La valeur
+  normalisée apparaît dans l'infobulle du champ.
 - Grandeurs simulées : dernier échantillon transitoire, tensions par broche et
   par net, courant et puissance lorsque calculables. Un résultat antérieur est
   signalé. Les tensions des nets sont aussi superposées au canevas lorsque
@@ -116,7 +124,8 @@ brouillon jusqu'à **Appliquer** ou `Entrée`.
 Les nombres sont formatés en ingénierie et reparsés avant validation. Une valeur
 invalide, un nom vide ou une transformation hors grille laisse document,
 révision et compteur d'identifiants inchangés. Les messages utilisateur sont en
-français ; les erreurs techniques restent en anglais.
+français ; les erreurs techniques restent en anglais. Un fil portant une erreur
+ou un avertissement ERC est dessiné en rouge.
 
 L'extraction est recalculée après chaque commande acceptée. Le panneau ERC
 affiche les compteurs et les diagnostics triés ; un clic sélectionne l'objet
@@ -206,5 +215,7 @@ aux lots suivants.
 Tests : `cargo test -p circuitsim-app` couvre document, vue, navigation,
 mini-carte, édition, palette, propriétés, historique, presse-papiers, sélection
 rectangle, séries E, ERC, canevas headless, dispositions, curseurs, marqueur
-Bode, instruments, worker, FFT, Bode, CSV et export. Détails dans
+Bode, instruments, worker, FFT, Bode, CSV et export, ainsi que le déplacement de
+fil sans embout, les fils en erreur, le basculement d'interrupteur et le
+propriétés par double-clic. Détails dans
 [TESTING.md](TESTING.md) ; recette web dans [DELIVERY.md](DELIVERY.md).

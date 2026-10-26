@@ -119,11 +119,11 @@ annulables en une action.
 - **Chemin de fil** : un chemin orthogonal peut contenir plusieurs segments. Les
   segments nuls ou déjà présents sont ignorés ; un chemin sans nouveau segment
   est refusé.
-- **Déplacement de segment** : un segment se déplace perpendiculairement. Les
-  points de connexion du segment (broches, labels, jonctions, extrémités de fils)
-  restent en place et de courts embouts perpendiculaires les relient au segment
-  déplacé. La topologie reste donc connectée sans déplacement implicite des
-  composants.
+- **Déplacement de segment** : un segment se déplace perpendiculairement. La
+  commande ne remplace que ce fil : ses extrémités sont libérées et aucun
+  embout ni fil supplémentaire n'est créé. Les broches, labels, jonctions et
+  autres fils restent à leur place ; l'ERC signale les connexions perdues. Une
+  position déjà occupée par un fil identique est refusée.
 - **Extrémité libre** : une extrémité sans broche, label, jonction ou autre fil
   peut être déplacée sur l’axe du fil. Une extrémité connectée est refusée
   (`CannotResizeWire`).
