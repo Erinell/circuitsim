@@ -34,7 +34,7 @@ l'installe séparément.
 
 ## 3. Suite et couverture
 
-Au 26 octobre 2026, `cargo test --workspace` exécute **202 tests** :
+Au 26 octobre 2026, `cargo test --workspace` exécute **218 tests** :
 
 | Groupe | Tests | Points clés |
 | --- | ---: | --- |
@@ -42,27 +42,31 @@ Au 26 octobre 2026, `cargo test --workspace` exécute **202 tests** :
 | `sim-core` DC | 18 | diviseur, sources, R/C/L, switch, diodes, opamp, erreurs |
 | `sim-core` transitoire | 16 | RC/RL, événements, diode, opamp, énergie, limites |
 | `sim-core` AC | 15 | RC/RL/RLC, phase, diode, opamp, balayages, erreurs |
-| `editor-core` | 40 | grille, symboles, schéma, undo, ERC, extraction, JSON, snap/routage |
-| `circuitsim-app` | 70 | document, UI, instruments, worker, FFT, Bode, CSV, placement, palettes |
+| `editor-core` | 47 | grille, symboles, schéma, historique, ERC, extraction, JSON, séries E, snap/routage |
+| `circuitsim-app` | 79 | document, UI, inspecteur, historique, presse-papiers, instruments, worker, FFT, Bode, CSV |
 | `worker-protocol` | 11 | trames, version, netlist, erreurs, transports |
 | `worker` | 13 | coalescence, cadence, révisions, DC/transitoire/AC |
 | `editor_invariants` | 2 | proptest undo/redo et extraction |
 
 Points couverts : relations de segments (contact, T, X avec/sans jonction,
 chevauchement), atomicité des commandes, noms déterministes, broches hors grille,
-JSON futur/malformé, accroche et routage orthogonal ; conventions de signe,
-composants non linéaires, saturation, singularités, non-convergence, événements
-alignés ou non, continuité condensateur/inductance, énergie ; réponses
-analytiques RC/RL/RLC, phases, conductance dynamique, balayages ; frames
-tronquées/direction/version, révisions obsolètes, rafale bornée, horloge non
-monotone ; catalogue, échelon, limites UI, mesures, pic FFT, trois CSV et export
-UTF-8 ; insertion en série, déplacement de segment, alignement/distribution,
-sélection de net, recherche floue et placement sur canevas.
+JSON v1 historique et futur/malformé, accroche et routage orthogonal, sauts
+d’historique nommé, séries E12/E24/E96 ; conventions de signe, composants non
+linéaires, saturation, singularités, non-convergence, événements alignés ou non,
+continuité condensateur/inductance, énergie ; réponses analytiques RC/RL/RLC,
+phases, conductance dynamique, balayages ; frames tronquées/direction/version,
+révisions obsolètes, rafale bornée, horloge non monotone ; catalogue, échelon,
+limites UI, mesures, pic FFT, trois CSV et export UTF-8 ; insertion en série,
+déplacement de segment, alignement/distribution, sélection de net et rectangle,
+presse-papiers, duplication, rotation/miroir de groupe, valeurs simulées,
+recherche floue et placement sur canevas.
 
-Deux propriétés proptest utilisent 64 cas : undo/redo restaure exactement les
-contenus et l’historique final ; deux extractions du même schéma sont égales,
-valides, indexées et nommées de façon unique. Une propriété app de 32 cas vérifie
-l’insertion en série et le retour exact après undo.
+Deux propriétés proptest utilisent 64 cas dans les invariants : undo/redo
+restaure exactement les contenus et l’historique final ; deux extractions du même
+schéma sont égales, valides, indexées et nommées de façon unique. Une propriété
+`editor-core` de 64 cas vérifie l’aller-retour des séries E. Deux propriétés app
+de 32 cas vérifient l’insertion en série et la géométrie relative après collage,
+avec retour exact après undo.
 
 ## 4. Reproductibilité
 

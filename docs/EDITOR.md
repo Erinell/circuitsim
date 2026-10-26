@@ -96,13 +96,15 @@ Le nom final est revalidé par `NetName::new`.
 
 Commandes publiques : `AddSymbol`, `RemoveSymbol`, `AddWire`, `RemoveWire`,
 `AddJunction`, `RemoveJunction`, `AddLabel`, `RemoveLabel`, `MoveObjects`,
-`ReplaceSymbol`, `ReplaceWire`, `ReplaceLabel`, `Composite`.
+`ReplaceSymbol`, `ReplaceWire`, `ReplaceJunction`, `ReplaceLabel`, `Composite`.
 
 Une suppression stocke l'objet complet et exige qu'il soit identique à l'état
 courant, sinon `StaleCommand`. `UndoStack` applique sur un clone, valide, puis
 remplace l'état ; un échec laisse tout inchangé. L'historique est illimité, une
 nouvelle commande vide le redo, et les identifiants annulés ne sont jamais
-réutilisés.
+réutilisés. Chaque entrée porte un libellé fourni par l'application ;
+`undo_to(applied)` ramène l'état au nombre de commandes appliquées demandé, dans
+les deux directions.
 
 ## 7. Opérations de placement et de câblage
 
@@ -129,7 +131,28 @@ annulables en une action.
 - **Net** : l’extraction fournit les fils, labels et broches d’un net. La
   sélection de net est déterministe et ne modifie pas la topologie.
 
-## 8. ERC
+## 8. Sélection, presse-papiers et séries
+
+- **Rectangle** : `select_in_rect` compare les bornes de chaque objet à un
+  rectangle normalisé. Le mode `Enclosing` exige l’inclusion complète ; le mode
+  `Touching` accepte toute intersection. Le changement est `Replace`, `Add` ou
+  `Toggle`, dans l’ordre déterministe des `ObjectRef`.
+- **Bornes** : un symbole utilise ses broches transformées, élargies d’une case
+  pour couvrir son corps ; un fil utilise ses extrémités ; une jonction ou un
+  label utilise son point.
+- **Presse-papiers interne** : `Clipboard` conserve une copie des objets et une
+  ancre au minimum de leurs origines. Le collage décale les positions, alloue de
+  nouveaux identifiants, régénère les références de symboles et reconstruit une
+  seule commande composite. Un collage refusé ne consomme rien.
+- **Rotation et miroir de groupe** : le centre entier de la sélection sert
+  d’origine. La rotation applique `(x, y) → (cx + cy − y, cy − cx + x)` et avance
+  l’orientation ; le miroir reflète `x` autour de `cx` et inverse le drapeau.
+  Fils, jonctions et labels suivent la même transformation.
+- **Séries E** : `editor-core::series` fournit E12, E24 et E96, la valeur la plus
+  proche et le cycle par pas entier, y compris le changement de décade et le
+  signe. La saisie directe reste assurée par `parse_si` (`4k7`, `100n`).
+
+## 9. ERC
 
 Les diagnostics sont triés par sévérité, code, position, sujet et message. Une
 erreur ERC n'empêche pas forcément l'extraction ; seule une `ExtractError` la
@@ -153,7 +176,7 @@ bloque. Le contrat de simulation reste séparé.
 | `MultipleLabelsOnNet` | avertissement | plusieurs labels sur un net |
 | `GroundLabelIgnored` | information | label ignoré sur la masse |
 
-## 9. JSON et interface
+## 10. JSON et interface
 
 Format versionné :
 

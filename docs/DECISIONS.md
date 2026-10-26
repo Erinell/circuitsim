@@ -55,14 +55,19 @@ documents spécialisés.
     16 384 points FFT. Un format incompatible est refusé, jamais interprété
     approximativement. Voir [PROTOCOL.md](PROTOCOL.md) et
     [INSTRUMENTS.md](INSTRUMENTS.md).
+11. **Presse-papiers interne et historique nommé.** Le copier/coller reste dans
+    `circuitsim-app` : aucune dépendance au presse-papiers système n’est
+    ajoutée, le contenu est déterministe et les identifiants sont régénérés au
+    collage. L’historique conserve un libellé par commande et permet un saut
+    bidirectionnel sans réécrire le schéma. Voir [EDITOR.md](EDITOR.md).
 
 ## Tests et périmètre
 
-11. **Composants personnalisés représentés, pas simulés.** Le registre,
+12. **Composants personnalisés représentés, pas simulés.** Le registre,
     l'extraction, le JSON et la netlist acceptent `Custom`; les solveurs le
     refusent avec `MnaError::UnsupportedComponent` jusqu'à l'ajout d'un modèle
     dans `sim-core`. Voir [COMPONENTS.md](COMPONENTS.md).
-12. **Tests natifs, benchmarks et CI.** Les tests ne demandent ni navigateur ni
+13. **Tests natifs, benchmarks et CI.** Les tests ne demandent ni navigateur ni
     ngspice ; les propriétés proptest affichent leur graine. La CI vérifie
     format, clippy, tests, WASM, benchmarks rapides, exemples et builds
     natif/web. Les budgets Criterion sont des seuils de revue, non bloquants sur
