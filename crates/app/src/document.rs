@@ -3,9 +3,10 @@
 use std::collections::BTreeSet;
 
 use editor_core::{
-    extract_netlist, Command, EditError, ErcReport, ExtractedNet, Extraction, GridPos, Junction,
-    JunctionId, NetLabel, NetLabelId, ObjectRef, Orientation, Schematic, Symbol, SymbolId,
-    SymbolKind, SymbolRegistry, UndoStack, Wire, WireGeometryError, WireId,
+    extract_netlist, nearest_snap, route_wire, Command, EditError, ErcReport, ExtractedNet,
+    Extraction, GridPos, GridRect, Junction, JunctionId, NetLabel, NetLabelId, ObjectRef,
+    Orientation, PinKey, Schematic, SnapTarget, Symbol, SymbolId, SymbolKind, SymbolRegistry,
+    UndoStack, Wire, WireGeometryError, WireId, DEFAULT_SNAP_RADIUS,
 };
 use sim_core::netlist::{NameError, ParamValue};
 use sim_core::units::UnitParseError;
@@ -47,6 +48,21 @@ pub enum ActionError {
     /// A numerical parameter is not finite.
     #[error("les paramètres numériques doivent être finis")]
     NonFiniteParameter,
+    /// The target wire cannot receive an in-series component.
+    #[error("le composant ne peut pas être inséré sur ce fil")]
+    CannotInsertOnWire,
+    /// The wire topology does not allow a perpendicular segment move.
+    #[error("ce segment ne peut pas être déplacé sans casser la topologie")]
+    CannotMoveWire,
+    /// The requested alignment needs at least two objects.
+    #[error("l'alignement exige au moins deux objets")]
+    NotEnoughObjects,
+    /// The requested distribution needs at least three objects.
+    #[error("la distribution exige au moins trois objets")]
+    NotEnoughForDistribution,
+    /// No electrical net was found at the requested position.
+    #[error("aucun net électrique à cette position")]
+    NoNet,
 }
 
 impl ActionError {
@@ -92,8 +108,45 @@ impl ActionError {
             Self::Duplicate => "Un objet identique existe déjà.".to_owned(),
             Self::ZeroLengthWire => "Un fil ne peut pas avoir une longueur nulle.".to_owned(),
             Self::NonFiniteParameter => "Les paramètres numériques doivent être finis.".to_owned(),
+            Self::CannotInsertOnWire => {
+                "Ce fil est trop court ou contient une connexion incompatible.".to_owned()
+            }
+            Self::CannotMoveWire => {
+                "Ce segment ne peut pas être déplacé dans cette topologie.".to_owned()
+            }
+            Self::NotEnoughObjects => "Sélectionnez au moins deux objets.".to_owned(),
+            Self::NotEnoughForDistribution => {
+                "Sélectionnez au moins trois objets pour distribuer.".to_owned()
+            }
+            Self::NoNet => "Aucun net électrique à cette position.".to_owned(),
         }
     }
+}
+
+/// Alignment applied to a selection.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Alignment {
+    /// Align left edges.
+    Left,
+    /// Align horizontal centres.
+    CenterX,
+    /// Align right edges.
+    Right,
+    /// Align top edges.
+    Top,
+    /// Align vertical centres.
+    CenterY,
+    /// Align bottom edges.
+    Bottom,
+}
+
+/// Axis used by distribution.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum DistributionAxis {
+    /// Distribute horizontally.
+    Horizontal,
+    /// Distribute vertically.
+    Vertical,
 }
 
 /// Editable schematic, history, selection, and cached extraction.
@@ -398,6 +451,17 @@ impl Document {
 
     /// Adds a built-in symbol with a generated unique label.
     pub fn add_symbol(&mut self, kind: SymbolKind, at: GridPos) -> Result<SymbolId, ActionError> {
+        self.add_symbol_oriented(kind, at, Orientation::R0, false)
+    }
+
+    /// Adds a symbol with an explicit orientation and mirror state.
+    pub fn add_symbol_oriented(
+        &mut self,
+        kind: SymbolKind,
+        at: GridPos,
+        orientation: Orientation,
+        mirrored: bool,
+    ) -> Result<SymbolId, ActionError> {
         let definition = self
             .registry
             .get(&kind)
@@ -410,7 +474,7 @@ impl Document {
                 .allocate_id()
                 .map_err(|_| ActionError::IdSpaceExhausted)?,
         );
-        let symbol = Symbol::from_def(id, &definition, at, label, Orientation::R0, false);
+        let symbol = Symbol::from_def(id, &definition, at, label, orientation, mirrored);
         self.execute(Command::AddSymbol(symbol))?;
         self.select_only(Some(ObjectRef::Symbol(id)));
         Ok(id)
@@ -724,6 +788,468 @@ impl Document {
         max.y = max.y.saturating_add(1);
         point.x >= min.x && point.x <= max.x && point.y >= min.y && point.y <= max.y
     }
+
+    /// Returns the nearest pin or wire around a grid position with the default radius.
+    pub fn nearest_snap(&self, point: GridPos) -> Option<SnapTarget> {
+        self.snap_point(point, DEFAULT_SNAP_RADIUS)
+    }
+
+    /// Returns the nearest pin or wire around a grid position.
+    pub fn snap_point(&self, point: GridPos, radius: i32) -> Option<SnapTarget> {
+        let pins = self.pin_positions();
+        let wires = self.schematic.wires().cloned().collect::<Vec<_>>();
+        nearest_snap(point, &pins, &wires, radius)
+    }
+
+    /// Returns all transformed symbol pins in deterministic order.
+    pub fn pin_positions(&self) -> Vec<(PinKey, GridPos)> {
+        let mut pins = Vec::new();
+        for symbol in self.schematic.symbols() {
+            let Some(definition) = self.registry.get(&symbol.kind) else {
+                continue;
+            };
+            for (index, pin) in definition.pins.iter().enumerate() {
+                if let Some(position) = symbol.pin_position_of(pin) {
+                    pins.push((
+                        PinKey {
+                            symbol: symbol.id,
+                            pin: u16::try_from(index).unwrap_or(u16::MAX),
+                        },
+                        position,
+                    ));
+                }
+            }
+        }
+        pins
+    }
+
+    /// Routes an orthogonal wire around symbol bodies.
+    pub fn route_path(
+        &self,
+        start: GridPos,
+        end: GridPos,
+        prefer_horizontal: bool,
+    ) -> Vec<GridPos> {
+        let obstacles = self
+            .schematic
+            .symbols()
+            .filter_map(|symbol| self.symbol_bounds(symbol))
+            .map(|(min, max)| GridRect::new(min, max))
+            .collect::<Vec<_>>();
+        route_wire(start, end, prefer_horizontal, &obstacles)
+    }
+
+    /// Adds an orthogonal path as one atomic undoable command.
+    pub fn add_wire_path(&mut self, points: &[GridPos]) -> Result<Vec<WireId>, ActionError> {
+        if points.len() < 2 {
+            return Err(ActionError::ZeroLengthWire);
+        }
+        let existing = self
+            .schematic
+            .wires()
+            .map(|wire| (wire.a, wire.b))
+            .collect::<BTreeSet<_>>();
+        let mut allocator = self.schematic.clone();
+        let mut commands = Vec::new();
+        let mut ids = Vec::new();
+        for pair in points.windows(2) {
+            if pair[0] == pair[1] {
+                continue;
+            }
+            let mut wire = Wire::new(WireId(0), pair[0], pair[1])?;
+            if existing.contains(&(wire.a, wire.b)) {
+                continue;
+            }
+            let id = WireId(
+                allocator
+                    .allocate_id()
+                    .map_err(|_| ActionError::IdSpaceExhausted)?,
+            );
+            wire.id = id;
+            ids.push(id);
+            commands.push(Command::AddWire(wire));
+        }
+        if commands.is_empty() {
+            return Err(ActionError::Duplicate);
+        }
+        self.execute(single_or_composite(commands))?;
+        self.clear_selection();
+        Ok(ids)
+    }
+
+    /// Inserts a two-terminal component in series on an existing wire.
+    pub fn insert_symbol_on_wire(
+        &mut self,
+        kind: SymbolKind,
+        wire_id: WireId,
+        at: GridPos,
+    ) -> Result<SymbolId, ActionError> {
+        let old = self
+            .wire(wire_id)
+            .ok_or(ActionError::MissingObject)?
+            .clone();
+        let horizontal = old.is_horizontal();
+        let span = if horizontal {
+            old.b.x - old.a.x
+        } else {
+            old.b.y - old.a.y
+        };
+        if span < 4 {
+            return Err(ActionError::CannotInsertOnWire);
+        }
+        let definition = self
+            .registry
+            .get(&kind)
+            .ok_or(ActionError::UnknownSymbol)?
+            .clone();
+        if definition.pins.len() != 2 {
+            return Err(ActionError::CannotInsertOnWire);
+        }
+        let center = if horizontal {
+            GridPos::new(at.x.clamp(old.a.x + 2, old.b.x - 2), old.a.y)
+        } else {
+            GridPos::new(old.a.x, at.y.clamp(old.a.y + 2, old.b.y - 2))
+        };
+        let orientation = if horizontal {
+            Orientation::R0
+        } else {
+            Orientation::R90
+        };
+        let label = self.next_label(&kind)?;
+        let mut allocator = self.schematic.clone();
+        let symbol_id = SymbolId(
+            allocator
+                .allocate_id()
+                .map_err(|_| ActionError::IdSpaceExhausted)?,
+        );
+        let symbol = Symbol::from_def(symbol_id, &definition, center, label, orientation, false);
+        let mut pin_positions = Vec::with_capacity(2);
+        for pin in &definition.pins {
+            let position = symbol
+                .pin_position_of(pin)
+                .ok_or(ActionError::CannotInsertOnWire)?;
+            let on_wire = if horizontal {
+                position.y == old.a.y && position.x >= old.a.x && position.x <= old.b.x
+            } else {
+                position.x == old.a.x && position.y >= old.a.y && position.y <= old.b.y
+            };
+            if !on_wire {
+                return Err(ActionError::CannotInsertOnWire);
+            }
+            pin_positions.push(position);
+        }
+        pin_positions.sort_by_key(|position| (position.x, position.y));
+        let (low, high) = (pin_positions[0], pin_positions[1]);
+        let gap_hits = self
+            .schematic
+            .labels()
+            .any(|label| strictly_between(label.at, low, high))
+            || self
+                .schematic
+                .junctions()
+                .any(|junction| strictly_between(junction.at, low, high));
+        if gap_hits {
+            return Err(ActionError::CannotInsertOnWire);
+        }
+
+        let mut commands = vec![
+            Command::RemoveWire(old.clone()),
+            Command::AddSymbol(symbol.clone()),
+        ];
+        for (start, end) in [(old.a, low), (high, old.b)] {
+            if start == end {
+                continue;
+            }
+            let id = WireId(
+                allocator
+                    .allocate_id()
+                    .map_err(|_| ActionError::IdSpaceExhausted)?,
+            );
+            commands.push(Command::AddWire(Wire::new(id, start, end)?));
+        }
+        self.execute(single_or_composite(commands))?;
+        self.select_only(Some(ObjectRef::Symbol(symbol_id)));
+        Ok(symbol_id)
+    }
+
+    /// Moves one wire segment perpendicularly and adjusts its orthogonal neighbours.
+    pub fn move_wire_segment(
+        &mut self,
+        wire_id: WireId,
+        delta: GridPos,
+    ) -> Result<(), ActionError> {
+        let old = self
+            .wire(wire_id)
+            .ok_or(ActionError::MissingObject)?
+            .clone();
+        let horizontal = old.is_horizontal();
+        if (horizontal && (delta.x != 0 || delta.y == 0))
+            || (!horizontal && (delta.y != 0 || delta.x == 0))
+        {
+            return Err(ActionError::CannotMoveWire);
+        }
+        if self
+            .schematic
+            .labels()
+            .any(|label| wire_contains(&old, label.at))
+            || self
+                .schematic
+                .junctions()
+                .any(|junction| wire_contains(&old, junction.at))
+        {
+            return Err(ActionError::CannotMoveWire);
+        }
+        let new_a = old
+            .a
+            .checked_add(delta)
+            .ok_or(ActionError::CannotMoveWire)?;
+        let new_b = old
+            .b
+            .checked_add(delta)
+            .ok_or(ActionError::CannotMoveWire)?;
+        let moved = Wire::new(old.id, new_a, new_b).map_err(|_| ActionError::CannotMoveWire)?;
+        let mut commands = vec![Command::ReplaceWire {
+            old: old.clone(),
+            new: moved,
+        }];
+        for other in self.schematic.wires() {
+            if other.id == old.id {
+                continue;
+            }
+            if other.is_horizontal() == horizontal {
+                if other.a == old.a || other.b == old.a || other.a == old.b || other.b == old.b {
+                    return Err(ActionError::CannotMoveWire);
+                }
+                continue;
+            }
+            let mut new_other = other.clone();
+            let mut changed = false;
+            for endpoint in [other.a, other.b] {
+                let replacement = if endpoint == old.a {
+                    Some(new_a)
+                } else if endpoint == old.b {
+                    Some(new_b)
+                } else {
+                    None
+                };
+                if let Some(replacement) = replacement {
+                    if new_other.a == endpoint {
+                        new_other.a = replacement;
+                    } else if new_other.b == endpoint {
+                        new_other.b = replacement;
+                    }
+                    changed = true;
+                }
+            }
+            if changed {
+                let replacement = Wire::new(new_other.id, new_other.a, new_other.b)
+                    .map_err(|_| ActionError::CannotMoveWire)?;
+                commands.push(Command::ReplaceWire {
+                    old: other.clone(),
+                    new: replacement,
+                });
+            }
+        }
+        self.execute(single_or_composite(commands))
+    }
+
+    /// Aligns selected objects against a common edge or centre.
+    pub fn align_selection(&mut self, alignment: Alignment) -> Result<(), ActionError> {
+        let mut bounds = Vec::new();
+        for object in &self.selected {
+            if let Some((min, max)) = self.object_bounds(*object) {
+                bounds.push((*object, min, max));
+            }
+        }
+        if bounds.len() < 2 {
+            return Err(ActionError::NotEnoughObjects);
+        }
+        let min_x = bounds.iter().map(|(_, min, _)| min.x).min().unwrap_or(0);
+        let max_x = bounds.iter().map(|(_, _, max)| max.x).max().unwrap_or(0);
+        let min_y = bounds.iter().map(|(_, min, _)| min.y).min().unwrap_or(0);
+        let max_y = bounds.iter().map(|(_, _, max)| max.y).max().unwrap_or(0);
+        let mut commands = Vec::new();
+        for (object, min, max) in bounds {
+            let delta = match alignment {
+                Alignment::Left => GridPos::new(min_x - min.x, 0),
+                Alignment::CenterX => GridPos::new((min_x + max_x) / 2 - (min.x + max.x) / 2, 0),
+                Alignment::Right => GridPos::new(max_x - max.x, 0),
+                Alignment::Top => GridPos::new(0, min_y - min.y),
+                Alignment::CenterY => GridPos::new(0, (min_y + max_y) / 2 - (min.y + max.y) / 2),
+                Alignment::Bottom => GridPos::new(0, max_y - max.y),
+            };
+            if delta != GridPos::default() {
+                commands.push(Command::MoveObjects {
+                    objects: vec![object],
+                    delta,
+                });
+            }
+        }
+        if commands.is_empty() {
+            return Ok(());
+        }
+        self.execute(single_or_composite(commands))
+    }
+
+    /// Distributes selected objects evenly along one axis.
+    pub fn distribute_selection(&mut self, axis: DistributionAxis) -> Result<(), ActionError> {
+        let mut entries = Vec::new();
+        for object in &self.selected {
+            if let Some((min, max)) = self.object_bounds(*object) {
+                let center = match axis {
+                    DistributionAxis::Horizontal => (min.x + max.x) / 2,
+                    DistributionAxis::Vertical => (min.y + max.y) / 2,
+                };
+                entries.push((center, *object));
+            }
+        }
+        if entries.len() < 3 {
+            return Err(ActionError::NotEnoughForDistribution);
+        }
+        entries.sort_by_key(|(center, object)| (*center, *object));
+        let first = entries[0].0;
+        let last = entries[entries.len() - 1].0;
+        let denominator = i64::try_from(entries.len() - 1).unwrap_or(1);
+        let step = (i64::from(last) - i64::from(first)) / denominator;
+        let mut commands = Vec::new();
+        for (index, (center, object)) in entries.iter().enumerate().skip(1).take(entries.len() - 2)
+        {
+            let target =
+                first + i32::try_from(step * i64::try_from(index).unwrap_or(0)).unwrap_or(0);
+            let delta = match axis {
+                DistributionAxis::Horizontal => GridPos::new(target - center, 0),
+                DistributionAxis::Vertical => GridPos::new(0, target - center),
+            };
+            if delta != GridPos::default() {
+                commands.push(Command::MoveObjects {
+                    objects: vec![*object],
+                    delta,
+                });
+            }
+        }
+        if commands.is_empty() {
+            return Ok(());
+        }
+        self.execute(single_or_composite(commands))
+    }
+
+    /// Returns the bounds of an editable object.
+    pub fn object_bounds(&self, object: ObjectRef) -> Option<(GridPos, GridPos)> {
+        match object {
+            ObjectRef::Symbol(id) => self
+                .symbol(id)
+                .and_then(|symbol| self.symbol_bounds(symbol)),
+            ObjectRef::Wire(id) => self.wire(id).map(|wire| (wire.a, wire.b)),
+            ObjectRef::Junction(id) => self.junction(id).map(|junction| (junction.at, junction.at)),
+            ObjectRef::Label(id) => self.label(id).map(|label| (label.at, label.at)),
+        }
+    }
+
+    /// Returns all objects belonging to the net at a pin, wire, or label.
+    pub fn net_objects_at(&self, point: GridPos) -> Option<BTreeSet<ObjectRef>> {
+        let extraction = self.extraction.as_ref()?;
+        let net = self.net_at_point(extraction, point)?;
+        let mut objects = BTreeSet::new();
+        objects.extend(net.wires.iter().copied().map(ObjectRef::Wire));
+        objects.extend(net.labels.iter().copied().map(ObjectRef::Label));
+        objects.extend(net.pins.iter().map(|pin| ObjectRef::Symbol(pin.symbol)));
+        for junction in self.schematic.junctions() {
+            if net
+                .wires
+                .iter()
+                .filter_map(|id| self.wire(*id))
+                .any(|wire| wire_contains(wire, junction.at))
+            {
+                objects.insert(ObjectRef::Junction(junction.id));
+            }
+        }
+        Some(objects)
+    }
+
+    /// Selects every object of the net at a position.
+    pub fn select_net_at(&mut self, point: GridPos) -> Result<usize, ActionError> {
+        let objects = self.net_objects_at(point).ok_or(ActionError::NoNet)?;
+        self.selected = objects;
+        Ok(self.selected.len())
+    }
+
+    /// Returns the name of the net at a position.
+    pub fn net_name_at(&self, point: GridPos) -> Option<String> {
+        let extraction = self.extraction.as_ref()?;
+        self.net_at_point(extraction, point)
+            .map(|net| net.name.as_str().to_owned())
+    }
+
+    /// Returns all existing net names in deterministic order.
+    pub fn existing_net_names(&self) -> Vec<String> {
+        let mut names = self
+            .extraction
+            .as_ref()
+            .map(|extraction| {
+                extraction
+                    .nets
+                    .iter()
+                    .map(|net| net.name.as_str().to_owned())
+                    .collect::<Vec<_>>()
+            })
+            .unwrap_or_default();
+        names.sort();
+        names.dedup();
+        names
+    }
+
+    fn net_at_point<'a>(
+        &'a self,
+        extraction: &'a Extraction,
+        point: GridPos,
+    ) -> Option<&'a ExtractedNet> {
+        if let Some(key) = self.pin_at(point) {
+            let node = extraction.net_of_pin.get(&key)?;
+            return extraction.nets.iter().find(|net| net.node == *node);
+        }
+        match self.object_at(point) {
+            Some(ObjectRef::Wire(id)) => extraction.nets.iter().find(|net| net.wires.contains(&id)),
+            Some(ObjectRef::Label(id)) => {
+                extraction.nets.iter().find(|net| net.labels.contains(&id))
+            }
+            Some(ObjectRef::Junction(id)) => self.junction(id).and_then(|junction| {
+                extraction.nets.iter().find(|net| {
+                    net.wires
+                        .iter()
+                        .filter_map(|wire| self.wire(*wire))
+                        .any(|wire| wire_contains(wire, junction.at))
+                })
+            }),
+            Some(ObjectRef::Symbol(id)) => extraction
+                .nets
+                .iter()
+                .find(|net| net.pins.iter().any(|pin| pin.symbol == id)),
+            None => None,
+        }
+    }
+
+    /// Returns the pin exactly at a position.
+    pub fn pin_at(&self, point: GridPos) -> Option<PinKey> {
+        self.pin_positions()
+            .into_iter()
+            .find_map(|(key, position)| (position == point).then_some(key))
+    }
+
+    fn symbol_bounds(&self, symbol: &Symbol) -> Option<(GridPos, GridPos)> {
+        let mut min = symbol.at;
+        let mut max = symbol.at;
+        if let Some(definition) = self.registry.get(&symbol.kind) {
+            for pin in &definition.pins {
+                if let Some(position) = symbol.pin_position_of(pin) {
+                    min.x = min.x.min(position.x);
+                    min.y = min.y.min(position.y);
+                    max.x = max.x.max(position.x);
+                    max.y = max.y.max(position.y);
+                }
+            }
+        }
+        Some((min, max))
+    }
 }
 
 impl Default for Document {
@@ -750,6 +1276,18 @@ fn single_or_composite(mut commands: Vec<Command>) -> Command {
         commands.remove(0)
     } else {
         Command::Composite(commands)
+    }
+}
+
+fn wire_contains(wire: &Wire, point: GridPos) -> bool {
+    wire.contains(point)
+}
+
+fn strictly_between(point: GridPos, low: GridPos, high: GridPos) -> bool {
+    if low.y == high.y {
+        point.y == low.y && point.x > low.x && point.x < high.x
+    } else {
+        point.x == low.x && point.y > low.y && point.y < high.y
     }
 }
 
@@ -862,6 +1400,7 @@ pub fn is_numeric_parameter(value: &ParamValue) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use proptest::prelude::*;
 
     fn assert_no_state_change(
         document: &mut Document,
@@ -1036,6 +1575,123 @@ mod tests {
                     "{text} did not round-trip for {key}"
                 );
             }
+        }
+    }
+
+    #[test]
+    fn inserts_a_component_in_series_and_undoes_atomically() {
+        let mut document = Document::new();
+        let wire = document
+            .add_wire(GridPos::new(0, 0), GridPos::new(8, 0))
+            .unwrap()[0];
+        let symbol = document
+            .insert_symbol_on_wire(SymbolKind::Resistor, wire, GridPos::new(4, 0))
+            .unwrap();
+        assert_eq!(document.schematic().wires().count(), 2);
+        assert_eq!(document.symbol(symbol).unwrap().at, GridPos::new(4, 0));
+        document.undo().unwrap();
+        assert_eq!(document.schematic().wires().count(), 1);
+        assert!(document.symbol(symbol).is_none());
+    }
+
+    #[test]
+    fn inserts_a_vertical_component_in_series() {
+        let mut document = Document::new();
+        let wire = document
+            .add_wire(GridPos::new(0, 0), GridPos::new(0, 8))
+            .unwrap()[0];
+        let symbol = document
+            .insert_symbol_on_wire(SymbolKind::Capacitor, wire, GridPos::new(0, 4))
+            .unwrap();
+        assert_eq!(
+            document.symbol(symbol).unwrap().orientation,
+            Orientation::R90
+        );
+        assert_eq!(document.schematic().wires().count(), 2);
+    }
+
+    #[test]
+    fn moves_a_segment_with_its_perpendicular_neighbours() {
+        let mut document = Document::new();
+        let horizontal = document
+            .add_wire(GridPos::new(0, 0), GridPos::new(4, 0))
+            .unwrap()[0];
+        document
+            .add_wire(GridPos::new(4, 0), GridPos::new(4, 4))
+            .unwrap();
+        document
+            .move_wire_segment(horizontal, GridPos::new(0, 2))
+            .unwrap();
+        let moved = document.wire(horizontal).unwrap();
+        assert_eq!(moved.a, GridPos::new(0, 2));
+        assert_eq!(moved.b, GridPos::new(4, 2));
+        let vertical = document
+            .schematic()
+            .wires()
+            .find(|wire| !wire.is_horizontal())
+            .unwrap();
+        assert_eq!(vertical.a, GridPos::new(4, 2));
+        assert_eq!(vertical.b, GridPos::new(4, 4));
+        document.undo().unwrap();
+        assert_eq!(document.wire(horizontal).unwrap().a, GridPos::new(0, 0));
+    }
+
+    #[test]
+    fn aligns_and_distributes_selected_symbols() {
+        let mut document = Document::new();
+        for at in [GridPos::new(0, 0), GridPos::new(10, 3), GridPos::new(20, 1)] {
+            document.add_symbol(SymbolKind::Resistor, at).unwrap();
+        }
+        document.select_all();
+        document.align_selection(Alignment::Top).unwrap();
+        assert!(document
+            .schematic()
+            .symbols()
+            .all(|symbol| symbol.at.y == 0));
+        document
+            .distribute_selection(DistributionAxis::Horizontal)
+            .unwrap();
+        let xs = document
+            .schematic()
+            .symbols()
+            .map(|symbol| symbol.at.x)
+            .collect::<Vec<_>>();
+        assert_eq!(xs, vec![0, 10, 20]);
+    }
+
+    #[test]
+    fn selects_a_whole_net_and_lists_names() {
+        let mut document = Document::demo().unwrap();
+        let at = GridPos::new(-6, -8);
+        assert_eq!(document.net_name_at(at).as_deref(), Some("VIN"));
+        let count = document.select_net_at(at).unwrap();
+        assert!(count > 2);
+        assert!(document
+            .selection()
+            .iter()
+            .any(|object| matches!(object, ObjectRef::Wire(_))));
+        assert!(document.existing_net_names().contains(&"OUT".to_owned()));
+    }
+
+    proptest! {
+        #![proptest_config(ProptestConfig::with_cases(32))]
+
+        #[test]
+        fn series_insertion_and_undo_preserve_invariants(
+            length in 4_i32..40,
+            offset in 0_i32..40,
+        ) {
+            let mut document = Document::new();
+            let wire = document
+                .add_wire(GridPos::new(0, 0), GridPos::new(length, 0))
+                .unwrap()[0];
+            let at = GridPos::new(offset.clamp(0, length), 0);
+            let _ = document.insert_symbol_on_wire(SymbolKind::Resistor, wire, at).unwrap();
+            prop_assert!(document.schematic().wires().count() <= 2);
+            prop_assert!(document.schematic().validate().is_ok());
+            document.undo().unwrap();
+            prop_assert_eq!(document.schematic().wires().count(), 1);
+            prop_assert!(document.schematic().validate().is_ok());
         }
     }
 
