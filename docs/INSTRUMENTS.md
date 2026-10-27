@@ -96,11 +96,12 @@ Le même panneau reste la référence pour le Bode et les exports.
 
 Chaque signal devient une `Trace` de points `[temps_s, valeur_SI]` en ordre
 croissant. En temps réel, la portée affiche une fenêtre glissante de **10 s de
-temps simulé**, indépendante de la vitesse de lecture. Les échantillons
-d’affichage sont décimés à pas fixe (au plus 20 000 points) pour couvrir cette
-fenêtre sans saturer la mémoire ; le tampon complet reste disponible pour le
-spectre et les mesures. Le rendu décime à 4 096 points en conservant les
-extrémités. Les couleurs suivent un huit-uplet fixe.
+temps simulé** par défaut, réglable de 0,5 à 30 s et indépendante de la vitesse de
+lecture. Les échantillons d’affichage sont décimés à pas fixe (1 ms, au plus
+32 000 points) pour couvrir cette fenêtre sans saturer la mémoire ; le tampon
+complet reste disponible pour le spectre et les mesures. Le rendu décime à
+4 096 points en conservant les extrémités. Les couleurs suivent un huit-uplet
+fixe.
 
 Mesures sur les échantillons, sans pondération temporelle supplémentaire :
 

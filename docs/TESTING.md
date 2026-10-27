@@ -43,7 +43,7 @@ Au 27 octobre 2026, `cargo test --workspace` exécute **267 tests** :
 | `sim-core` transitoire | 19 | RC/RL, événements, diode, opamp, énergie, session incrémentale, mise à jour à chaud |
 | `sim-core` AC | 15 | RC/RL/RLC, phase, diode, opamp, balayages, erreurs |
 | `editor-core` | 47 | grille, symboles, schéma, historique, ERC, extraction, JSON, séries E, snap/routage |
-| `circuitsim-app` | 139 | document, projet JSON, vue, navigation, mini-carte, UI, inspecteur, historique, presse-papiers, simulation continue, mise à jour à chaud, calques, palettes, survol, câblage direct, raccourcis, aide générée, contrastes, panneau unifié et portées, fenêtre 10 s et décimation, sondes intégrées, FFT et curseurs A/B, curseurs de réglage, exemples, diviseur, RLC et polarité, préférences persistées et migration, À propos, onboarding, accessibilité, sondes, instruments, worker, FFT, Bode, CSV |
+| `circuitsim-app` | 141 | document, projet JSON, vue, navigation, mini-carte, UI, inspecteur, historique, presse-papiers, simulation continue, mise à jour à chaud, calques, palettes, survol, câblage direct, raccourcis, aide générée, contrastes, panneau unifié et portées, fenêtre réglable 0,5–30 s, 10 s par défaut et décimation, réordonnancement et recentrage, sondes intégrées, FFT et curseurs A/B, curseurs de réglage, exemples, diviseur, RLC et polarité, préférences persistées et migration, À propos, onboarding, accessibilité, sondes, instruments, worker, FFT, Bode, CSV |
 | `worker-protocol` | 11 | trames, version, netlist, erreurs, transports |
 | `worker` | 13 | coalescence, cadence, révisions, DC/transitoire/AC |
 | `editor_invariants` | 2 | proptest undo/redo et extraction |
@@ -64,7 +64,8 @@ mini-carte, dispositions, courant animé, session transitoire incrémentale,
 mise à jour à chaud d'une session, démarrage live, pause/reset/pas, mapping
 tension→couleur, calques et palettes, lecture au survol, câblage direct depuis
 une broche, coupe de fil, raccourcis sans collision, panneau unifié avec portées,
-fenêtre glissante de 10 s et décimation du tampon, sondes intégrées et FFT,
+fenêtre temporelle réglable de 0,5 à 30 s et décimation du tampon, réordonnancement
+par identifiant et recentrage X/Y, sondes intégrées et FFT,
 curseurs A/B, fusion et réordonnancement, curseurs de réglage, exemples originaux
 dont le diviseur et le RLC redessinés ainsi que le RLC parallèle commuté,
 polarité positive des sources, préférences versionnées et

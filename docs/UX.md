@@ -181,10 +181,12 @@ Les raccourcis sont ignorés lorsqu’un champ texte a le focus, à l’exceptio
   Un clic droit sur un composant ou un fil ajoute le signal à la dernière
   portée. Les onglets **Spectre** et **Bode** partagent le même panneau, visible
   par défaut et repliable depuis **Afficher**.
-- La portée affiche une fenêtre glissante de **10 s de temps simulé**,
-  indépendante de la vitesse de lecture. Le tampon d’affichage est décimé à pas
-  fixe pour rester borné ; le tampon complet alimente le spectre. Il peut être
-  mis en pause sans perdre les données.
+- La portée affiche une fenêtre glissante de **10 s de temps simulé** par défaut,
+  réglable de 0,5 à 30 s, indépendante de la vitesse de lecture. Le tampon
+  d’affichage est décimé à pas fixe pour rester borné ; le tampon complet alimente
+  le spectre. Il peut être mis en pause sans perdre les données. **Recentrer**
+  réinitialise le zoom et le déplacement X/Y ; **Monter** et **Descendre**
+  réordonnent les portées.
 - Un circuit invalide affiche l’état `Circuit invalide` et un lien vers le
   diagnostic, sans modale bloquante.
 - Les tensions ne sont plus superposées aux labels du canevas. Un badge indique
