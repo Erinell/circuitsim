@@ -428,7 +428,7 @@ fn two_terminal(kind: SymbolKind, defaults: &[(&str, f64)]) -> SymbolDef {
 }
 
 fn switch_def() -> SymbolDef {
-    let mut defaults = numeric_params(&[("ron", 1e-3), ("roff", 1e9)]);
+    let mut defaults = numeric_params(&[("ron", 1e-3), ("roff", 1e18)]);
     defaults.insert("closed".to_owned(), ParamValue::Bool(false));
     SymbolDef::new(
         SymbolKind::Switch,
