@@ -54,6 +54,9 @@ Une branche avec deux broches identiques est refusée (`DegenerateBranch`).
 
 Le condensateur est ouvert (aucune contribution, aucune inconnue). L'inductance
 est une branche de tension nulle avec inconnue de courant.
+Pour le **point initial transitoire**, chaque condensateur est refermé par une
+très grande conductance (`1e9 S`), ce qui impose une tension initiale nulle et
+une charge déchargée. Le calcul DC classique garde le condensateur ouvert.
 
 ## 3. Assemblage transitoire
 

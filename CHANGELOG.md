@@ -64,6 +64,9 @@ sémantique.
 
 ### Fixed
 
+- Au démarrage et après **Reset**, les condensateurs du transitoire partent à
+  **tension nulle** (charge complètement déchargée) au lieu du point DC à
+  condensateur ouvert. Le calcul DC classique reste inchangé.
 - Le panneau des portées n’affiche plus de barre de défilement superflue ni de
   séparateur au-dessus de la première portée. Ajouter une portée conserve des
   hauteurs identiques pour tous les tracés.
