@@ -58,6 +58,8 @@ sémantique.
 - Le panneau des portées n’affiche plus de barre de défilement superflue ni de
   séparateur au-dessus de la première portée. Ajouter une portée conserve des
   hauteurs identiques pour tous les tracés.
+- Les textes secondaires passent de 9 à 10 px pour une lisibilité légèrement
+  meilleure sans agrandir les contrôles principaux.
 - Le courant animé s’arrête quand l’interrupteur est ouvert, y compris lorsque le
   solveur renvoie un courant de fuite résiduel.
 - Les sources de tension des exemples diviseur, LED, interrupteur et RLC sont
