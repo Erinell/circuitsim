@@ -145,6 +145,11 @@ Les raccourcis sont ignorés lorsqu’un champ texte a le focus, à l’exceptio
 - La barre d’outils compacte affiche les composants favoris puis les composants
   fréquents, avec la lettre de placement en infobulle. La barre d’état rappelle
   l’outil actif.
+- Un clic droit sur un composant propose **Ajouter un curseur**. Le curseur se
+  règle au glisser ou à la molette, affiche la valeur SI et applique la
+  modification à chaud en une seule étape annulable.
+- Le menu **Exemples** propose des circuits originaux : RC, diviseur, LED,
+  interrupteur et RLC.
 - Un clic sur une broche ou un fil met en évidence le net complet. `Alt` + clic
   sélectionne tous ses objets.
 

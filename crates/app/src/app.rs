@@ -303,16 +303,19 @@ impl CircuitApp {
 
     fn load_demo(&mut self) {
         match Document::demo() {
-            Ok(document) => {
-                self.document = document;
-                self.instruments.clear_results();
-                self.canvas.cancel_interaction();
-                self.canvas.request_fit();
-                self.live_autostart = true;
-                self.status.success("Exemple RC chargé.");
-            }
+            Ok(document) => self.load_example(document, "RC"),
             Err(error) => self.status.error(error.user_message()),
         }
+    }
+
+    fn load_example(&mut self, document: Document, label: &str) {
+        self.document = document;
+        self.instruments.clear_results();
+        self.scopes = InlineScopes::with_signals(BTreeSet::new());
+        self.canvas.cancel_interaction();
+        self.canvas.request_fit();
+        self.live_autostart = true;
+        self.status.success(format!("Exemple {label} chargé."));
     }
 
     fn apply_preferences(&mut self, context: &Context) {
@@ -704,6 +707,26 @@ impl CircuitApp {
             {
                 self.show_preferences = true;
             }
+            ui.menu_button("Exemples", |ui| {
+                for (label, builder) in [
+                    (
+                        "RC",
+                        Document::demo as fn() -> Result<Document, crate::document::ActionError>,
+                    ),
+                    ("Diviseur", Document::divider_example),
+                    ("LED", Document::led_example),
+                    ("Interrupteur", Document::switch_example),
+                    ("RLC", Document::rlc_example),
+                ] {
+                    if ui.button(label).clicked() {
+                        match builder() {
+                            Ok(document) => self.load_example(document, label),
+                            Err(error) => self.status.error(error.user_message()),
+                        }
+                        ui.close();
+                    }
+                }
+            });
             if ui
                 .button("Commandes")
                 .on_hover_text("Palette de commandes (Ctrl+K)")
