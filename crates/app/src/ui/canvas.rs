@@ -322,8 +322,9 @@ impl CanvasState {
             self.fit_requested = false;
         }
 
-        if interactive {
-            self.handle_viewport(ui, &response, rect);
+        self.handle_viewport(ui, &response, rect);
+        if !interactive && response.dragged_by(PointerButton::Primary) {
+            self.viewport.pan_by(response.drag_delta());
         }
         let raw_point = ui
             .input(|input| input.pointer.hover_pos())

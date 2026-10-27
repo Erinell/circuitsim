@@ -21,14 +21,15 @@ La distribution web utilise `index.html` et Trunk.
 | `ui/properties.rs`, `ui/erc.rs` | inspecteur, ERC et nets |
 | `ui/instruments.rs` | panneau de simulation et graphiques |
 
-De haut en bas : barre d'outils (document, undo/redo, outils, composants
-fréquents, transformations, alignement, **Cadrer sél.**, **Marche/Arrêt**,
-**Reset**, **Pas**, **Afficher**, **Vue**, **Commandes**, aide), palette
-filtrable à gauche, canevas central avec portées incrustées en bas, inspecteur/ERC
-à droite, panneau d'instruments optionnel en bas (210–560 px), barre d'état.
-`Ctrl+K` ouvre la palette de commandes. Les onglets **Portée**, **Spectre** et
-**Bode** du panneau classique conservent leurs résultats séparément. La
-démonstration présélectionne `V1`, `5 V` et `OUT`.
+De haut en bas : barre d'outils avec menus **Fichier**, **Édition**, **Dessin**,
+**Afficher**, **Options** et **Aide**, puis outils, composants fréquents,
+transformations, alignement, **Cadrer sél.**, **Marche/Arrêt**, **Reset**,
+**Pas**, **Vue**, **Commandes** et aide ; palette filtrable à gauche, canevas
+central avec portées incrustées en bas, inspecteur/ERC à droite, panneau
+d'instruments optionnel en bas (210–560 px), barre d'état. `Ctrl+K` ouvre la
+palette de commandes. Les onglets **Portée**, **Spectre** et **Bode** du panneau
+classique conservent leurs résultats séparément. La démonstration présélectionne
+`V1`, `5 V` et `OUT`.
 
 À l'ouverture d'un schéma valide, la session temps réel démarre seule : le
 circuit est déjà en marche et les instruments affichent le signal sans clic.
@@ -100,6 +101,8 @@ et applique la valeur à chaud en une seule étape annulable.
 - `Ctrl+0` : retour à l'origine et au zoom par défaut.
 - Flèches : déplacer la vue de deux cases ; `Maj` : huit cases.
 - Bouton milieu + glisser : déplacer la vue ; `Home` : ajuster.
+- En lecture seule (fenêtre ou dialogue ouvert), un glisser gauche sur le fond
+  déplace aussi la vue sans modifier le schéma.
 - Mini-carte : clic pour recentrer la vue sur le contenu.
 
 Priorité au clic : label, jonction, symbole, fil. Le survol d'un fil ou d'une
