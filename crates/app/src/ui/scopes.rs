@@ -402,10 +402,10 @@ impl Scope {
         self.show_values(ui, &traces, unit);
         match self.view {
             ScopeView::Time => {
-                self.show_time(ui, &traces, unit, instruments.nominal_step(), plot_height)
+                self.show_time(ui, &traces, unit, instruments.scope_step(), plot_height)
             }
             ScopeView::Spectrum => {
-                self.show_spectrum(ui, &traces, unit, instruments.nominal_step(), plot_height)
+                self.show_spectrum(ui, &traces, unit, instruments.scope_step(), plot_height)
             }
         }
         action

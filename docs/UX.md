@@ -181,8 +181,10 @@ Les raccourcis sont ignorés lorsqu’un champ texte a le focus, à l’exceptio
   Un clic droit sur un composant ou un fil ajoute le signal à la dernière
   portée. Les onglets **Spectre** et **Bode** partagent le même panneau, visible
   par défaut et repliable depuis **Afficher**.
-- La portée réutilise la fenêtre glissante des derniers échantillons. Le tampon
-  peut être mis en pause sans perdre les données ; il est plafonné en mémoire.
+- La portée affiche une fenêtre glissante de **10 s de temps simulé**,
+  indépendante de la vitesse de lecture. Le tampon d’affichage est décimé à pas
+  fixe pour rester borné ; le tampon complet alimente le spectre. Il peut être
+  mis en pause sans perdre les données.
 - Un circuit invalide affiche l’état `Circuit invalide` et un lien vers le
   diagnostic, sans modale bloquante.
 - Les tensions ne sont plus superposées aux labels du canevas. Un badge indique

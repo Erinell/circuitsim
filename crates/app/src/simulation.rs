@@ -11,8 +11,12 @@ use crate::document::Document;
 
 /// Maximum number of integration steps executed during one frame.
 pub const MAX_STEPS_PER_FRAME: usize = 800;
-/// Maximum number of samples retained for the live traces.
+/// Maximum number of samples retained for the spectral analyses.
 pub const MAX_SAMPLES: usize = 100_000;
+/// Sliding time window shown by the scopes, in simulated seconds.
+pub const SCOPE_WINDOW_SECONDS: f64 = 10.0;
+/// Maximum number of decimated samples kept for the scopes.
+const MAX_SCOPE_SAMPLES: usize = 20_000;
 /// Speed multipliers offered by the live controls.
 pub const LIVE_SPEEDS: [f64; 6] = [0.25, 0.5, 1.0, 2.0, 5.0, 10.0];
 
@@ -36,6 +40,9 @@ pub struct LiveSimulation {
     synced_revision: u64,
     sample_revision: u64,
     samples: Vec<TransientSample>,
+    display_samples: Vec<TransientSample>,
+    display_stride: usize,
+    display_counter: usize,
     last_wall: f64,
     speed: f64,
     paused: bool,
@@ -59,12 +66,17 @@ impl LiveSimulation {
         let mut session = TransientSession::new(&setup.netlist, &setup.options)
             .map_err(|error| SimulationError::Transient(error.to_string()))?;
         let samples = session.drain_samples();
+        let display_stride = scope_stride(setup.context.nominal_step);
+        let display_samples = samples.clone();
         Ok(Self {
             session,
             context: setup.context,
             synced_revision: document.revision(),
             sample_revision: document.revision(),
             samples,
+            display_samples,
+            display_stride,
+            display_counter: 0,
             last_wall: now,
             speed: 1.0,
             paused: false,
@@ -96,8 +108,8 @@ impl LiveSimulation {
                 .map_err(|error| SimulationError::Transient(error.to_string()))?;
             steps += 1;
         }
-        self.samples.extend(self.session.drain_samples());
-        self.trim_samples();
+        let drained = self.session.drain_samples();
+        self.ingest(drained);
         let simulated = (self.session.time() - start).max(0.0);
         self.simulated_total += simulated;
         self.wall_total += elapsed;
@@ -124,8 +136,8 @@ impl LiveSimulation {
         self.session
             .step()
             .map_err(|error| SimulationError::Transient(error.to_string()))?;
-        self.samples.extend(self.session.drain_samples());
-        self.trim_samples();
+        let drained = self.session.drain_samples();
+        self.ingest(drained);
         self.sample_revision = self.synced_revision;
         self.ratio = 1.0;
         self.lag = false;
@@ -171,6 +183,18 @@ impl LiveSimulation {
     /// Returns the retained samples in increasing time order.
     pub fn samples(&self) -> &[TransientSample] {
         &self.samples
+    }
+
+    /// Returns the decimated samples used by the scopes over a 10 s window.
+    pub fn display_samples(&self) -> &[TransientSample] {
+        &self.display_samples
+    }
+
+    /// Returns the effective step of the decimated scope traces.
+    pub fn scope_step(&self) -> Option<f64> {
+        self.context
+            .nominal_step
+            .map(|step| step * self.display_stride as f64)
     }
 
     /// Returns the name and revision mapping captured at session start.
@@ -237,6 +261,47 @@ impl LiveSimulation {
             self.samples.drain(0..excess);
         }
     }
+
+    fn ingest(&mut self, drained: Vec<TransientSample>) {
+        for sample in drained {
+            self.display_counter = self.display_counter.wrapping_add(1);
+            if self.display_counter.is_multiple_of(self.display_stride) {
+                self.display_samples.push(sample.clone());
+            }
+            self.samples.push(sample);
+        }
+        self.trim_samples();
+        self.trim_display_samples();
+    }
+
+    fn trim_display_samples(&mut self) {
+        let Some(latest) = self.display_samples.last().map(|sample| sample.time) else {
+            return;
+        };
+        let cutoff = latest - SCOPE_WINDOW_SECONDS;
+        let first = self
+            .display_samples
+            .partition_point(|sample| sample.time < cutoff);
+        if first > 0 {
+            self.display_samples.drain(0..first);
+        }
+        if self.display_samples.len() > MAX_SCOPE_SAMPLES {
+            let excess = self.display_samples.len() - MAX_SCOPE_SAMPLES;
+            self.display_samples.drain(0..excess);
+        }
+    }
+}
+
+fn scope_stride(step: Option<f64>) -> usize {
+    let Some(step) = step.filter(|step| step.is_finite() && *step > 0.0) else {
+        return 1;
+    };
+    let stride = (SCOPE_WINDOW_SECONDS / (step * MAX_SCOPE_SAMPLES as f64) - 1e-9).ceil();
+    if stride.is_finite() && stride >= 1.0 {
+        stride as usize
+    } else {
+        1
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -296,6 +361,48 @@ mod tests {
             session.tick(&document, 0.05).unwrap(),
             TickOutcome::NeedsRestart
         );
+    }
+
+    #[test]
+    fn scope_samples_use_a_fixed_decimation_and_window() {
+        let document = Document::demo().unwrap();
+        let mut session =
+            LiveSimulation::start(&document, &TransientSettings::default(), 0.0).unwrap();
+        assert_eq!(session.display_samples.len(), 1);
+        let step = session.scope_step().unwrap();
+        assert!((step - 5e-4).abs() < 1e-12, "scope step = {step}");
+        for _ in 0..49 {
+            session.step_once(&document).unwrap();
+        }
+        assert_eq!(session.display_samples.len(), 1);
+        session.step_once(&document).unwrap();
+        assert_eq!(session.display_samples.len(), 2);
+    }
+
+    #[test]
+    fn display_samples_are_trimmed_to_ten_seconds() {
+        let document = Document::demo().unwrap();
+        let mut session =
+            LiveSimulation::start(&document, &TransientSettings::default(), 0.0).unwrap();
+        let template = session.samples[0].clone();
+        session.display_samples.clear();
+        for index in 0..=20 {
+            let mut sample = template.clone();
+            sample.time = f64::from(index) * 0.6;
+            session.display_samples.push(sample);
+        }
+        session.trim_display_samples();
+        let first = session.display_samples.first().unwrap().time;
+        assert!(first >= 2.0 - 1e-12, "first kept time = {first}");
+    }
+
+    #[test]
+    fn scope_stride_scales_with_the_integration_step() {
+        assert_eq!(scope_stride(Some(1e-5)), 50);
+        assert_eq!(scope_stride(Some(1e-3)), 1);
+        assert_eq!(scope_stride(Some(1e-6)), 500);
+        assert_eq!(scope_stride(None), 1);
+        assert_eq!(scope_stride(Some(0.0)), 1);
     }
 
     #[test]

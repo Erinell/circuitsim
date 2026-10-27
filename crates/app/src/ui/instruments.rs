@@ -215,6 +215,14 @@ impl InstrumentsState {
             .and_then(|run| run.context.nominal_step)
     }
 
+    /// Returns the effective step of the decimated realtime scope traces.
+    pub fn scope_step(&self) -> Option<f64> {
+        self.realtime
+            .as_ref()
+            .and_then(LiveSimulation::scope_step)
+            .or_else(|| self.nominal_step())
+    }
+
     /// Returns a cache key for the current transient traces.
     pub fn trace_key(&self) -> (u64, Option<f64>) {
         (
@@ -1177,15 +1185,12 @@ impl InstrumentsState {
                 return Ok(Some(Vec::new()));
             }
             let signals = signals.iter().cloned().collect::<Vec<_>>();
-            let samples = if let Some(step) = run.context().nominal_step {
-                let latest = run.last_sample().map_or(0.0, |sample| sample.time);
-                let start = latest - step * 500.0;
-                let first = run.samples().partition_point(|sample| sample.time < start);
-                &run.samples()[first..]
-            } else {
-                run.samples()
-            };
-            return transient_traces_from_samples(samples, run.context(), &signals).map(Some);
+            let samples = run.display_samples();
+            let latest = samples.last().map_or(0.0, |sample| sample.time);
+            let start = latest - crate::simulation::SCOPE_WINDOW_SECONDS;
+            let first = samples.partition_point(|sample| sample.time < start);
+            return transient_traces_from_samples(&samples[first..], run.context(), &signals)
+                .map(Some);
         }
         let Some(run) = &self.transient_run else {
             return Ok(None);
@@ -1197,7 +1202,10 @@ impl InstrumentsState {
             return Ok(Some(Vec::new()));
         }
         let signals = signals.iter().cloned().collect::<Vec<_>>();
-        transient_traces(result, &run.context, &signals).map(Some)
+        let latest = result.samples.last().map_or(0.0, |sample| sample.time);
+        let start = latest - crate::simulation::SCOPE_WINDOW_SECONDS;
+        let first = result.samples.partition_point(|sample| sample.time < start);
+        transient_traces_from_samples(&result.samples[first..], &run.context, &signals).map(Some)
     }
 
     fn spectrum_data(&self) -> Result<Option<(Trace, Spectrum)>, SimulationError> {
