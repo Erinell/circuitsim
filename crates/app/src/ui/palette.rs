@@ -6,7 +6,8 @@ use editor_core::{GridPos, Orientation, Symbol, SymbolId, SymbolKind, SymbolRegi
 use eframe::egui::{self, Align2, Color32, FontId, Pos2, Sense, Ui, Vec2};
 
 use crate::ui::canvas::CanvasState;
-use crate::ui::glyph::{paint_symbol, GlyphColors};
+use crate::ui::glyph::{paint_symbol, GlyphColors, SymbolText};
+use crate::ui::theme::ResistorStyle;
 use crate::ui::{Tool, ACCENT, HOVER, LABEL, MUTED, PIN, SYMBOL};
 
 pub(crate) const BUILTINS: [(SymbolKind, &str, &str); 14] = [
@@ -302,8 +303,9 @@ fn symbol_button(
                 pin: PIN,
                 label: LABEL,
                 value: MUTED,
+                resistor: ResistorStyle::default(),
             },
-            false,
+            SymbolText::NONE,
         );
     }
     painter.text(

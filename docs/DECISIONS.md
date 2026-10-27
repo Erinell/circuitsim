@@ -76,15 +76,22 @@ documents spécialisés.
     la réduction des animations utilisent les styles egui et `set_zoom_factor`.
     Les préférences restent session-locales pour éviter d’activer la persistance
     d’eframe et ses dépendances ; `Tab`/`Maj+Tab` restent la navigation clavier
-    native d’egui. Voir [UI.md](UI.md).
+    native d’egui. Le thème **Clair** et les palettes de tension sont des jetons
+    internes au canevas, sans nouvelle bibliothèque. Voir [UI.md](UI.md).
+15. **Lisibilité par calques indépendants.** La tension, le courant, la
+    puissance, les valeurs, les références et les labels sont des couches
+    désactivables. La couleur de tension est normalisée sur la valeur absolue
+    maximale du circuit, avec une palette daltonienne par défaut et une variante
+    haute visibilité. L’erreur ERC et la sélection restent prioritaires. Aucun
+    texte n’est l’unique porteur d’une information. Voir [UI.md](UI.md).
 
 ## Tests et périmètre
 
-15. **Composants personnalisés représentés, pas simulés.** Le registre,
+16. **Composants personnalisés représentés, pas simulés.** Le registre,
     l'extraction, le JSON et la netlist acceptent `Custom`; les solveurs le
     refusent avec `MnaError::UnsupportedComponent` jusqu'à l'ajout d'un modèle
     dans `sim-core`. Voir [COMPONENTS.md](COMPONENTS.md).
-16. **Tests natifs, benchmarks et CI.** Les tests ne demandent ni navigateur ni
+17. **Tests natifs, benchmarks et CI.** Les tests ne demandent ni navigateur ni
     ngspice ; les propriétés proptest affichent leur graine. La CI vérifie
     format, clippy, tests, WASM, benchmarks rapides, exemples et builds
     natif/web. Les budgets Criterion sont des seuils de revue, non bloquants sur

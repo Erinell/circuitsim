@@ -16,6 +16,7 @@ use crate::ui::history;
 use crate::ui::instruments::InstrumentsState;
 use crate::ui::palette::PaletteState;
 use crate::ui::properties::{InspectorState, SymbolDialog};
+use crate::ui::theme::CanvasTheme;
 use crate::ui::{self, Status, Tool};
 
 /// Root application state.
@@ -63,15 +64,18 @@ enum ThemeMode {
     Dark,
     /// Maximum contrast for low-vision use.
     HighContrast,
+    /// Light background for daylight use.
+    Light,
 }
 
 impl ThemeMode {
-    const ALL: [Self; 2] = [Self::Dark, Self::HighContrast];
+    const ALL: [Self; 3] = [Self::Dark, Self::HighContrast, Self::Light];
 
     const fn label(self) -> &'static str {
         match self {
             Self::Dark => "Sombre",
             Self::HighContrast => "Contraste élevé",
+            Self::Light => "Clair",
         }
     }
 }
@@ -523,6 +527,73 @@ impl CircuitApp {
             if self.instruments.is_busy() {
                 ui.spinner();
             }
+            ui.menu_button("Afficher", |ui| {
+                let settings = self.canvas.settings_mut();
+                ui.label(RichText::new("Calques").strong());
+                ui.checkbox(&mut settings.layers.voltage, "Tension des fils");
+                ui.checkbox(&mut settings.layers.current, "Courant animé");
+                ui.checkbox(&mut settings.layers.power, "Puissance");
+                ui.checkbox(&mut settings.layers.values, "Valeurs");
+                ui.checkbox(&mut settings.layers.references, "Références");
+                ui.checkbox(&mut settings.layers.net_labels, "Labels de nets");
+                ui.separator();
+                ui.horizontal(|ui| {
+                    ui.label("Palette tension");
+                    egui::ComboBox::from_id_salt("voltage_palette")
+                        .selected_text(settings.voltage_palette.label())
+                        .show_ui(ui, |ui| {
+                            for palette in [
+                                crate::ui::theme::VoltagePalette::Colorblind,
+                                crate::ui::theme::VoltagePalette::HighVisibility,
+                            ] {
+                                ui.selectable_value(
+                                    &mut settings.voltage_palette,
+                                    palette,
+                                    palette.label(),
+                                );
+                            }
+                        });
+                });
+                ui.horizontal(|ui| {
+                    ui.label("Courant");
+                    egui::ComboBox::from_id_salt("current_direction")
+                        .selected_text(settings.current_direction.label())
+                        .show_ui(ui, |ui| {
+                            for direction in [
+                                crate::ui::theme::CurrentDirection::Conventional,
+                                crate::ui::theme::CurrentDirection::Electrons,
+                            ] {
+                                ui.selectable_value(
+                                    &mut settings.current_direction,
+                                    direction,
+                                    direction.label(),
+                                );
+                            }
+                        });
+                });
+                ui.horizontal(|ui| {
+                    ui.label("Résistance");
+                    egui::ComboBox::from_id_salt("resistor_style")
+                        .selected_text(settings.resistor_style.label())
+                        .show_ui(ui, |ui| {
+                            for style in [
+                                crate::ui::theme::ResistorStyle::European,
+                                crate::ui::theme::ResistorStyle::American,
+                            ] {
+                                ui.selectable_value(
+                                    &mut settings.resistor_style,
+                                    style,
+                                    style.label(),
+                                );
+                            }
+                        });
+                });
+                ui.checkbox(&mut settings.small_grid, "Petite grille");
+                ui.add(
+                    egui::Slider::new(&mut settings.value_scale, 0.7..=1.5)
+                        .text("Taille des valeurs"),
+                );
+            });
             ui.menu_button("Vue", |ui| {
                 ui.checkbox(&mut self.show_palette, "Palette");
                 ui.checkbox(&mut self.show_inspector, "Inspecteur");
@@ -709,6 +780,11 @@ impl CircuitApp {
             .set_animation_speed(self.instruments.animation_speed());
         self.canvas
             .set_power_brightness(self.instruments.power_brightness());
+        self.canvas.set_theme(match self.preferences.theme {
+            ThemeMode::Dark => CanvasTheme::Dark,
+            ThemeMode::HighContrast => CanvasTheme::HighContrast,
+            ThemeMode::Light => CanvasTheme::Light,
+        });
         ui::canvas::CanvasState::show(
             &mut self.canvas,
             ui,
@@ -1498,6 +1574,7 @@ fn apply_style(context: &Context, preferences: DisplayPreferences) {
     let visuals = match preferences.theme {
         ThemeMode::Dark => dark_visuals(),
         ThemeMode::HighContrast => high_contrast_visuals(),
+        ThemeMode::Light => light_visuals(),
     };
     context.set_visuals(visuals);
     context.all_styles_mut(|style| {
@@ -1538,6 +1615,19 @@ fn high_contrast_visuals() -> egui::Visuals {
     visuals.widgets.inactive.fg_stroke = egui::Stroke::new(1.2, Color32::WHITE);
     visuals.widgets.hovered.fg_stroke = egui::Stroke::new(1.5, Color32::WHITE);
     visuals.widgets.active.fg_stroke = egui::Stroke::new(1.5, Color32::WHITE);
+    visuals
+}
+
+fn light_visuals() -> egui::Visuals {
+    let mut visuals = egui::Visuals::light();
+    visuals.panel_fill = Color32::from_rgb(248, 249, 251);
+    visuals.window_fill = Color32::WHITE;
+    visuals.extreme_bg_color = Color32::from_rgb(238, 241, 246);
+    visuals.faint_bg_color = Color32::from_rgb(232, 236, 242);
+    visuals.selection.bg_fill = Color32::from_rgb(188, 214, 244);
+    visuals.selection.stroke = egui::Stroke::new(1.0, Color32::from_rgb(28, 86, 156));
+    visuals.hyperlink_color = Color32::from_rgb(0, 110, 130);
+    visuals.window_stroke = egui::Stroke::new(1.0, Color32::from_rgb(196, 204, 216));
     visuals
 }
 
@@ -1602,6 +1692,8 @@ mod tests {
         assert!(!preferences.reduce_motion);
         assert!(UI_SCALES.windows(2).all(|pair| pair[0] < pair[1]));
         assert_eq!(ThemeMode::HighContrast.label(), "Contraste élevé");
+        assert_eq!(ThemeMode::Light.label(), "Clair");
+        assert_eq!(ThemeMode::ALL.len(), 3);
     }
 
     #[test]

@@ -7,6 +7,7 @@ use eframe::egui::{Align2, Color32, FontId, Painter, Pos2, Stroke, Vec2};
 use sim_core::netlist::ParamValue;
 
 use crate::document::{format_parameter, parameter_unit};
+use crate::ui::theme::ResistorStyle;
 
 /// Colors used to paint one symbol glyph.
 #[derive(Clone, Copy, Debug)]
@@ -19,6 +20,31 @@ pub struct GlyphColors {
     pub label: Color32,
     /// Parameter value color.
     pub value: Color32,
+    /// Resistor body style.
+    pub resistor: ResistorStyle,
+}
+
+/// Text layers painted beside a symbol.
+#[derive(Clone, Copy, Debug)]
+pub struct SymbolText {
+    /// Draw the reference label.
+    pub labels: bool,
+    /// Draw the engineering value.
+    pub values: bool,
+    /// Multiplier applied to the value font.
+    pub scale: f32,
+    /// Extra offset added to the value position.
+    pub value_offset: Vec2,
+}
+
+impl SymbolText {
+    /// No text at all.
+    pub const NONE: Self = Self {
+        labels: false,
+        values: false,
+        scale: 1.0,
+        value_offset: Vec2::ZERO,
+    };
 }
 
 /// Paints a placed symbol around a screen-space center.
@@ -29,14 +55,14 @@ pub fn paint_symbol(
     center: Pos2,
     scale: f32,
     colors: GlyphColors,
-    draw_text: bool,
+    text: SymbolText,
 ) {
     if !scale.is_finite() || scale <= 0.0 {
         return;
     }
     let stroke_width = (scale * 0.085).clamp(1.25, 2.2);
     let stroke = Stroke::new(stroke_width, colors.body);
-    paint_body(painter, symbol, center, scale, stroke);
+    paint_body(painter, symbol, center, scale, stroke, colors.resistor);
 
     if let Some(definition) = definition {
         let pin_radius = (scale * 0.11).clamp(1.4, 2.8);
@@ -58,7 +84,7 @@ pub fn paint_symbol(
         );
     }
 
-    if draw_text && !symbol.label.is_empty() {
+    if text.labels && !symbol.label.is_empty() {
         let font = FontId::proportional((scale * 0.72).clamp(9.0, 16.0));
         let (position, anchor) = if symbol.kind.is_ground() {
             (
@@ -74,16 +100,19 @@ pub fn paint_symbol(
         painter.text(position, anchor, &symbol.label, font, colors.label);
     }
 
-    if draw_text && scale >= 13.0 {
+    if text.values && scale >= 13.0 {
         if let Some(value) = symbol_value(symbol) {
-            let font = FontId::proportional((scale * 0.56).clamp(8.0, 12.0));
+            let font = FontId::proportional((scale * 0.56 * text.scale).clamp(8.0, 18.0));
             let (position, anchor) = if symbol.kind.is_ground() {
                 (
-                    center + Vec2::new(scale * 1.35, scale * 1.0),
+                    center + Vec2::new(scale * 1.35, scale * 1.0) + text.value_offset,
                     Align2::LEFT_CENTER,
                 )
             } else {
-                (center + Vec2::new(0.0, scale * 2.35), Align2::CENTER_TOP)
+                (
+                    center + Vec2::new(0.0, scale * 2.35) + text.value_offset,
+                    Align2::CENTER_TOP,
+                )
             };
             painter.text(position, anchor, value, font, colors.value);
         }
@@ -97,22 +126,63 @@ fn egui_rect(center: Pos2, scale: f32, half_width: f32, half_height: f32) -> efr
     )
 }
 
-fn paint_body(painter: &Painter, symbol: &Symbol, center: Pos2, scale: f32, stroke: Stroke) {
+fn paint_body(
+    painter: &Painter,
+    symbol: &Symbol,
+    center: Pos2,
+    scale: f32,
+    stroke: Stroke,
+    resistor: ResistorStyle,
+) {
     match &symbol.kind {
-        SymbolKind::Resistor => {
-            let points = [
-                (-2.0, 0.0),
-                (-1.35, 0.0),
-                (-1.05, -0.62),
-                (-0.55, 0.62),
-                (-0.05, -0.62),
-                (0.45, 0.62),
-                (0.95, -0.62),
-                (1.35, 0.0),
-                (2.0, 0.0),
-            ];
-            line_local(painter, symbol, center, scale, &points, stroke);
-        }
+        SymbolKind::Resistor => match resistor {
+            ResistorStyle::European => {
+                line_local(
+                    painter,
+                    symbol,
+                    center,
+                    scale,
+                    &[(-2.0, 0.0), (-1.0, 0.0)],
+                    stroke,
+                );
+                line_local(
+                    painter,
+                    symbol,
+                    center,
+                    scale,
+                    &[
+                        (-1.0, -0.62),
+                        (1.0, -0.62),
+                        (1.0, 0.62),
+                        (-1.0, 0.62),
+                        (-1.0, -0.62),
+                    ],
+                    stroke,
+                );
+                line_local(
+                    painter,
+                    symbol,
+                    center,
+                    scale,
+                    &[(1.0, 0.0), (2.0, 0.0)],
+                    stroke,
+                );
+            }
+            ResistorStyle::American => {
+                let points = [
+                    (-2.0, 0.0),
+                    (-1.35, 0.0),
+                    (-1.05, -0.62),
+                    (-0.55, 0.62),
+                    (-0.05, -0.62),
+                    (0.45, 0.62),
+                    (0.95, -0.62),
+                    (1.35, 0.0),
+                    (2.0, 0.0),
+                ];
+                line_local(painter, symbol, center, scale, &points, stroke);
+            }
+        },
         SymbolKind::Capacitor => {
             line_local(
                 painter,
