@@ -25,7 +25,7 @@ distribution web.
   câblage par glisser, menus contextuels, placement par palette/menu, curseurs de
   réglage, galerie d’exemples, édition par double-clic, panneau unifié
   instruments/portées, préférences persistées, projets JSON, écran À propos,
-  thème clair, sondes V/A/Ω, transitoire temps réel avec pause et vitesse,
+  thème clair, ohmmètre et mesures V/I au survol, transitoire temps réel avec pause et vitesse,
   curseurs A/B, marqueur Bode, mini-carte, dispositions fiables, guide de
   démarrage, contraste élevé et taille réglable, portée, mesures, FFT de Hann,
   Bode, export CSV, échelon de source.

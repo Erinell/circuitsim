@@ -138,12 +138,15 @@ Les raccourcis sont ignorés lorsqu’un champ texte a le focus, à l’exceptio
 - Un double-clic sur un symbole ouvre une fenêtre centrée d’édition de ses
   propriétés, avec les mêmes validations que l’inspecteur.
 - Le survol affiche une bulle avec le type, le nom, les paramètres, les tensions
-  de broches, le courant et la puissance. Aucun clic n’est nécessaire.
+  de broches, l’intensité du net survolé et la puissance. L’intensité est
+  référencée à la masse commune et aucun clic n’est nécessaire. Les composants
+  **Voltmètre** et **Ampèremètre** ne sont plus proposés ; l’**Ohmmètre** reste
+  disponible.
 - En mode Sélection, un glisser démarré sur une broche câble directement avec
   aperçu, accroche et annulation en une action. L’outil Fil `W` reste disponible.
 - Le menu contextuel propose les propriétés, les transformations, la
-  duplication, la suppression, les mesures et, sur un fil, la coupe, une
-  jonction ou un label. Sur le fond, il propose les sous-menus **Ajouter**.
+  duplication, la suppression, la mesure de résistance et, sur un fil, la coupe,
+  une jonction ou un label. Sur le fond, il propose les sous-menus **Ajouter**.
 - Les outils et composants sont dans la palette et dans le menu **Dessin** ; la
   barre supérieure reste réservée aux commandes de document, de simulation et de
   présentation. La barre d’état rappelle l’outil actif.
@@ -192,10 +195,10 @@ Les raccourcis sont ignorés lorsqu’un champ texte a le focus, à l’exceptio
 - Les tensions ne sont plus superposées aux labels du canevas. Un badge indique
   `t = … · à jour/antérieur`, et l’inspecteur reprend les tensions par broche,
   le courant et la puissance.
-- Les sondes **Voltmètre**, **Ampèremètre** et **Ohmmètre** se placent depuis la
-  palette. Leur liste est intégrée aux portées avec la valeur courante,
-  **Graphique** et **Afficher**. Le voltmètre se pose sur un fil ; l’ampèremètre
-  et l’ohmmètre mesurent le composant sous la sonde.
+- Les sondes **Voltmètre** et **Ampèremètre** ne sont plus proposées : le survol
+  affiche directement la tension et l’intensité du fil, référencées à la masse
+  commune. L’**Ohmmètre** reste dans la palette pour mesurer un composant ; sa
+  valeur apparaît dans la section **Sondes** des portées.
 - Le calcul reste dans le fil de l’interface ; le worker dédié et
   `SharedArrayBuffer` restent hors périmètre pour ce lot.
 

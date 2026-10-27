@@ -35,6 +35,11 @@ sémantique.
 - Les boutons **Monter** et **Descendre** réordonnent la portée par son
   identifiant ; ils sont désactivés aux extrémités. **Recentrer** réinitialise le
   zoom et le déplacement X/Y de la portée active.
+- Les composants **Voltmètre** et **Ampèremètre** sont retirés de la palette et
+  des menus de placement ; l’**Ohmmètre** reste disponible. Les anciens symboles
+  restent lisibles dans les projets existants.
+- Le survol d’un fil ou d’une broche affiche l’intensité sous la tension, avec la
+  masse commune comme référence.
 - Les valeurs et références sont placées au plus près du corps du symbole, avec
   un décalage adapté à son orientation.
 - La zone de clic, le cadre de sélection et la marquise épousent le corps des

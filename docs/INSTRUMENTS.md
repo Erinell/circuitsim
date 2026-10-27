@@ -80,8 +80,10 @@ en dérive les tensions de broches, le courant et la puissance. Le canevas
 normalise ces tensions sur leur valeur absolue maximale pour colorer les fils,
 puis ajoute les halos de puissance des composants non résistifs. Un interrupteur
 ouvert interrompt l’animation de courant. Les sondes placées sur le schéma
-alimentent la section **Sondes** des portées et les bulles du canevas : voltmètre
-sur un fil, ampèremètre et ohmmètre sur un composant.
+alimentent la section **Sondes** des portées et les bulles du canevas. Le survol
+d’un fil ou d’une broche affiche sa tension puis l’intensité du net, référencée à
+la masse commune. Seul l’ohmmètre reste proposé dans la palette ; les anciens
+voltmètres et ampèremètres restent lisibles dans les projets existants.
 
 ## 4. Portée et mesures
 
