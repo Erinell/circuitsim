@@ -16,6 +16,7 @@ use crate::ui::history;
 use crate::ui::instruments::InstrumentsState;
 use crate::ui::palette::PaletteState;
 use crate::ui::properties::{InspectorState, SymbolDialog};
+use crate::ui::scopes::InlineScopes;
 use crate::ui::shortcuts::Keymap;
 use crate::ui::theme::CanvasTheme;
 use crate::ui::{self, Status, Tool};
@@ -30,6 +31,7 @@ pub struct CircuitApp {
     canvas: CanvasState,
     inspector: InspectorState,
     instruments: InstrumentsState,
+    scopes: InlineScopes,
     palette: CommandPalette,
     symbol_dialog: Option<SymbolDialog>,
     status: Status,
@@ -192,6 +194,8 @@ impl CircuitApp {
                 )),
             ),
         };
+        let instruments = InstrumentsState::new();
+        let scopes = InlineScopes::with_signals(instruments.selected_signals());
         Self {
             document,
             tool: Tool::Select,
@@ -200,7 +204,8 @@ impl CircuitApp {
             palette_state: PaletteState::default(),
             canvas: CanvasState::new(),
             inspector: InspectorState::default(),
-            instruments: InstrumentsState::new(),
+            instruments,
+            scopes,
             palette: CommandPalette::default(),
             symbol_dialog: None,
             status,
@@ -212,7 +217,7 @@ impl CircuitApp {
             show_preferences: false,
             show_palette: true,
             show_inspector: true,
-            show_instruments: true,
+            show_instruments: false,
             live_autostart: true,
         }
     }
@@ -615,7 +620,11 @@ impl CircuitApp {
             ui.menu_button("Vue", |ui| {
                 ui.checkbox(&mut self.show_palette, "Palette");
                 ui.checkbox(&mut self.show_inspector, "Inspecteur");
-                ui.checkbox(&mut self.show_instruments, "Instruments");
+                ui.checkbox(&mut self.show_instruments, "Panneau d'instruments");
+                let mut scopes = self.scopes.visible();
+                if ui.checkbox(&mut scopes, "Portées incrustées").changed() {
+                    self.scopes.set_visible(scopes);
+                }
                 let mut minimap = self.canvas.minimap_visible();
                 if ui.checkbox(&mut minimap, "Mini-carte").changed() {
                     self.canvas.set_minimap_visible(minimap);
@@ -804,6 +813,26 @@ impl CircuitApp {
             });
     }
 
+    fn central(&mut self, ui: &mut Ui) {
+        if self.scopes.visible() {
+            let CircuitApp {
+                scopes,
+                instruments,
+                document,
+                status,
+                ..
+            } = self;
+            egui::Panel::bottom("inline_scopes_panel")
+                .resizable(true)
+                .default_size(220.0)
+                .size_range(120.0..=560.0)
+                .show(ui, |ui| {
+                    scopes.show(ui, instruments, document, status);
+                });
+        }
+        self.canvas(ui);
+    }
+
     fn canvas(&mut self, ui: &mut Ui) {
         let interactive = !self.canvas.has_dialog()
             && !self.show_help
@@ -850,6 +879,10 @@ impl CircuitApp {
         );
         if let Some(id) = self.canvas.take_property_request() {
             self.symbol_dialog = SymbolDialog::new(&self.document, id);
+        }
+        if let Some(signal) = self.canvas.take_scope_request() {
+            self.scopes.push_signal(signal);
+            self.status.success("Signal ajouté à la portée.");
         }
     }
 
@@ -1621,7 +1654,7 @@ impl eframe::App for CircuitApp {
                 .size_range(280.0..=470.0)
                 .show(ui, |ui| self.inspector(ui));
         }
-        egui::CentralPanel::no_frame().show(ui, |ui| self.canvas(ui));
+        egui::CentralPanel::no_frame().show(ui, |ui| self.central(ui));
 
         self.canvas
             .show_label_dialog(ui.ctx(), &mut self.document, &mut self.status);

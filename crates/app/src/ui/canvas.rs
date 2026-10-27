@@ -9,7 +9,7 @@ use eframe::egui::{
 };
 use sim_core::units::{format_si_precision, Unit};
 
-use crate::analysis::{LiveValues, ProbeReading};
+use crate::analysis::{LiveValues, ProbeReading, SignalCatalog, SignalId};
 use crate::document::{
     format_parameter, parameter_unit, ActionError, ClipboardItem, Document, SelectionChange,
     SelectionMode, WireEnd,
@@ -46,6 +46,7 @@ pub struct CanvasState {
     power_brightness: f32,
     settings: CanvasSettings,
     property_request: Option<SymbolId>,
+    scope_request: Option<SignalId>,
     label_dialog: Option<LabelDialog>,
 }
 
@@ -109,6 +110,7 @@ impl CanvasState {
             power_brightness: 0.6,
             settings: CanvasSettings::default(),
             property_request: None,
+            scope_request: None,
             label_dialog: None,
         }
     }
@@ -258,6 +260,11 @@ impl CanvasState {
     /// Takes one pending double-click property request.
     pub fn take_property_request(&mut self) -> Option<SymbolId> {
         self.property_request.take()
+    }
+
+    /// Takes one pending signal request for an inline scope.
+    pub fn take_scope_request(&mut self) -> Option<SignalId> {
+        self.scope_request.take()
     }
 
     /// Returns true while the label name dialog is open.
@@ -814,6 +821,43 @@ impl CanvasState {
                                 }
                             }
                         });
+                        ui.menu_button("Tracer dans une portée", |ui| {
+                            let Some(symbol) = document.symbol(id) else {
+                                return;
+                            };
+                            let catalog = document
+                                .extraction()
+                                .map(SignalCatalog::from_extraction)
+                                .unwrap_or_default();
+                            let mut signals = Vec::new();
+                            if catalog.currents.contains(&symbol.label) {
+                                signals.push(SignalId::Current(symbol.label.clone()));
+                            }
+                            for (key, position) in document.pin_positions() {
+                                if key.symbol != id {
+                                    continue;
+                                }
+                                let Some(net) = document.net_name_at(position) else {
+                                    continue;
+                                };
+                                if net == "0" {
+                                    continue;
+                                }
+                                let signal = SignalId::Voltage(net);
+                                if !signals.contains(&signal) {
+                                    signals.push(signal);
+                                }
+                            }
+                            if signals.is_empty() {
+                                ui.label("Aucun signal disponible.");
+                            }
+                            for signal in signals {
+                                if ui.button(signal.label()).clicked() {
+                                    self.scope_request = Some(signal);
+                                    ui.close();
+                                }
+                            }
+                        });
                     }
                     ObjectRef::Label(id) => {
                         if ui.button("Renommer").clicked() {
@@ -867,6 +911,12 @@ impl CanvasState {
                                 "Net sélectionné.",
                             );
                             ui.close();
+                        }
+                        if let Some(net) = document.net_name_at(point) {
+                            if net != "0" && ui.button("Tracer dans une portée").clicked() {
+                                self.scope_request = Some(SignalId::Voltage(net));
+                                ui.close();
+                            }
                         }
                     }
                     ObjectRef::Junction(_) => {
