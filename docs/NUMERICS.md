@@ -29,6 +29,8 @@ G[b,a] -= g    G[b,b] += g
 ```
 
 `R = ron` si `closed`, sinon `roff`. Deux broches sur le même nœud ajoutent zéro.
+La valeur ouverte par défaut est `1e18` Ω ; les courants et tensions inférieurs
+au bruit numérique sont affichés à zéro.
 
 ### Source de courant
 

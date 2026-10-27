@@ -48,7 +48,7 @@ avec sa résistance. En AC, `C` devient `jωC` et `L` vaut `R + jωL`.
 | Paramètre | Type | Défaut | Rôle |
 | --- | --- | --- | --- |
 | `ron` | nombre | `1e-3` Ω | résistance fermée |
-| `roff` | nombre | `1e9` Ω | résistance ouverte |
+| `roff` | nombre | `1e18` Ω | résistance ouverte |
 | `closed` | booléen | `false` | état logique |
 
 Le solveur choisit `ron` si `closed`, sinon `roff` ; pas d'hystérésis ni de

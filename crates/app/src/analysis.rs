@@ -26,6 +26,17 @@ pub const MAX_TRANSIENT_STEPS: usize = 100_000;
 pub const MAX_AC_POINTS: usize = 10_000;
 /// Maximum power-of-two spectrum size computed by the interface.
 pub const MAX_FFT_POINTS: usize = 16_384;
+/// Sub-picovolt values are numerical noise rather than useful traces.
+const VOLTAGE_TRACE_FLOOR: f64 = 1e-12;
+/// Sub-femtovolt currents are numerical noise rather than useful traces.
+const CURRENT_TRACE_FLOOR: f64 = 1e-15;
+/// Returns the floor below which a trace value is displayed as zero.
+fn trace_floor(signal: &SignalId) -> f64 {
+    match signal {
+        SignalId::Voltage(_) | SignalId::ComponentVoltage(_) => VOLTAGE_TRACE_FLOOR,
+        SignalId::NetCurrent(_) | SignalId::Current(_) => CURRENT_TRACE_FLOOR,
+    }
+}
 
 /// Voltage or current displayed by an instrument.
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
@@ -580,20 +591,21 @@ impl LiveValues {
 }
 
 fn derive_current(symbol: &Symbol, voltage: f64) -> Option<f64> {
+    if symbol.kind == SymbolKind::Switch
+        && !symbol
+            .params
+            .get("closed")
+            .and_then(ParamValue::as_bool)
+            .unwrap_or(false)
+    {
+        return Some(0.0);
+    }
     let resistance = match symbol.kind {
         SymbolKind::Resistor => symbol
             .params
             .get("resistance")
             .and_then(ParamValue::as_number),
-        SymbolKind::Switch => {
-            let closed = symbol
-                .params
-                .get("closed")
-                .and_then(ParamValue::as_bool)
-                .unwrap_or(false);
-            let key = if closed { "ron" } else { "roff" };
-            symbol.params.get(key).and_then(ParamValue::as_number)
-        }
+        SymbolKind::Switch => symbol.params.get("ron").and_then(ParamValue::as_number),
         _ => None,
     }?;
     (resistance.abs() > f64::MIN_POSITIVE).then_some(voltage / resistance)
@@ -1277,6 +1289,12 @@ pub fn transient_traces_from_samples_with_document(
                 }
             }
         }
+        let floor = trace_floor(signal);
+        for point in &mut points {
+            if point[1].abs() < floor {
+                point[1] = 0.0;
+            }
+        }
         if points.is_empty() {
             return Err(SimulationError::NoData);
         }
@@ -1373,7 +1391,10 @@ fn derived_component_current(
                 .get("closed")
                 .and_then(ParamValue::as_bool)
                 .unwrap_or(false);
-            let resistance = component_number(spec, if closed { "ron" } else { "roff" })?;
+            if !closed {
+                return Some(0.0);
+            }
+            let resistance = component_number(spec, "ron")?;
             (resistance.abs() > f64::MIN_POSITIVE).then_some(voltage / resistance)
         }
         ComponentKind::Capacitor => {
@@ -1473,6 +1494,12 @@ pub fn transient_traces_from_samples(
                         points.push([sample.time, value]);
                     }
                 }
+            }
+        }
+        let floor = trace_floor(signal);
+        for point in &mut points {
+            if point[1].abs() < floor {
+                point[1] = 0.0;
             }
         }
         if points.is_empty() {
@@ -1931,6 +1958,33 @@ mod tests {
         assert!((current - 1e-3).abs() < 1e-12);
         let power = observed.power.unwrap();
         assert!((power - 1e-3).abs() < 1e-12);
+    }
+
+    #[test]
+    fn open_switch_current_is_reported_as_zero() {
+        let document = Document::switch_example().unwrap();
+        let switch = document
+            .schematic()
+            .symbols()
+            .find(|symbol| symbol.kind == SymbolKind::Switch)
+            .unwrap();
+        let definition = document.registry().get(&switch.kind).unwrap();
+        let a = switch
+            .pin_position_of(&definition.pins[0])
+            .and_then(|at| document.net_name_at(at))
+            .unwrap();
+        let b = switch
+            .pin_position_of(&definition.pins[1])
+            .and_then(|at| document.net_name_at(at))
+            .unwrap();
+        let live = LiveValues {
+            document_revision: document.revision(),
+            time: Some(1e-3),
+            node_voltages: [(a, 5.0), (b, 0.0)].into_iter().collect(),
+            branch_currents: BTreeMap::new(),
+        };
+        let observed = live.symbol(&document, switch);
+        assert_eq!(observed.current, Some(0.0));
     }
 
     #[test]

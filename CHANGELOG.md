@@ -69,6 +69,9 @@ sémantique.
 
 ### Fixed
 
+- Un interrupteur **ouvert** ne fait plus apparaître de fuite dans les
+  graphiques : `roff` passe à `1e18 Ω` par défaut, son courant est rapporté
+  exactement à zéro, et les traces sous `1 pV` / `1 fA` sont ramenées à zéro.
 - Au démarrage et après **Reset**, les condensateurs du transitoire partent à
   **tension nulle** (charge complètement déchargée) au lieu du point DC à
   condensateur ouvert. Le calcul DC classique reste inchangé.
