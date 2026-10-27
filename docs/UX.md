@@ -58,6 +58,9 @@ Les raccourcis sont ignorés lorsqu’un champ texte a le focus, à l’exceptio
   jonction ou d’un label.
 - Un glisser sur un symbole, label ou jonction déplace toute la sélection ; un
   glisser sur un fil déplace le segment perpendiculairement.
+- Lors d’un placement au bout d’un fil ou sur une broche, une broche du nouveau
+  composant est alignée sur la cible ; au milieu d’un fil, un composant à deux
+  broches est inséré en série.
 
 ## 4. Presse-papiers et duplication
 
