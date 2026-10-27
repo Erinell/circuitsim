@@ -128,7 +128,12 @@ Le bouton **Accessibilité** ou `Ctrl+Maj+A` ouvre les préférences d’afficha
 - réduction des animations ;
 - rappel de la navigation clavier `Tab`/`Maj+Tab`.
 
-Ces réglages sont appliqués à la session ; ils ne sont pas encore persistés.
+Ces réglages, les calques, les palettes, la grille, les favoris, les vitesses et
+la disposition des panneaux sont enregistrés automatiquement. Sur le Web, le
+stockage est `localStorage` ; en natif, un fichier `preferences.json` versionné
+est écrit dans le dossier de configuration. Un fichier absent, corrompu ou d’une
+version future est ignoré et remplacé par les valeurs par défaut. Le bouton
+**À propos** affiche la version, la licence et les licences tierces.
 
 ## 4. Propriétés et ERC
 
@@ -260,8 +265,8 @@ masquables et redimensionnables, mais il n'y a pas de dockage libre ni de
 disposition persistée. Les portées incrustées couvrent le tracé temporel, la
 FFT, les signaux multiples, les curseurs A/B, le gel, le zoom, la séparation et
 la fusion par bouton ; le mode XY, la fusion par glisser et le Bode incrusté
-restent dans le panneau classique. Les calques, palettes et préférences
-d’affichage sont session-locaux ; leur persistance appartient au lot U6.
+restent dans le panneau classique. Les préférences sont persistées, mais les
+projets et le partage de schéma restent à livrer.
 
 Tests : `cargo test -p circuitsim-app` couvre document, vue, navigation,
 mini-carte, édition, palette, propriétés, historique, presse-papiers, sélection

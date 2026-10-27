@@ -44,6 +44,11 @@ impl PaletteState {
         self.favorites.iter().cloned()
     }
 
+    /// Replaces the favorite set, keeping deterministic order.
+    pub(crate) fn set_favorites(&mut self, favorites: impl IntoIterator<Item = SymbolKind>) {
+        self.favorites = favorites.into_iter().collect();
+    }
+
     fn toggle_favorite(&mut self, kind: &SymbolKind) {
         if !self.favorites.remove(kind) {
             self.favorites.insert(kind.clone());

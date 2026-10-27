@@ -402,6 +402,8 @@ dependencies = [
  "js-sys",
  "proptest",
  "rustfft",
+ "serde",
+ "serde_json",
  "sim-core",
  "thiserror 2.0.21",
  "wasm-bindgen",

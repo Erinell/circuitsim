@@ -1,9 +1,10 @@
 //! Canvas colors, layers, and voltage palettes.
 
 use eframe::egui::Color32;
+use serde::{Deserialize, Serialize};
 
 /// Visual theme applied to the schematic canvas.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub enum CanvasTheme {
     /// Default dark palette.
     #[default]
@@ -124,7 +125,7 @@ pub struct CanvasPalette {
 }
 
 /// Color palette used for net voltages.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub enum VoltagePalette {
     /// Blue, neutral grey, and orange: readable for common color-vision variants.
     #[default]
@@ -144,7 +145,7 @@ impl VoltagePalette {
 }
 
 /// Direction used by the current animation.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub enum CurrentDirection {
     /// Conventional current, from positive to negative.
     #[default]
@@ -164,7 +165,7 @@ impl CurrentDirection {
 }
 
 /// Body style of the resistor symbol.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub enum ResistorStyle {
     /// Rectangular IEC symbol.
     #[default]
@@ -184,7 +185,7 @@ impl ResistorStyle {
 }
 
 /// Independently toggleable schematic layers.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct LayerSettings {
     /// Tension-based wire colors.
     pub voltage: bool,
@@ -214,7 +215,7 @@ impl Default for LayerSettings {
 }
 
 /// Canvas display settings independent from the egui panel theme.
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
 pub struct CanvasSettings {
     /// Background and base colors.
     pub theme: CanvasTheme,
@@ -254,7 +255,7 @@ impl CanvasSettings {
 }
 
 /// Symmetric voltage range used to normalize wire colors.
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
 pub struct VoltageScale {
     max_abs: f64,
     min: f64,
