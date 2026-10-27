@@ -19,7 +19,7 @@ use crate::ui::palette::PaletteState;
 use crate::ui::project::ProjectDialog;
 use crate::ui::properties::{InspectorState, SymbolDialog};
 use crate::ui::scopes::InlineScopes;
-use crate::ui::shortcuts::{Keymap, SHORTCUTS};
+use crate::ui::shortcuts::SHORTCUTS;
 use crate::ui::theme::CanvasTheme;
 use crate::ui::{self, Status, Tool};
 
@@ -27,7 +27,6 @@ use crate::ui::{self, Status, Tool};
 pub struct CircuitApp {
     document: Document,
     tool: Tool,
-    keymap: Keymap,
     filter: String,
     palette_state: PaletteState,
     canvas: CanvasState,
@@ -247,7 +246,6 @@ impl CircuitApp {
         Self {
             document,
             tool: Tool::Select,
-            keymap: Keymap::default(),
             filter: String::new(),
             palette_state,
             canvas,
@@ -1172,25 +1170,13 @@ impl CircuitApp {
             self.canvas.request_fit();
             return;
         }
-        if !command && !shift && !alt {
-            if let Some(kind) = self.keymap.bindings().iter().find_map(|binding| {
-                context
-                    .input(|input| input.key_pressed(binding.key))
-                    .then_some(binding.kind)
-            }) {
-                self.set_tool(Tool::Place(kind.symbol_kind()));
-                self.status.info(format!("Placement : {}.", kind.label()));
-                return;
-            }
-        }
         if context.input(|input| input.key_pressed(Key::W)) {
             self.set_tool(Tool::Wire);
         } else if context.input(|input| input.key_pressed(Key::J)) {
             self.set_tool(Tool::Junction);
         } else if context.input(|input| input.key_pressed(Key::N)) {
             self.set_tool(Tool::Label);
-        } else if shift
-            && context.input(|input| input.key_pressed(Key::R))
+        } else if context.input(|input| input.key_pressed(Key::R))
             && !matches!(self.tool, Tool::Place(_))
         {
             if selection_has_symbols(&self.document) {

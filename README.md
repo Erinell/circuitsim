@@ -21,7 +21,7 @@ distribution web.
   avec valeurs simulées, fils colorés par tension avec palettes daltoniennes,
   calques indépendants, courant animé orienté, erreurs ERC en rouge, halos de
   puissance, LED lumineuses, interrupteurs cliquables, lecture au survol,
-  câblage par glisser, menus contextuels, raccourcis de placement, curseurs de
+  câblage par glisser, menus contextuels, placement par palette/menu, curseurs de
   réglage, galerie d’exemples, édition par double-clic, portées incrustées,
   préférences persistées, projets JSON, écran À propos, thème clair, sondes
   V/A/Ω, transitoire temps réel avec pause et vitesse, curseurs A/B, marqueur Bode,

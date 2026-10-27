@@ -20,7 +20,7 @@
 | `Ctrl+K` | Palette de commandes |
 | `W`, `J`, `N` | Fil, Jonction, Label |
 | `R`, `C`, `L`, `D`, `V`, `G`, `S` | Placer résistance, condensateur, bobine, diode, source, masse, interrupteur |
-| `Maj+R`, `M` | Pivoter ou mettre en miroir la sélection |
+| `R`, `M` | Pivoter ou mettre en miroir la sélection |
 | `R`, `F` | Pivoter ou mettre en miroir l’aperçu de placement |
 | `Maj` + clic | Ajouter ou retirer de la sélection |
 | `Ctrl` + clic | Inverser un objet dans la sélection |
