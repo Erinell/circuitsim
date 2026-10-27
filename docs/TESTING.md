@@ -42,7 +42,7 @@ Au 27 octobre 2026, `cargo test --workspace` exécute **267 tests** :
 | `sim-core` DC | 18 | diviseur, sources, R/C/L, switch, diodes, opamp, erreurs |
 | `sim-core` transitoire | 19 | RC/RL, événements, diode, opamp, énergie, session incrémentale, mise à jour à chaud |
 | `sim-core` AC | 15 | RC/RL/RLC, phase, diode, opamp, balayages, erreurs |
-| `editor-core` | 47 | grille, symboles, schéma, historique, ERC, extraction, JSON, séries E, snap/routage |
+| `editor-core` | 48 | grille, symboles, schéma, historique, ERC, extraction, masses communes, JSON, séries E, snap/routage |
 | `circuitsim-app` | 143 | document, projet JSON, vue, navigation, mini-carte, UI, inspecteur, historique, presse-papiers, simulation continue, mise à jour à chaud, calques, palettes, survol avec tension et intensité de fil, câblage direct, raccourcis, aide générée, contrastes, panneau unifié et portées, fenêtre réglable 0,5–30 s, 10 s par défaut et décimation, réordonnancement et recentrage, sondes intégrées, FFT et curseurs A/B, curseurs de réglage, exemples, diviseur, RLC et polarité, préférences persistées et migration, À propos, onboarding, accessibilité, ohmmètre, instruments, worker, FFT, Bode, CSV |
 | `worker-protocol` | 11 | trames, version, netlist, erreurs, transports |
 | `worker` | 13 | coalescence, cadence, révisions, DC/transitoire/AC |
@@ -50,6 +50,7 @@ Au 27 octobre 2026, `cargo test --workspace` exécute **267 tests** :
 
 Points couverts : relations de segments (contact, T, X avec/sans jonction,
 chevauchement), atomicité des commandes, noms déterministes, broches hors grille,
+fusion de plusieurs symboles de masse en un nœud `0`,
 JSON v1 historique et futur/malformé, accroche et routage orthogonal, sauts
 d’historique nommé, séries E12/E24/E96 ; conventions de signe, composants non
 linéaires, saturation, singularités, non-convergence, événements alignés ou non,

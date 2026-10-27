@@ -40,6 +40,9 @@ sémantique.
   restent lisibles dans les projets existants.
 - Le survol d’un fil ou d’une broche affiche l’intensité sous la tension, avec la
   masse commune comme référence.
+- Plusieurs symboles de masse sur un même canevas sont fusionnés dans le nœud
+  commun `0`, même sans fil partagé. L’ERC signale la fusion en information au
+  lieu de la refuser.
 - Les valeurs et références sont placées au plus près du corps du symbole, avec
   un décalage adapté à son orientation.
 - La zone de clic, le cadre de sélection et la marquise épousent le corps des
