@@ -359,18 +359,21 @@ impl Document {
         let mut document = Self::new();
         let source = document.add_symbol(SymbolKind::VoltageSource, GridPos::new(0, 0))?;
         set_orientation(&mut document, source, Orientation::R180)?;
-        document.add_symbol(SymbolKind::Ground, GridPos::new(2, 4))?;
-        document.add_symbol(SymbolKind::Resistor, GridPos::new(6, 0))?;
-        document.add_symbol(SymbolKind::Inductor, GridPos::new(12, 0))?;
+        document.add_symbol(SymbolKind::Ground, GridPos::new(-2, 8))?;
+        let resistor = document.add_symbol(SymbolKind::Resistor, GridPos::new(6, 0))?;
+        set_number(&mut document, resistor, "resistance", 1_000.0)?;
+        let inductor = document.add_symbol(SymbolKind::Inductor, GridPos::new(12, 0))?;
+        set_number(&mut document, inductor, "inductance", 1e-3)?;
         let capacitor = document.add_symbol(SymbolKind::Capacitor, GridPos::new(14, 4))?;
         set_orientation(&mut document, capacitor, Orientation::R90)?;
-        document.add_wire(GridPos::new(-2, 0), GridPos::new(-2, 4))?;
-        document.add_wire(GridPos::new(-2, 4), GridPos::new(2, 4))?;
+        set_number(&mut document, capacitor, "capacitance", 1e-6)?;
+
+        document.add_wire(GridPos::new(-2, 0), GridPos::new(-2, 8))?;
         document.add_wire(GridPos::new(2, 0), GridPos::new(4, 0))?;
         document.add_wire(GridPos::new(8, 0), GridPos::new(10, 0))?;
         document.add_wire(GridPos::new(14, 0), GridPos::new(14, 2))?;
-        document.add_wire(GridPos::new(14, 6), GridPos::new(14, 4))?;
-        document.add_wire(GridPos::new(14, 4), GridPos::new(2, 4))?;
+        document.add_wire(GridPos::new(14, 6), GridPos::new(14, 8))?;
+        document.add_wire(GridPos::new(-2, 8), GridPos::new(14, 8))?;
         document.add_label(GridPos::new(14, 0), "OUT")?;
         finish_example(document)
     }
@@ -2310,6 +2313,50 @@ mod tests {
             .unwrap();
         let voltage = result.node_voltage(out.id).unwrap();
         assert!((voltage - 2.5).abs() < 1e-9, "OUT = {voltage}");
+    }
+
+    #[test]
+    fn rlc_example_matches_the_requested_layout() {
+        let document = Document::rlc_example().unwrap();
+        let source = document
+            .schematic()
+            .symbols()
+            .find(|symbol| symbol.kind == SymbolKind::VoltageSource)
+            .unwrap();
+        assert_eq!(source.at, GridPos::new(0, 0));
+        assert_eq!(source.orientation, Orientation::R180);
+        for (label, at, orientation) in [
+            ("R1", GridPos::new(6, 0), Orientation::R0),
+            ("L1", GridPos::new(12, 0), Orientation::R0),
+            ("C1", GridPos::new(14, 4), Orientation::R90),
+        ] {
+            let symbol = document
+                .schematic()
+                .symbols()
+                .find(|symbol| symbol.label == label)
+                .unwrap();
+            assert_eq!(symbol.at, at);
+            assert_eq!(symbol.orientation, orientation);
+        }
+        assert!(document
+            .schematic()
+            .labels()
+            .any(|label| label.text == "OUT" && label.at == GridPos::new(14, 0)));
+        assert!(document
+            .schematic()
+            .symbols()
+            .any(|symbol| symbol.kind == SymbolKind::Ground && symbol.at == GridPos::new(-2, 8)));
+        let extraction = document.extraction().unwrap();
+        let result = sim_core::solve_dc(&extraction.netlist, sim_core::DcOptions::default())
+            .expect("RLC has a DC operating point");
+        let out = extraction
+            .netlist
+            .nodes
+            .iter()
+            .find(|node| node.name.as_str() == "OUT")
+            .unwrap();
+        let voltage = result.node_voltage(out.id).unwrap();
+        assert!((voltage - 5.0).abs() < 1e-9, "OUT = {voltage}");
     }
 
     #[test]
