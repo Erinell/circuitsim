@@ -14,9 +14,15 @@ pub const MAX_STEPS_PER_FRAME: usize = 800;
 /// Maximum number of samples retained for the spectral analyses.
 pub const MAX_SAMPLES: usize = 100_000;
 /// Sliding time window shown by the scopes, in simulated seconds.
-pub const SCOPE_WINDOW_SECONDS: f64 = 10.0;
+pub const DEFAULT_SCOPE_WINDOW_SECONDS: f64 = 10.0;
+/// Smallest selectable scope window, in simulated seconds.
+pub const MIN_SCOPE_WINDOW_SECONDS: f64 = 0.5;
+/// Largest selectable scope window, in simulated seconds.
+pub const MAX_SCOPE_WINDOW_SECONDS: f64 = 30.0;
+/// Fixed time resolution of the decimated scope buffer, in seconds.
+const SCOPE_SAMPLE_INTERVAL_SECONDS: f64 = 1e-3;
 /// Maximum number of decimated samples kept for the scopes.
-const MAX_SCOPE_SAMPLES: usize = 20_000;
+const MAX_SCOPE_SAMPLES: usize = 32_000;
 /// Speed multipliers offered by the live controls.
 pub const LIVE_SPEEDS: [f64; 6] = [0.25, 0.5, 1.0, 2.0, 5.0, 10.0];
 
@@ -185,7 +191,7 @@ impl LiveSimulation {
         &self.samples
     }
 
-    /// Returns the decimated samples used by the scopes over a 10 s window.
+    /// Returns the decimated samples kept for the scopes.
     pub fn display_samples(&self) -> &[TransientSample] {
         &self.display_samples
     }
@@ -278,7 +284,7 @@ impl LiveSimulation {
         let Some(latest) = self.display_samples.last().map(|sample| sample.time) else {
             return;
         };
-        let cutoff = latest - SCOPE_WINDOW_SECONDS;
+        let cutoff = latest - MAX_SCOPE_WINDOW_SECONDS;
         let first = self
             .display_samples
             .partition_point(|sample| sample.time < cutoff);
@@ -296,8 +302,8 @@ fn scope_stride(step: Option<f64>) -> usize {
     let Some(step) = step.filter(|step| step.is_finite() && *step > 0.0) else {
         return 1;
     };
-    let stride = (SCOPE_WINDOW_SECONDS / (step * MAX_SCOPE_SAMPLES as f64) - 1e-9).ceil();
-    if stride.is_finite() && stride >= 1.0 {
+    let stride = (SCOPE_SAMPLE_INTERVAL_SECONDS / step).round().max(1.0);
+    if stride.is_finite() {
         stride as usize
     } else {
         1
@@ -370,8 +376,8 @@ mod tests {
             LiveSimulation::start(&document, &TransientSettings::default(), 0.0).unwrap();
         assert_eq!(session.display_samples.len(), 1);
         let step = session.scope_step().unwrap();
-        assert!((step - 5e-4).abs() < 1e-12, "scope step = {step}");
-        for _ in 0..49 {
+        assert!((step - 1e-3).abs() < 1e-12, "scope step = {step}");
+        for _ in 0..99 {
             session.step_once(&document).unwrap();
         }
         assert_eq!(session.display_samples.len(), 1);
@@ -380,27 +386,27 @@ mod tests {
     }
 
     #[test]
-    fn display_samples_are_trimmed_to_ten_seconds() {
+    fn display_samples_are_trimmed_to_thirty_seconds() {
         let document = Document::demo().unwrap();
         let mut session =
             LiveSimulation::start(&document, &TransientSettings::default(), 0.0).unwrap();
         let template = session.samples[0].clone();
         session.display_samples.clear();
-        for index in 0..=20 {
+        for index in 0..=40 {
             let mut sample = template.clone();
-            sample.time = f64::from(index) * 0.6;
+            sample.time = f64::from(index);
             session.display_samples.push(sample);
         }
         session.trim_display_samples();
         let first = session.display_samples.first().unwrap().time;
-        assert!(first >= 2.0 - 1e-12, "first kept time = {first}");
+        assert!(first >= 10.0 - 1e-12, "first kept time = {first}");
     }
 
     #[test]
     fn scope_stride_scales_with_the_integration_step() {
-        assert_eq!(scope_stride(Some(1e-5)), 50);
+        assert_eq!(scope_stride(Some(1e-5)), 100);
         assert_eq!(scope_stride(Some(1e-3)), 1);
-        assert_eq!(scope_stride(Some(1e-6)), 500);
+        assert_eq!(scope_stride(Some(1e-6)), 1_000);
         assert_eq!(scope_stride(None), 1);
         assert_eq!(scope_stride(Some(0.0)), 1);
     }

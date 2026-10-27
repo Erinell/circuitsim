@@ -205,7 +205,9 @@ live.
   Les signaux tracés sont rappelés par un marqueur de couleur sur le fil ou le
   composant correspondant. Le panneau reste accessible par **Afficher →
   Instruments et portées**. La fenêtre temporelle couvre **10 s de temps
-  simulé**, indépendamment de la vitesse de lecture.
+  simulé** par défaut et se règle de 0,5 à 30 s dans les contrôles. Le bouton
+  **Recentrer** réinitialise le zoom et le déplacement X/Y ; **Monter** et
+  **Descendre** réordonnent les portées et sont désactivés aux extrémités.
 - **Contrôles live** : état `En marche`, `Pause`, `Arrêtée` ou `Circuit
   invalide`, rapport temps simulé/réel, badge `trop lent (×0,3)`, vitesse de
   simulation logarithmique, vitesse des points de courant et luminosité de

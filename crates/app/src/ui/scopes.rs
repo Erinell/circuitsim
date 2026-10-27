@@ -33,7 +33,7 @@ enum ScaleMode {
 }
 
 /// One stacked inline scope.
-type TraceCache = ((u64, Option<f64>), Arc<Vec<Trace>>);
+type TraceCache = ((u64, Option<f64>, f64), Arc<Vec<Trace>>);
 
 #[derive(Clone, Debug)]
 struct Scope {
@@ -50,6 +50,7 @@ struct Scope {
     view: ScopeView,
     cursor_a: Option<f64>,
     cursor_b: Option<f64>,
+    reset_view: bool,
 }
 
 impl Scope {
@@ -68,6 +69,7 @@ impl Scope {
             view: ScopeView::Time,
             cursor_a: None,
             cursor_b: None,
+            reset_view: false,
         }
     }
 }
@@ -83,10 +85,19 @@ enum ScopeAction {
 }
 
 /// Persistent collection of inline scopes.
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug)]
 pub struct InlineScopes {
     scopes: Vec<Scope>,
     next_id: usize,
+}
+
+impl Default for InlineScopes {
+    fn default() -> Self {
+        Self {
+            scopes: Vec::new(),
+            next_id: 1,
+        }
+    }
 }
 
 impl InlineScopes {
@@ -179,21 +190,29 @@ impl InlineScopes {
         let available = ui.available_height();
         let count = self.scopes.len().max(1) as f32;
         let plot_height = ((available - 24.0) / count - 78.0).clamp(96.0, 640.0);
+        let scope_count = self.scopes.len();
         egui::ScrollArea::vertical()
             .id_salt("inline_scopes")
             .auto_shrink([false, false])
             .show(ui, |ui| {
                 let mut actions = Vec::new();
                 for (index, scope) in self.scopes.iter_mut().enumerate() {
-                    let action = scope.show(ui, instruments, &catalog, plot_height);
+                    let action = scope.show(
+                        ui,
+                        instruments,
+                        &catalog,
+                        plot_height,
+                        index > 0,
+                        index + 1 < scope_count,
+                    );
                     if action != ScopeAction::None {
-                        actions.push((index, action));
+                        actions.push((scope.id, action));
                     }
                     ui.separator();
                 }
-                actions.sort_by_key(|(index, _)| std::cmp::Reverse(*index));
-                for (index, action) in actions {
-                    self.apply_action(index, action, status);
+                actions.sort_by_key(|(id, _)| std::cmp::Reverse(*id));
+                for (id, action) in actions {
+                    self.apply_action(id, action, status);
                 }
             });
     }
@@ -255,23 +274,26 @@ impl InlineScopes {
         }
     }
 
-    fn apply_action(&mut self, index: usize, action: ScopeAction, status: &mut Status) {
+    fn apply_action(&mut self, id: usize, action: ScopeAction, status: &mut Status) {
+        let Some(index) = self.scopes.iter().position(|scope| scope.id == id) else {
+            return;
+        };
         match action {
             ScopeAction::None => {}
             ScopeAction::Remove => {
-                if index < self.scopes.len() {
-                    self.scopes.remove(index);
-                    status.info("Portée supprimée.");
-                }
+                self.scopes.remove(index);
+                status.info("Portée supprimée.");
             }
             ScopeAction::MoveUp => {
                 if index > 0 {
                     self.scopes.swap(index, index - 1);
+                    status.info("Portée déplacée vers le haut.");
                 }
             }
             ScopeAction::MoveDown => {
                 if index + 1 < self.scopes.len() {
                     self.scopes.swap(index, index + 1);
+                    status.info("Portée déplacée vers le bas.");
                 }
             }
             ScopeAction::MergeNext => {
@@ -295,10 +317,13 @@ impl Scope {
         instruments: &InstrumentsState,
         catalog: &SignalCatalog,
         plot_height: f32,
+        can_move_up: bool,
+        can_move_down: bool,
     ) -> ScopeAction {
         let mut action = ScopeAction::None;
         let live_traces = self.traces(instruments);
         let mut freeze_now = false;
+        let reset_view = std::mem::take(&mut self.reset_view);
         ui.horizontal_wrapped(|ui| {
             ui.label(RichText::new(&self.title).strong());
             ui.menu_button("Signaux", |ui| {
@@ -364,11 +389,26 @@ impl Scope {
                 self.cursor_a = None;
                 self.cursor_b = None;
             }
-            if ui.button("↑").on_hover_text("Monter").clicked() {
+            if ui
+                .add_enabled(can_move_up, egui::Button::new("↑"))
+                .on_hover_text("Monter la portée")
+                .clicked()
+            {
                 action = ScopeAction::MoveUp;
             }
-            if ui.button("↓").on_hover_text("Descendre").clicked() {
+            if ui
+                .add_enabled(can_move_down, egui::Button::new("↓"))
+                .on_hover_text("Descendre la portée")
+                .clicked()
+            {
                 action = ScopeAction::MoveDown;
+            }
+            if ui
+                .button("Recentrer")
+                .on_hover_text("Réinitialise le zoom et le déplacement X/Y")
+                .clicked()
+            {
+                self.reset_view = true;
             }
             if ui
                 .button("Fusionner")
@@ -401,12 +441,22 @@ impl Scope {
         let unit = common_unit(&traces);
         self.show_values(ui, &traces, unit);
         match self.view {
-            ScopeView::Time => {
-                self.show_time(ui, &traces, unit, instruments.scope_step(), plot_height)
-            }
-            ScopeView::Spectrum => {
-                self.show_spectrum(ui, &traces, unit, instruments.scope_step(), plot_height)
-            }
+            ScopeView::Time => self.show_time(
+                ui,
+                &traces,
+                unit,
+                instruments.scope_step(),
+                plot_height,
+                reset_view,
+            ),
+            ScopeView::Spectrum => self.show_spectrum(
+                ui,
+                &traces,
+                unit,
+                instruments.scope_step(),
+                plot_height,
+                reset_view,
+            ),
         }
         action
     }
@@ -510,6 +560,7 @@ impl Scope {
         unit: Option<SignalUnit>,
         nominal_step: Option<f64>,
         plot_height: f32,
+        reset_view: bool,
     ) {
         let _ = nominal_step;
         let mut clicked_time = None;
@@ -517,9 +568,14 @@ impl Scope {
             let each = ((plot_height - 30.0) / traces.len().max(1) as f32).max(80.0);
             for (index, trace) in traces.iter().enumerate() {
                 let plot_id = format!("inline_scope_{}_signal_{index}", self.id);
-                if let Some(time) =
-                    self.plot_one(ui, plot_id, std::slice::from_ref(trace), unit, each)
-                {
+                if let Some(time) = self.plot_one(
+                    ui,
+                    plot_id,
+                    std::slice::from_ref(trace),
+                    unit,
+                    each,
+                    reset_view,
+                ) {
                     clicked_time = Some(time);
                 }
             }
@@ -529,6 +585,7 @@ impl Scope {
             traces,
             unit,
             plot_height,
+            reset_view,
         ) {
             clicked_time = Some(time);
         }
@@ -544,6 +601,7 @@ impl Scope {
         unit: Option<SignalUnit>,
         nominal_step: Option<f64>,
         plot_height: f32,
+        reset_view: bool,
     ) {
         let Some(step) = nominal_step else {
             ui.label(RichText::new("FFT indisponible sans pas nominal.").color(MUTED));
@@ -566,7 +624,7 @@ impl Scope {
             .zip(&spectrum.magnitudes)
             .map(|(frequency, magnitude)| [*frequency, *magnitude])
             .collect::<Vec<_>>();
-        Plot::new(format!("inline_scope_{}_fft", self.id))
+        let mut plot = Plot::new(format!("inline_scope_{}_fft", self.id))
             .height(plot_height)
             .allow_drag(true)
             .allow_zoom(true)
@@ -576,14 +634,17 @@ impl Scope {
                 Some(SignalUnit::Ampere) => "Courant",
                 None => "Valeur",
             })
-            .x_axis_formatter(|mark, _| format_frequency(mark.value))
-            .show(ui, |plot_ui| {
-                plot_ui.line(
-                    Line::new(trace.label(), decimate(&points, MAX_PLOT_POINTS))
-                        .color(signal_color(&trace.signal))
-                        .width(1.8),
-                );
-            });
+            .x_axis_formatter(|mark, _| format_frequency(mark.value));
+        if reset_view {
+            plot = plot.reset();
+        }
+        plot.show(ui, |plot_ui| {
+            plot_ui.line(
+                Line::new(trace.label(), decimate(&points, MAX_PLOT_POINTS))
+                    .color(signal_color(&trace.signal))
+                    .width(1.8),
+            );
+        });
     }
 
     fn show_spectrum_values(&self, ui: &mut Ui, spectrum: &Spectrum, trace: &Trace) {
@@ -615,6 +676,7 @@ impl Scope {
         traces: &[Trace],
         unit: Option<SignalUnit>,
         height: f32,
+        reset_view: bool,
     ) -> Option<f64> {
         let mut clicked = None;
         let y_formatter = move |mark: egui_plot::GridMark, _: &std::ops::RangeInclusive<f64>| {
@@ -658,6 +720,9 @@ impl Scope {
             });
         if self.scale == ScaleMode::Manual {
             plot = plot.include_y(self.manual_min).include_y(self.manual_max);
+        }
+        if reset_view {
+            plot = plot.reset();
         }
         plot.show(ui, |plot_ui| {
             for trace in traces {
@@ -760,14 +825,14 @@ mod tests {
         let mut scopes = InlineScopes::default();
         scopes.push_signals(BTreeSet::from([SignalId::Voltage("A".to_owned())]));
         scopes.push_signals(BTreeSet::from([SignalId::Voltage("B".to_owned())]));
-        scopes.apply_action(1, ScopeAction::MoveUp, &mut Status::new_info(""));
+        scopes.apply_action(2, ScopeAction::MoveUp, &mut Status::new_info(""));
         assert!(scopes.scopes[0]
             .signals
             .contains(&SignalId::Voltage("B".to_owned())));
-        scopes.apply_action(0, ScopeAction::MergeNext, &mut Status::new_info(""));
+        scopes.apply_action(2, ScopeAction::MergeNext, &mut Status::new_info(""));
         assert_eq!(scopes.scopes.len(), 1);
         assert_eq!(scopes.scopes[0].signals.len(), 2);
-        scopes.apply_action(0, ScopeAction::Remove, &mut Status::new_info(""));
+        scopes.apply_action(2, ScopeAction::Remove, &mut Status::new_info(""));
         assert!(scopes.scopes.is_empty());
     }
 
@@ -777,6 +842,17 @@ mod tests {
         scopes.push_signals(BTreeSet::from([SignalId::Voltage("OUT".to_owned())]));
         scopes.push_signals(BTreeSet::from([SignalId::Voltage("OUT".to_owned())]));
         assert_eq!(scopes.active_signals().len(), 1);
+    }
+
+    #[test]
+    fn moving_a_scope_down_uses_its_identity() {
+        let mut scopes = InlineScopes::default();
+        scopes.push_signals(BTreeSet::from([SignalId::Voltage("A".to_owned())]));
+        scopes.push_signals(BTreeSet::from([SignalId::Voltage("B".to_owned())]));
+        scopes.apply_action(1, ScopeAction::MoveDown, &mut Status::new_info(""));
+        assert!(scopes.scopes[0]
+            .signals
+            .contains(&SignalId::Voltage("B".to_owned())));
     }
 
     #[test]

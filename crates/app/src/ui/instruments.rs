@@ -81,6 +81,7 @@ pub struct InstrumentsState {
     error: Option<String>,
     selection_initialized: bool,
     auto_refresh: bool,
+    scope_window: f64,
     scope_signals: BTreeSet<SignalId>,
     realtime: Option<LiveSimulation>,
     realtime_speed: f64,
@@ -114,6 +115,7 @@ impl InstrumentsState {
             error: None,
             selection_initialized: false,
             auto_refresh: true,
+            scope_window: crate::simulation::DEFAULT_SCOPE_WINDOW_SECONDS,
             scope_signals: BTreeSet::new(),
             realtime: None,
             realtime_speed: 1.0,
@@ -223,11 +225,27 @@ impl InstrumentsState {
             .or_else(|| self.nominal_step())
     }
 
+    /// Returns the simulated time window shown by the scopes.
+    pub const fn scope_window(&self) -> f64 {
+        self.scope_window
+    }
+
+    /// Changes the simulated time window shown by the scopes.
+    pub fn set_scope_window(&mut self, seconds: f64) {
+        if seconds.is_finite() {
+            self.scope_window = seconds.clamp(
+                crate::simulation::MIN_SCOPE_WINDOW_SECONDS,
+                crate::simulation::MAX_SCOPE_WINDOW_SECONDS,
+            );
+        }
+    }
+
     /// Returns a cache key for the current transient traces.
-    pub fn trace_key(&self) -> (u64, Option<f64>) {
+    pub fn trace_key(&self) -> (u64, Option<f64>, f64) {
         (
             self.transient_revision().unwrap_or(0),
             self.transient_time(),
+            self.scope_window,
         )
     }
 
@@ -539,6 +557,34 @@ impl InstrumentsState {
                         .auto_shrink([false, false])
                         .show(ui, |ui| {
                             self.live_controls(ui, document, now, status);
+                            ui.separator();
+                            let mut window = self.scope_window;
+                            ui.label(RichText::new("Fenêtre temporelle").strong());
+                            if ui
+                                .add(
+                                    egui::Slider::new(
+                                        &mut window,
+                                        crate::simulation::MIN_SCOPE_WINDOW_SECONDS
+                                            ..=crate::simulation::MAX_SCOPE_WINDOW_SECONDS,
+                                    )
+                                    .logarithmic(true)
+                                    .suffix(" s"),
+                                )
+                                .on_hover_text(
+                                    "Durée de temps simulé affichée par les portées (10 s par défaut)",
+                                )
+                                .changed()
+                            {
+                                self.set_scope_window(window);
+                            }
+                            ui.label(
+                                RichText::new(format!(
+                                    "{:.1} s affichées · 10 s par défaut",
+                                    self.scope_window
+                                ))
+                                .small()
+                                .color(MUTED),
+                            );
                             ui.separator();
                             self.export_controls(ui, status);
                         });
@@ -1187,7 +1233,7 @@ impl InstrumentsState {
             let signals = signals.iter().cloned().collect::<Vec<_>>();
             let samples = run.display_samples();
             let latest = samples.last().map_or(0.0, |sample| sample.time);
-            let start = latest - crate::simulation::SCOPE_WINDOW_SECONDS;
+            let start = latest - self.scope_window;
             let first = samples.partition_point(|sample| sample.time < start);
             return transient_traces_from_samples(&samples[first..], run.context(), &signals)
                 .map(Some);
@@ -1203,7 +1249,7 @@ impl InstrumentsState {
         }
         let signals = signals.iter().cloned().collect::<Vec<_>>();
         let latest = result.samples.last().map_or(0.0, |sample| sample.time);
-        let start = latest - crate::simulation::SCOPE_WINDOW_SECONDS;
+        let start = latest - self.scope_window;
         let first = result.samples.partition_point(|sample| sample.time < start);
         transient_traces_from_samples(&result.samples[first..], &run.context, &signals).map(Some)
     }
@@ -1894,6 +1940,18 @@ mod tests {
     #[test]
     fn automatic_refresh_is_enabled_by_default() {
         assert!(InstrumentsState::new().auto_refresh());
+    }
+
+    #[test]
+    fn scope_window_defaults_to_ten_seconds_and_is_clamped() {
+        let mut state = InstrumentsState::new();
+        assert!((state.scope_window() - 10.0).abs() < f64::EPSILON);
+        state.set_scope_window(2.5);
+        assert!((state.scope_window() - 2.5).abs() < f64::EPSILON);
+        state.set_scope_window(100.0);
+        assert!((state.scope_window() - 30.0).abs() < f64::EPSILON);
+        state.set_scope_window(f64::NAN);
+        assert!((state.scope_window() - 30.0).abs() < f64::EPSILON);
     }
 
     #[test]
