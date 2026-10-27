@@ -216,6 +216,30 @@ fn models_an_inductor_as_a_short_circuit_at_dc() {
 }
 
 #[test]
+fn inductor_series_resistance_limits_the_dc_current() {
+    let mut builder = NetlistBuilder::new();
+    let ground = builder.add_node("0", NodeKind::Ground).unwrap();
+    let input = builder.add_node("in", NodeKind::Electrical).unwrap();
+    builder
+        .add_component(
+            ComponentKind::VoltageSource,
+            "V1",
+            number_param("dc", 5.0),
+            vec![input, ground],
+        )
+        .unwrap();
+    let mut params = number_param("inductance", 1e-3);
+    params.insert("resistance".to_owned(), ParamValue::Number(10.0));
+    let inductor = builder
+        .add_component(ComponentKind::Inductor, "L1", params, vec![input, ground])
+        .unwrap();
+    let netlist = builder.build().unwrap();
+
+    let result = solve_dc(&netlist, DcOptions::default()).unwrap();
+    assert!((result.branch_current(inductor).unwrap() - 0.5).abs() < 1e-12);
+}
+
+#[test]
 fn solves_an_open_and_a_closed_switch() {
     fn switch_circuit(closed: bool) -> (Netlist, NodeId) {
         let mut builder = NetlistBuilder::new();
@@ -356,6 +380,48 @@ fn solves_a_forward_biased_led() {
     let voltage = result.node_voltage(output).unwrap();
     assert!((1.5..2.2).contains(&voltage), "LED voltage was {voltage}");
     assert!(result.iterations > 1);
+}
+
+#[test]
+fn led_vf_and_if_define_the_forward_characteristic() {
+    let mut builder = NetlistBuilder::new();
+    let ground = builder.add_node("0", NodeKind::Ground).unwrap();
+    let input = builder.add_node("in", NodeKind::Electrical).unwrap();
+    let output = builder.add_node("out", NodeKind::Electrical).unwrap();
+    builder
+        .add_component(
+            ComponentKind::VoltageSource,
+            "V1",
+            number_param("dc", 5.0),
+            vec![input, ground],
+        )
+        .unwrap();
+    builder
+        .add_component(
+            ComponentKind::Resistor,
+            "R1",
+            number(150.0),
+            vec![input, output],
+        )
+        .unwrap();
+    let mut params = ParamMap::new();
+    params.insert("vf".to_owned(), ParamValue::Number(2.0));
+    params.insert("if".to_owned(), ParamValue::Number(0.02));
+    params.insert("imax".to_owned(), ParamValue::Number(0.03));
+    params.insert("wavelength".to_owned(), ParamValue::Number(620.0));
+    builder
+        .add_component(ComponentKind::Led, "D1", params, vec![output, ground])
+        .unwrap();
+    let netlist = builder.build().unwrap();
+
+    let result = solve_dc(&netlist, DcOptions::default()).unwrap();
+    let voltage = result.node_voltage(output).unwrap();
+    let current = (5.0 - voltage) / 150.0;
+    assert!((1.9..2.1).contains(&voltage), "LED voltage was {voltage}");
+    assert!(
+        (0.018..0.022).contains(&current),
+        "LED current was {current}"
+    );
 }
 
 #[test]

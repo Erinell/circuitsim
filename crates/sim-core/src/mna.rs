@@ -253,13 +253,17 @@ impl MnaCircuit {
                     }
                     sources[branch.index] += voltage * source_scale;
                 }
-                BranchKind::Inductor { inductance } => {
+                BranchKind::Inductor {
+                    inductance,
+                    resistance,
+                } => {
                     if let Some(a) = branch.a {
                         conductance[(branch.index, a)] += 1.0;
                     }
                     if let Some(b) = branch.b {
                         conductance[(branch.index, b)] -= 1.0;
                     }
+                    conductance[(branch.index, branch.index)] -= resistance;
                     if let AssemblyMode::Transient { previous, step } = mode {
                         let ratio = inductance / step;
                         conductance[(branch.index, branch.index)] -= ratio;
@@ -366,7 +370,10 @@ impl MnaCircuit {
                         .copied()
                         .unwrap_or_else(|| Complex::new(0.0, 0.0));
                 }
-                BranchKind::Inductor { inductance } => {
+                BranchKind::Inductor {
+                    inductance,
+                    resistance,
+                } => {
                     if let Some(a) = branch.a {
                         conductance[(branch.index, a)] += Complex::new(1.0, 0.0);
                     }
@@ -374,7 +381,7 @@ impl MnaCircuit {
                         conductance[(branch.index, b)] -= Complex::new(1.0, 0.0);
                     }
                     conductance[(branch.index, branch.index)] -=
-                        Complex::new(0.0, omega * inductance);
+                        Complex::new(resistance, omega * inductance);
                 }
                 BranchKind::OpAmp {
                     in_plus,
@@ -561,7 +568,20 @@ impl MnaCircuit {
             }
             ComponentKind::Inductor => {
                 let inductance = positive_parameter(component, "inductance")?;
-                self.add_branch(component, a, b, BranchKind::Inductor { inductance })?;
+                let resistance = if component.params.contains_key("resistance") {
+                    non_negative_parameter(component, "resistance")?
+                } else {
+                    0.0
+                };
+                self.add_branch(
+                    component,
+                    a,
+                    b,
+                    BranchKind::Inductor {
+                        inductance,
+                        resistance,
+                    },
+                )?;
             }
             ComponentKind::VoltageSource => {
                 let voltage = number_parameter(component, "dc")?;
@@ -593,13 +613,24 @@ impl MnaCircuit {
                     resistance,
                 });
             }
-            ComponentKind::Diode | ComponentKind::Led => {
+            ComponentKind::Diode => {
                 self.nonlinear.push(DiodeDevice {
                     component: component.id,
                     a,
                     b,
                     saturation_current: positive_parameter(component, "is")?,
                     emission_coefficient: positive_parameter(component, "n")?,
+                    breakdown: None,
+                });
+            }
+            ComponentKind::Led => {
+                let (saturation_current, emission_coefficient) = led_model(component)?;
+                self.nonlinear.push(DiodeDevice {
+                    component: component.id,
+                    a,
+                    b,
+                    saturation_current,
+                    emission_coefficient,
                     breakdown: None,
                 });
             }
@@ -721,6 +752,7 @@ enum BranchKind {
     },
     Inductor {
         inductance: f64,
+        resistance: f64,
     },
     OpAmp {
         in_plus: Option<usize>,
@@ -947,6 +979,74 @@ fn positive_parameter(component: &ComponentSpec, key: &'static str) -> Result<f6
         });
     }
     Ok(value)
+}
+
+fn non_negative_parameter(component: &ComponentSpec, key: &'static str) -> Result<f64, MnaError> {
+    let value = number_parameter(component, key)?;
+    if value < 0.0 {
+        return Err(MnaError::InvalidParameterValue {
+            component: component.id,
+            key,
+            value,
+            requirement: "non-negative",
+        });
+    }
+    Ok(value)
+}
+
+fn optional_number(component: &ComponentSpec, key: &'static str) -> Result<Option<f64>, MnaError> {
+    match component.params.get(key) {
+        Some(ParamValue::Number(value)) if value.is_finite() => Ok(Some(*value)),
+        Some(ParamValue::Number(value)) => Err(MnaError::InvalidParameterValue {
+            component: component.id,
+            key,
+            value: *value,
+            requirement: "finite",
+        }),
+        Some(ParamValue::Bool(_) | ParamValue::Text(_)) => Err(MnaError::InvalidParameterType {
+            component: component.id,
+            key,
+            expected: "a number",
+        }),
+        None => Ok(None),
+    }
+}
+
+fn led_model(component: &ComponentSpec) -> Result<(f64, f64), MnaError> {
+    let emission = optional_number(component, "n")?.unwrap_or(2.0);
+    if emission <= 0.0 {
+        return Err(MnaError::InvalidParameterValue {
+            component: component.id,
+            key: "n",
+            value: emission,
+            requirement: "strictly positive",
+        });
+    }
+    if let Some(saturation) = optional_number(component, "is")? {
+        if saturation > 0.0 {
+            return Ok((saturation, emission));
+        }
+        return Err(MnaError::InvalidParameterValue {
+            component: component.id,
+            key: "is",
+            value: saturation,
+            requirement: "strictly positive",
+        });
+    }
+    let forward_voltage = positive_parameter(component, "vf")?;
+    let forward_current = positive_parameter(component, "if")?;
+    let thermal = emission * THERMAL_VOLTAGE;
+    let saturation = forward_current / ((forward_voltage / thermal).min(MAX_EXPONENT).exp() - 1.0);
+    if saturation.is_finite() && saturation > 0.0 {
+        Ok((saturation, emission))
+    } else {
+        Err(MnaError::InvalidParameterValue {
+            component: component.id,
+            key: "vf",
+            value: forward_voltage,
+            requirement: "a finite positive saturation current",
+        })
+    }
 }
 
 fn bool_parameter(component: &ComponentSpec, key: &'static str) -> Result<bool, MnaError> {

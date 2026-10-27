@@ -2146,6 +2146,9 @@ pub fn parameter_unit(kind: &SymbolKind, key: &str) -> Option<sim_core::units::U
         }
         (SymbolKind::Capacitor, "capacitance") => Some(Unit::Farad),
         (SymbolKind::Inductor, "inductance") => Some(Unit::Henry),
+        (SymbolKind::Inductor, "resistance") => Some(Unit::Ohm),
+        (SymbolKind::Led, "vf") => Some(Unit::Volt),
+        (SymbolKind::Led, "if" | "imax") => Some(Unit::Ampere),
         (SymbolKind::VoltageSource, "dc")
         | (SymbolKind::Zener, "bv")
         | (SymbolKind::OpAmp, "v_sat_pos" | "v_sat_neg") => Some(Unit::Volt),
@@ -2204,6 +2207,10 @@ pub fn parameter_label(key: &str) -> &str {
         "resistance" => "Résistance",
         "capacitance" => "Capacité",
         "inductance" => "Inductance",
+        "vf" => "Tension directe Vf",
+        "if" => "Courant nominal If",
+        "imax" => "Courant maximal",
+        "wavelength" => "Longueur d'onde (nm)",
         "dc" => "Tension ou courant DC",
         "ron" => "Résistance fermée",
         "roff" => "Résistance ouverte",

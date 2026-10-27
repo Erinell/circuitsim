@@ -2090,13 +2090,14 @@ impl CanvasState {
         }
         let center = self.viewport.grid_to_screen(rect, symbol.at);
         let zoom_fade = (self.viewport.scale() / 20.0).clamp(0.3, 1.0);
+        let (red, green, blue) = led_glow_color(symbol);
         painter.circle_filled(
             center,
             (self.viewport.scale() * 1.5).clamp(3.0, 26.0),
             Color32::from_rgba_premultiplied(
-                255,
-                220,
-                60,
+                red,
+                green,
+                blue,
                 (70.0 * brightness * self.power_brightness * zoom_fade) as u8,
             ),
         );
@@ -2104,9 +2105,9 @@ impl CanvasState {
             center,
             (self.viewport.scale() * 0.85).clamp(2.0, 15.0),
             Color32::from_rgba_premultiplied(
-                255,
-                245,
-                170,
+                red.saturating_add(50),
+                green.saturating_add(50),
+                blue.saturating_add(50),
                 (120.0 * brightness * self.power_brightness * zoom_fade) as u8,
             ),
         );
@@ -3239,6 +3240,24 @@ fn format_hover_parameter(
             if *value { "fermé" } else { "ouvert" }.to_owned()
         }
         sim_core::netlist::ParamValue::Text(value) => value.clone(),
+    }
+}
+
+fn led_glow_color(symbol: &Symbol) -> (u8, u8, u8) {
+    let wavelength = symbol
+        .params
+        .get("wavelength")
+        .and_then(sim_core::netlist::ParamValue::as_number)
+        .filter(|value| value.is_finite() && *value > 0.0)
+        .unwrap_or(620.0);
+    match wavelength {
+        value if value < 450.0 => (120, 70, 255),
+        value if value < 495.0 => (60, 120, 255),
+        value if value < 570.0 => (70, 220, 110),
+        value if value < 590.0 => (255, 220, 60),
+        value if value < 620.0 => (255, 160, 50),
+        value if value < 750.0 => (255, 70, 50),
+        _ => (200, 30, 30),
     }
 }
 
