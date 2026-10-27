@@ -150,8 +150,8 @@ Les raccourcis sont ignorés lorsqu’un champ texte a le focus, à l’exceptio
 - Un clic droit sur un composant propose **Ajouter un curseur**. Le curseur se
   règle au glisser ou à la molette, affiche la valeur SI et applique la
   modification à chaud en une seule étape annulable.
-- Le menu **Exemples** propose des circuits originaux : RC, diviseur, LED,
-  interrupteur et RLC.
+- Le menu **Fichier → Exemples** propose des circuits originaux : RC, diviseur,
+  LED, interrupteur, RLC série et RLC parallèle commuté.
 - Un clic sur une broche ou un fil met en évidence le net complet. `Alt` + clic
   sélectionne tous ses objets.
 
@@ -189,9 +189,9 @@ Les raccourcis sont ignorés lorsqu’un champ texte a le focus, à l’exceptio
   `t = … · à jour/antérieur`, et l’inspecteur reprend les tensions par broche,
   le courant et la puissance.
 - Les sondes **Voltmètre**, **Ampèremètre** et **Ohmmètre** se placent depuis la
-  palette. Leur liste apparaît à côté du graphique avec **Afficher** et
-  **Graphique**. Le voltmètre se pose sur un fil ; l’ampèremètre et l’ohmmètre
-  mesurent le composant sous la sonde.
+  palette. Leur liste est intégrée aux portées avec la valeur courante,
+  **Graphique** et **Afficher**. Le voltmètre se pose sur un fil ; l’ampèremètre
+  et l’ohmmètre mesurent le composant sous la sonde.
 - Le calcul reste dans le fil de l’interface ; le worker dédié et
   `SharedArrayBuffer` restent hors périmètre pour ce lot.
 
