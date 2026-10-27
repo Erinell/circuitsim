@@ -18,6 +18,8 @@ sémantique.
 - L’exemple **Diviseur** adopte la disposition demandée : source à droite,
   masse à gauche, `OUT` entre les deux résistances de 1 kΩ ; la sortie reste à
   2,5 V.
+- L’exemple **RLC** adopte la disposition demandée : masse en bas à gauche,
+  `R1`, `L1`, `C1` et `OUT` à droite ; la sortie continue vaut 5 V.
 
 ### Changed
 
