@@ -297,18 +297,23 @@ impl Document {
     /// Creates a resistive divider example.
     pub fn divider_example() -> Result<Self, ActionError> {
         let mut document = Self::new();
-        let source = document.add_symbol(SymbolKind::VoltageSource, GridPos::new(0, 0))?;
+        let source = document.add_symbol(SymbolKind::VoltageSource, GridPos::new(3, -5))?;
         set_orientation(&mut document, source, Orientation::R180)?;
-        document.add_symbol(SymbolKind::Ground, GridPos::new(2, 4))?;
-        document.add_symbol(SymbolKind::Resistor, GridPos::new(6, 0))?;
+        document.add_symbol(SymbolKind::Ground, GridPos::new(-2, 7))?;
+        let upper = document.add_symbol(SymbolKind::Resistor, GridPos::new(8, -2))?;
+        set_orientation(&mut document, upper, Orientation::R90)?;
+        set_number(&mut document, upper, "resistance", 1_000.0)?;
         let lower = document.add_symbol(SymbolKind::Resistor, GridPos::new(8, 4))?;
         set_orientation(&mut document, lower, Orientation::R90)?;
-        document.add_wire(GridPos::new(-2, 0), GridPos::new(-2, 4))?;
-        document.add_wire(GridPos::new(-2, 4), GridPos::new(2, 4))?;
-        document.add_wire(GridPos::new(2, 0), GridPos::new(4, 0))?;
+        set_number(&mut document, lower, "resistance", 1_000.0)?;
+
+        document.add_wire(GridPos::new(-2, -5), GridPos::new(-2, 7))?;
+        document.add_wire(GridPos::new(5, -5), GridPos::new(8, -5))?;
         document.add_wire(GridPos::new(8, 0), GridPos::new(8, 2))?;
-        document.add_wire(GridPos::new(8, 6), GridPos::new(8, 4))?;
-        document.add_wire(GridPos::new(8, 4), GridPos::new(2, 4))?;
+        document.add_wire(GridPos::new(8, 6), GridPos::new(8, 7))?;
+        document.add_wire(GridPos::new(-2, 7), GridPos::new(8, 7))?;
+        document.add_wire(GridPos::new(8, -5), GridPos::new(8, -4))?;
+        document.add_wire(GridPos::new(-2, -5), GridPos::new(1, -5))?;
         document.add_label(GridPos::new(8, 0), "OUT")?;
         finish_example(document)
     }
@@ -2262,6 +2267,49 @@ mod tests {
                 "{name} must drive OUT positive, got {voltage}"
             );
         }
+    }
+
+    #[test]
+    fn divider_example_matches_the_requested_layout() {
+        let document = Document::divider_example().unwrap();
+        let source = document
+            .schematic()
+            .symbols()
+            .find(|symbol| symbol.kind == SymbolKind::VoltageSource)
+            .unwrap();
+        assert_eq!(source.at, GridPos::new(3, -5));
+        assert_eq!(source.orientation, Orientation::R180);
+        for (label, at) in [("R1", GridPos::new(8, -2)), ("R2", GridPos::new(8, 4))] {
+            let symbol = document
+                .schematic()
+                .symbols()
+                .find(|symbol| symbol.label == label)
+                .unwrap();
+            assert_eq!(symbol.at, at);
+            assert_eq!(symbol.orientation, Orientation::R90);
+            assert_eq!(
+                symbol
+                    .params
+                    .get("resistance")
+                    .and_then(sim_core::netlist::ParamValue::as_number),
+                Some(1_000.0)
+            );
+        }
+        assert!(document
+            .schematic()
+            .labels()
+            .any(|label| label.text == "OUT" && label.at == GridPos::new(8, 0)));
+        let extraction = document.extraction().unwrap();
+        let result = sim_core::solve_dc(&extraction.netlist, sim_core::DcOptions::default())
+            .expect("divider has a DC operating point");
+        let out = extraction
+            .netlist
+            .nodes
+            .iter()
+            .find(|node| node.name.as_str() == "OUT")
+            .unwrap();
+        let voltage = result.node_voltage(out.id).unwrap();
+        assert!((voltage - 2.5).abs() < 1e-9, "OUT = {voltage}");
     }
 
     #[test]
