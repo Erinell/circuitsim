@@ -822,33 +822,21 @@ impl CanvasState {
                             );
                             ui.close();
                         }
-                        ui.menu_button("Mesurer ici", |ui| {
-                            let Some(symbol) = document.symbol(id) else {
-                                return;
-                            };
-                            let definition = document.registry().get(&symbol.kind);
-                            let pin_at = definition
-                                .and_then(|definition| definition.pins.first())
-                                .and_then(|pin| symbol.pin_position_of(pin))
-                                .unwrap_or(symbol.at);
-                            let body_at = symbol.at;
-                            for (kind, label, at) in [
-                                (editor_core::SymbolKind::Voltmeter, "Voltmètre", pin_at),
-                                (editor_core::SymbolKind::Ammeter, "Ampèremètre", body_at),
-                                (editor_core::SymbolKind::Ohmmeter, "Ohmmètre", body_at),
-                            ] {
-                                if ui.button(label).clicked() {
-                                    match document.add_symbol(kind, at) {
-                                        Ok(probe) => {
-                                            document.select_only(Some(ObjectRef::Symbol(probe)));
-                                            status.success(format!("{label} ajouté."));
-                                        }
-                                        Err(error) => status.error(error.user_message()),
-                                    }
-                                    ui.close();
+                        if ui
+                            .button("Mesurer la résistance")
+                            .on_hover_text("Ajoute un ohmmètre sur ce composant")
+                            .clicked()
+                        {
+                            let at = document.symbol(id).map_or(point, |symbol| symbol.at);
+                            match document.add_symbol(editor_core::SymbolKind::Ohmmeter, at) {
+                                Ok(probe) => {
+                                    document.select_only(Some(ObjectRef::Symbol(probe)));
+                                    status.success("Ohmmètre ajouté.");
                                 }
+                                Err(error) => status.error(error.user_message()),
                             }
-                        });
+                            ui.close();
+                        }
                         ui.menu_button("Ajouter un curseur", |ui| {
                             let Some(symbol) = document.symbol(id) else {
                                 return;
@@ -1025,11 +1013,7 @@ impl CanvasState {
                         ),
                         (
                             "Mesures",
-                            vec![
-                                (editor_core::SymbolKind::Voltmeter, "Voltmètre"),
-                                (editor_core::SymbolKind::Ammeter, "Ampèremètre"),
-                                (editor_core::SymbolKind::Ohmmeter, "Ohmmètre"),
-                            ],
+                            vec![(editor_core::SymbolKind::Ohmmeter, "Ohmmètre")],
                         ),
                         (
                             "Divers",
@@ -1716,6 +1700,14 @@ impl CanvasState {
                                 format_si_precision(voltage, Unit::Volt, 4)
                             ));
                         }
+                        if let Some(net) = &pin.net {
+                            if let Some(current) = net_current(document, live, net) {
+                                lines.push(format!(
+                                    "I : {}",
+                                    format_si_precision(current, Unit::Ampere, 3)
+                                ));
+                            }
+                        }
                     }
                     if live.document_revision != document.revision() {
                         lines.push("Résultat antérieur".to_owned());
@@ -1764,13 +1756,41 @@ impl CanvasState {
                             }
                         }
                     }
-                    ObjectRef::Wire(_) | ObjectRef::Junction(_) | ObjectRef::Label(_) => {
+                    ObjectRef::Wire(id) => {
                         if let Some(net) = document.net_name_at(point) {
                             title = format!("Net {net}");
                             if let Some(voltage) = live.voltage(&net) {
                                 lines.push(format!(
                                     "V : {}",
                                     format_si_precision(voltage, Unit::Volt, 4)
+                                ));
+                            }
+                            if let Some(current) = wire_current(document, live, id)
+                                .or_else(|| net_current(document, live, &net))
+                            {
+                                lines.push(format!(
+                                    "I : {}",
+                                    format_si_precision(current.abs(), Unit::Ampere, 3)
+                                ));
+                            }
+                            if live.document_revision != document.revision() {
+                                lines.push("Résultat antérieur".to_owned());
+                            }
+                        }
+                    }
+                    ObjectRef::Junction(_) | ObjectRef::Label(_) => {
+                        if let Some(net) = document.net_name_at(point) {
+                            title = format!("Net {net}");
+                            if let Some(voltage) = live.voltage(&net) {
+                                lines.push(format!(
+                                    "V : {}",
+                                    format_si_precision(voltage, Unit::Volt, 4)
+                                ));
+                            }
+                            if let Some(current) = net_current(document, live, &net) {
+                                lines.push(format!(
+                                    "I : {}",
+                                    format_si_precision(current, Unit::Ampere, 3)
                                 ));
                             }
                             if live.document_revision != document.revision() {
@@ -2889,6 +2909,160 @@ fn net_flows(document: &Document, live: &LiveValues) -> BTreeMap<String, NetFlow
     flows
 }
 
+fn net_current(document: &Document, live: &LiveValues, net: &str) -> Option<f64> {
+    if live.is_empty() {
+        return None;
+    }
+    Some(
+        net_flows(document, live)
+            .get(net)
+            .map_or(0.0, |flow| flow.strength),
+    )
+}
+
+fn wire_current(document: &Document, live: &LiveValues, wire_id: WireId) -> Option<f64> {
+    let net = document
+        .nets()
+        .iter()
+        .find(|net| net.wires.contains(&wire_id))?;
+    let mut node_index = BTreeMap::new();
+    let mut node_points = Vec::new();
+    for id in &net.wires {
+        let wire = document.wire(*id)?;
+        for point in [wire.a, wire.b] {
+            let next = node_points.len();
+            node_index.entry(point).or_insert_with(|| {
+                node_points.push(point);
+                next
+            });
+        }
+    }
+    if node_points.is_empty() {
+        return None;
+    }
+    let node_count = node_points.len();
+    let mut adjacency: Vec<Vec<(usize, WireId, bool)>> = vec![Vec::new(); node_count];
+    for id in &net.wires {
+        let wire = document.wire(*id)?;
+        let a = *node_index.get(&wire.a)?;
+        let b = *node_index.get(&wire.b)?;
+        adjacency[a].push((b, *id, true));
+        adjacency[b].push((a, *id, false));
+    }
+    for neighbours in &mut adjacency {
+        neighbours.sort_by_key(|(_, id, _)| u8::from(*id != wire_id));
+    }
+
+    let mut injections = vec![0.0_f64; node_count];
+    let mut unknown = vec![0_usize; node_count];
+    for symbol in document.schematic().symbols() {
+        if symbol.kind.is_measurement() {
+            continue;
+        }
+        let Some(definition) = document.registry().get(&symbol.kind) else {
+            continue;
+        };
+        if definition.pins.len() != 2 {
+            continue;
+        }
+        let observed = live.symbol(document, symbol);
+        let current = observed.current.or_else(|| current_source_dc(symbol));
+        for (index, pin) in definition.pins.iter().enumerate() {
+            let Some(position) = symbol.pin_position_of(pin) else {
+                continue;
+            };
+            let Some(&node) = node_index.get(&position) else {
+                continue;
+            };
+            let Some(pin_net) = observed.pins.get(index).and_then(|pin| pin.net.as_deref()) else {
+                continue;
+            };
+            if pin_net != net.name.as_str() {
+                continue;
+            }
+            match current {
+                Some(current) if current.is_finite() => {
+                    injections[node] += if index == 0 { -current } else { current };
+                }
+                _ => unknown[node] += 1,
+            }
+        }
+    }
+    let residual: f64 = injections.iter().sum();
+    let unknowns: usize = unknown.iter().sum();
+    if unknowns > 0 && residual.is_finite() && residual.abs() > f64::MIN_POSITIVE {
+        let correction = residual / unknowns as f64;
+        for (node, count) in unknown.iter().enumerate() {
+            if *count > 0 {
+                injections[node] -= correction * *count as f64;
+            }
+        }
+    }
+
+    let root = injections
+        .iter()
+        .enumerate()
+        .max_by(|(_, left), (_, right)| {
+            left.abs()
+                .partial_cmp(&right.abs())
+                .unwrap_or(std::cmp::Ordering::Equal)
+        })
+        .map_or(0, |(index, _)| index);
+    let mut parent = vec![usize::MAX; node_count];
+    let mut parent_edge: Vec<Option<(WireId, bool)>> = vec![None; node_count];
+    let mut order = Vec::with_capacity(node_count);
+    let mut stack = vec![root];
+    parent[root] = root;
+    while let Some(node) = stack.pop() {
+        order.push(node);
+        for (next, id, forward) in &adjacency[node] {
+            if parent[*next] == usize::MAX {
+                parent[*next] = node;
+                parent_edge[*next] = Some((*id, *forward));
+                stack.push(*next);
+            }
+        }
+    }
+
+    let wire = document.wire(wire_id)?;
+    let a = *node_index.get(&wire.a)?;
+    let b = *node_index.get(&wire.b)?;
+    let (child, child_is_b) = if parent[b] == a {
+        (b, true)
+    } else if parent[a] == b {
+        (a, false)
+    } else {
+        return None;
+    };
+    let mut subtree = injections;
+    let mut hovered = None;
+    for node in order.into_iter().rev() {
+        if node == root {
+            continue;
+        }
+        let Some((edge, _)) = parent_edge[node] else {
+            continue;
+        };
+        let flow = subtree[node];
+        if node == child && edge == wire_id {
+            hovered = Some(if child_is_b { -flow } else { flow });
+        }
+        subtree[parent[node]] += flow;
+    }
+    hovered
+}
+
+fn current_source_dc(symbol: &Symbol) -> Option<f64> {
+    (symbol.kind == editor_core::SymbolKind::CurrentSource)
+        .then(|| {
+            symbol
+                .params
+                .get("dc")
+                .and_then(sim_core::netlist::ParamValue::as_number)
+        })
+        .flatten()
+}
+
 fn wire_directions(
     document: &Document,
     net: &editor_core::ExtractedNet,
@@ -3468,6 +3642,59 @@ mod tests {
             branch_currents: flowing,
         };
         assert!(!net_flows(&document, &live).is_empty());
+    }
+
+    #[test]
+    fn hover_current_comes_from_the_hovered_net() {
+        let document = Document::demo().unwrap();
+        let live = LiveValues {
+            document_revision: document.revision(),
+            time: Some(1e-3),
+            node_voltages: [
+                ("VIN".to_owned(), 5.0),
+                ("OUT".to_owned(), 2.5),
+                ("0".to_owned(), 0.0),
+            ]
+            .into_iter()
+            .collect(),
+            branch_currents: BTreeMap::new(),
+        };
+        let current = net_current(&document, &live, "VIN").unwrap();
+        assert!((current - 2.5e-3).abs() < 1e-12, "current = {current}");
+        assert_eq!(net_current(&document, &LiveValues::default(), "VIN"), None);
+    }
+
+    #[test]
+    fn hover_wire_current_follows_the_branch_to_ground() {
+        let document = Document::divider_example().unwrap();
+        let extraction = document.extraction().unwrap();
+        let result = sim_core::solve_dc(&extraction.netlist, sim_core::DcOptions::default())
+            .expect("divider has a DC operating point");
+        let node_voltages = extraction
+            .nets
+            .iter()
+            .filter_map(|net| {
+                result
+                    .node_voltage(net.node)
+                    .map(|voltage| (net.name.as_str().to_owned(), voltage))
+            })
+            .collect();
+        let live = LiveValues {
+            document_revision: document.revision(),
+            time: Some(1e-3),
+            node_voltages,
+            branch_currents: BTreeMap::new(),
+        };
+        let wire = document
+            .schematic()
+            .wires()
+            .find(|wire| wire.a == GridPos::new(5, -5) && wire.b == GridPos::new(8, -5))
+            .expect("source-to-divider wire exists");
+        let current = wire_current(&document, &live, wire.id).unwrap();
+        assert!(
+            (current.abs() - 2.5e-3).abs() < 1e-12,
+            "current = {current}"
+        );
     }
 
     #[test]

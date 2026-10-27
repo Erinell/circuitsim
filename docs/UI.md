@@ -216,11 +216,12 @@ live.
   échantillons sans plage d’arrêt. Les mesures min/max, crête-à-crête, moyenne,
   RMS et nombre d’échantillons restent disponibles lorsque le signal est
   sélectionné.
-- **Sondes** : les composants **Voltmètre**, **Ampèremètre** et **Ohmmètre** sont
-  placés depuis la palette. Leur liste est intégrée aux portées, dans la section
-  **Sondes** du panneau : valeur courante, **Graphique** (ajout du signal à la
-  portée active) et **Afficher** (valeur sur le canevas). Le voltmètre se pose sur
-  un fil ; l’ampèremètre et l’ohmmètre mesurent le composant sous la sonde.
+- **Sondes** : l’**Ohmmètre** reste disponible dans la palette et se pose sur un
+  composant. Sa valeur apparaît dans la section **Sondes** du panneau avec
+  **Afficher** et, quand un signal existe, **Graphique**. Les anciens composants
+  **Voltmètre** et **Ampèremètre** restent lisibles dans les projets existants
+  mais ne sont plus proposés. Le survol d’un fil affiche directement sa tension
+  puis son intensité, référencées à la masse commune.
 - **Spectre** : réutilise le dernier transitoire, choisit un signal et affiche
   pic non continu, fréquence et résolution. Il reste à la demande.
 - **Bode** : analyse AC logarithmique, source, amplitude, sortie ; gain et phase
