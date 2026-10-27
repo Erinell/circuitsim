@@ -29,18 +29,19 @@ négatif. En AC, `AcExcitation.magnitude` est une amplitude crête et
 | --- | --- | --- | --- | --- |
 | `Resistor` | `resistance = 1000` Ω | `i = v/R` | `i = v/R` | conductance `1/R` |
 | `Capacitor` | `capacitance = 1e-6` F | ouvert | `i = C dv/dt`, Euler arrière | `jωC` |
-| `Inductor` | `inductance = 1e-3` H | court-circuit, courant inconnu | `v = L di/dt` | `v = jωL i` |
+| `Inductor` | `inductance = 1e-3` H, `resistance = 0.01` Ω | `v = R i` (court-circuit si `R = 0`) | `v = R i + L di/dt` | `R + jωL` |
 | `VoltageSource` | `dc = 5` V | `v(a)-v(b)=dc` | valeur après événements | phasor |
 | `CurrentSource` | `dc = 1e-3` A | `dc` de `a` vers `b` | valeur après événements | phasor |
 | `Ground` | aucun | `0 V` | `0 V` | `0 V` |
 
-`resistance`, `capacitance` et `inductance` doivent être strictement positives.
-Une source peut être nulle ou négative, mais finie. Une source de tension ou une
-inductance avec deux broches identiques est refusée (`DegenerateBranch`).
+`resistance`, `capacitance` et `inductance` doivent être strictement positives ;
+la résistance série d’une inductance peut être nulle. Une source peut être nulle
+ou négative, mais finie. Une source de tension ou une inductance avec deux
+broches identiques est refusée (`DegenerateBranch`).
 
-En DC, `C` est ouvert et `L` court-circuité. En transitoire, `C` devient une
-conductance `C/h` avec source équivalente et `L` conserve son courant. En AC, `C`
-devient `jωC` et `L` garde sa branche `v(a)-v(b)=jωL i`.
+En DC, `C` est ouvert et `L` se réduit à sa résistance série. En transitoire, `C`
+devient une conductance `C/h` avec source équivalente et `L` conserve son courant
+avec sa résistance. En AC, `C` devient `jωC` et `L` vaut `R + jωL`.
 
 ## 3. Commutateur
 
@@ -60,18 +61,25 @@ interprété.
 
 | Paramètre | Défaut diode | Défaut LED | Rôle |
 | --- | ---: | ---: | --- |
-| `is` | `1e-14` A | `1e-20` A | courant de saturation |
-| `n` | `1` | `1.8` | coefficient d'émission |
+| `is` | `1e-14` A | dérivé de `vf`/`if` | courant de saturation |
+| `n` | `1` | `2` (implicite) | coefficient d'émission |
+| `wavelength` | — | `620` nm | couleur / longueur d'onde |
+| `vf` | — | `2.0` V | tension directe au courant nominal |
+| `if` | — | `0.02` A | courant nominal de la LED |
+| `imax` | — | `0.03` A | courant maximal |
 
 ```text
 I(v) = is * (exp(v / (n * Vt)) - 1)
 Vt = kT/q ≈ 25.85 mV à 300.15 K
+is = if / (exp(vf / (n * Vt)) - 1)   (LED sans is)
 ```
 
 `is` et `n` sont strictement positifs. L'exponentielle est plafonnée à `exp(80)`
 pendant Newton ; ce n'est pas une résistance série. La LED n'émet aucun flux
-lumineux modélisé. La diode n'a ni capacité de jonction ni température
-paramétrable ; en AC, seule la conductance `dI/dV` au point DC intervient.
+lumineux modélisé ; sa longueur d'onde colore uniquement le halo de l'interface.
+`imax` est une limite de datasheet éditable, non utilisée par le solveur. La
+diode n'a ni capacité de jonction ni température paramétrable ; en AC, seule la
+conductance `dI/dV` au point DC intervient.
 
 Le Zener ajoute, pour `v < -bv` :
 

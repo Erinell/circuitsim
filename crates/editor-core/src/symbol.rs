@@ -346,7 +346,10 @@ fn builtin_defs() -> Vec<SymbolDef> {
     vec![
         two_terminal(SymbolKind::Resistor, &[("resistance", 1_000.0)]),
         two_terminal(SymbolKind::Capacitor, &[("capacitance", 1e-6)]),
-        two_terminal(SymbolKind::Inductor, &[("inductance", 1e-3)]),
+        two_terminal(
+            SymbolKind::Inductor,
+            &[("inductance", 1e-3), ("resistance", 0.01)],
+        ),
         two_terminal(SymbolKind::VoltageSource, &[("dc", 5.0)]),
         two_terminal(SymbolKind::CurrentSource, &[("dc", 0.001)]),
         SymbolDef::new(
@@ -357,7 +360,15 @@ fn builtin_defs() -> Vec<SymbolDef> {
         .expect("ground definition is valid"),
         switch_def(),
         two_terminal(SymbolKind::Diode, &[("is", 1e-14), ("n", 1.0)]),
-        two_terminal(SymbolKind::Led, &[("is", 1e-20), ("n", 1.8)]),
+        two_terminal(
+            SymbolKind::Led,
+            &[
+                ("wavelength", 620.0),
+                ("vf", 2.0),
+                ("if", 0.02),
+                ("imax", 0.03),
+            ],
+        ),
         two_terminal(
             SymbolKind::Zener,
             &[
@@ -459,6 +470,18 @@ mod tests {
             registry.get(&SymbolKind::Ground).map(SymbolDef::pin_count),
             Some(1)
         );
+    }
+
+    #[test]
+    fn led_and_inductor_expose_the_requested_parameters() {
+        let registry = SymbolRegistry::builtin();
+        let led = registry.get(&SymbolKind::Led).unwrap();
+        for key in ["wavelength", "vf", "if", "imax"] {
+            assert!(led.defaults.contains_key(key), "missing LED param {key}");
+        }
+        let inductor = registry.get(&SymbolKind::Inductor).unwrap();
+        assert!(inductor.defaults.contains_key("inductance"));
+        assert!(inductor.defaults.contains_key("resistance"));
     }
 
     #[test]

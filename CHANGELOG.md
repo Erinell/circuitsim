@@ -8,6 +8,11 @@ sémantique.
 
 ### Added
 
+- Paramètres de la **LED** : longueur d’onde/couleur (`wavelength`), tension
+  directe `vf`, courant nominal `if`, courant maximal `imax`. Le modèle dérive
+  `is` de `vf`/`if` et le halo prend la couleur de la longueur d’onde.
+- Paramètre de **résistance série** pour la bobine, utilisée en DC, transitoire
+  et AC.
 - Le circuit de démonstration **RC** est remplacé par le montage fourni :
   `V1 = 10 V`, `R1 = 1 kΩ`, `C1 = 100 µF`, `SW1` fermé, masse commune et
   sortie `Vc`.

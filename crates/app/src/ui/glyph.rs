@@ -688,13 +688,26 @@ fn symbol_value(symbol: &Symbol) -> Option<String> {
     if symbol.kind.is_ground() {
         return None;
     }
-    let (key, value) = symbol.params.iter().next()?;
+    let primary = match symbol.kind {
+        SymbolKind::Resistor => Some("resistance"),
+        SymbolKind::Capacitor => Some("capacitance"),
+        SymbolKind::Inductor => Some("inductance"),
+        SymbolKind::VoltageSource | SymbolKind::CurrentSource => Some("dc"),
+        SymbolKind::Switch => Some("closed"),
+        SymbolKind::Led => Some("vf"),
+        SymbolKind::Diode => Some("is"),
+        SymbolKind::Zener => Some("bv"),
+        SymbolKind::OpAmp => Some("gain"),
+        _ => None,
+    }
+    .and_then(|key| symbol.params.get_key_value(key));
+    let (key, value) = primary.or_else(|| symbol.params.iter().next())?;
     match value {
         ParamValue::Number(number) => {
             Some(format_parameter(*number, parameter_unit(&symbol.kind, key)))
         }
         ParamValue::Bool(closed) => {
-            if *key == "closed" {
+            if key == "closed" {
                 Some(if *closed { "fermé" } else { "ouvert" }.to_owned())
             } else {
                 Some(closed.to_string())

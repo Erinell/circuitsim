@@ -1397,11 +1397,19 @@ fn derived_component_current(
 
 fn diode_current(spec: &ComponentSpec, voltage: f64) -> Option<f64> {
     const THERMAL_VOLTAGE: f64 = 0.025_864_925_786_329;
-    let saturation = component_number(spec, "is")?;
-    let emission = component_number(spec, "n")?;
+    let emission = component_number(spec, "n").unwrap_or(2.0);
     if emission <= 0.0 {
         return None;
     }
+    let saturation = component_number(spec, "is").or_else(|| {
+        let forward_voltage = component_number(spec, "vf")?;
+        let forward_current = component_number(spec, "if")?;
+        let denominator = (forward_voltage / (emission * THERMAL_VOLTAGE))
+            .min(80.0)
+            .exp()
+            - 1.0;
+        (denominator > 0.0).then_some(forward_current / denominator)
+    })?;
     let forward = (voltage / (emission * THERMAL_VOLTAGE)).min(80.0).exp();
     let mut current = saturation * (forward - 1.0);
     if spec.kind == ComponentKind::Zener {
