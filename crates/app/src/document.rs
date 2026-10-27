@@ -290,6 +290,78 @@ impl Document {
         Ok(document)
     }
 
+    /// Creates a resistive divider example.
+    pub fn divider_example() -> Result<Self, ActionError> {
+        let mut document = Self::new();
+        document.add_symbol(SymbolKind::VoltageSource, GridPos::new(0, 0))?;
+        document.add_symbol(SymbolKind::Ground, GridPos::new(2, 4))?;
+        document.add_symbol(SymbolKind::Resistor, GridPos::new(6, 0))?;
+        let lower = document.add_symbol(SymbolKind::Resistor, GridPos::new(8, 4))?;
+        set_orientation(&mut document, lower, Orientation::R90)?;
+        document.add_wire(GridPos::new(-2, 0), GridPos::new(-2, 4))?;
+        document.add_wire(GridPos::new(-2, 4), GridPos::new(2, 4))?;
+        document.add_wire(GridPos::new(2, 0), GridPos::new(4, 0))?;
+        document.add_wire(GridPos::new(8, 0), GridPos::new(8, 2))?;
+        document.add_wire(GridPos::new(8, 6), GridPos::new(8, 4))?;
+        document.add_wire(GridPos::new(8, 4), GridPos::new(2, 4))?;
+        document.add_label(GridPos::new(8, 0), "OUT")?;
+        finish_example(document)
+    }
+
+    /// Creates a LED and series resistor example.
+    pub fn led_example() -> Result<Self, ActionError> {
+        let mut document = Self::new();
+        document.add_symbol(SymbolKind::VoltageSource, GridPos::new(0, 0))?;
+        document.add_symbol(SymbolKind::Ground, GridPos::new(2, 4))?;
+        document.add_symbol(SymbolKind::Resistor, GridPos::new(6, 0))?;
+        document.add_symbol(SymbolKind::Led, GridPos::new(12, 0))?;
+        document.add_wire(GridPos::new(-2, 0), GridPos::new(-2, 4))?;
+        document.add_wire(GridPos::new(-2, 4), GridPos::new(2, 4))?;
+        document.add_wire(GridPos::new(2, 0), GridPos::new(4, 0))?;
+        document.add_wire(GridPos::new(8, 0), GridPos::new(10, 0))?;
+        document.add_wire(GridPos::new(14, 0), GridPos::new(14, 4))?;
+        document.add_wire(GridPos::new(14, 4), GridPos::new(2, 4))?;
+        document.add_label(GridPos::new(8, 0), "OUT")?;
+        finish_example(document)
+    }
+
+    /// Creates a switch and load example.
+    pub fn switch_example() -> Result<Self, ActionError> {
+        let mut document = Self::new();
+        document.add_symbol(SymbolKind::VoltageSource, GridPos::new(0, 0))?;
+        document.add_symbol(SymbolKind::Ground, GridPos::new(2, 4))?;
+        document.add_symbol(SymbolKind::Resistor, GridPos::new(6, 0))?;
+        document.add_symbol(SymbolKind::Switch, GridPos::new(12, 0))?;
+        document.add_wire(GridPos::new(-2, 0), GridPos::new(-2, 4))?;
+        document.add_wire(GridPos::new(-2, 4), GridPos::new(2, 4))?;
+        document.add_wire(GridPos::new(2, 0), GridPos::new(4, 0))?;
+        document.add_wire(GridPos::new(8, 0), GridPos::new(10, 0))?;
+        document.add_wire(GridPos::new(14, 0), GridPos::new(14, 4))?;
+        document.add_wire(GridPos::new(14, 4), GridPos::new(2, 4))?;
+        document.add_label(GridPos::new(8, 0), "OUT")?;
+        finish_example(document)
+    }
+
+    /// Creates a series RLC example.
+    pub fn rlc_example() -> Result<Self, ActionError> {
+        let mut document = Self::new();
+        document.add_symbol(SymbolKind::VoltageSource, GridPos::new(0, 0))?;
+        document.add_symbol(SymbolKind::Ground, GridPos::new(2, 4))?;
+        document.add_symbol(SymbolKind::Resistor, GridPos::new(6, 0))?;
+        document.add_symbol(SymbolKind::Inductor, GridPos::new(12, 0))?;
+        let capacitor = document.add_symbol(SymbolKind::Capacitor, GridPos::new(14, 4))?;
+        set_orientation(&mut document, capacitor, Orientation::R90)?;
+        document.add_wire(GridPos::new(-2, 0), GridPos::new(-2, 4))?;
+        document.add_wire(GridPos::new(-2, 4), GridPos::new(2, 4))?;
+        document.add_wire(GridPos::new(2, 0), GridPos::new(4, 0))?;
+        document.add_wire(GridPos::new(8, 0), GridPos::new(10, 0))?;
+        document.add_wire(GridPos::new(14, 0), GridPos::new(14, 2))?;
+        document.add_wire(GridPos::new(14, 6), GridPos::new(14, 4))?;
+        document.add_wire(GridPos::new(14, 4), GridPos::new(2, 4))?;
+        document.add_label(GridPos::new(14, 0), "OUT")?;
+        finish_example(document)
+    }
+
     /// Returns the current schematic.
     pub const fn schematic(&self) -> &Schematic {
         &self.schematic
@@ -1817,6 +1889,15 @@ impl Default for Document {
     }
 }
 
+fn finish_example(mut document: Document) -> Result<Document, ActionError> {
+    document.history.clear();
+    document.selected.clear();
+    document.dirty = false;
+    document.revision = 0;
+    document.refresh_extraction();
+    Ok(document)
+}
+
 fn set_orientation(
     document: &mut Document,
     id: SymbolId,
@@ -2073,6 +2154,26 @@ mod tests {
         assert!(document.schematic().content_eq(&before));
         assert_eq!(document.revision(), revision);
         assert_eq!(document.schematic().next_id(), next_id);
+    }
+
+    #[test]
+    fn examples_extract_clean_netlists() {
+        for (name, document) in [
+            ("divider", Document::divider_example().unwrap()),
+            ("led", Document::led_example().unwrap()),
+            ("switch", Document::switch_example().unwrap()),
+            ("rlc", Document::rlc_example().unwrap()),
+        ] {
+            assert!(
+                document.extraction().is_some(),
+                "{name} must extract a netlist"
+            );
+            assert!(
+                document.erc().is_some_and(|erc| erc.issues().is_empty()),
+                "{name} must have a clean ERC"
+            );
+            assert!(!document.nets().is_empty(), "{name} must have nets");
+        }
     }
 
     #[test]

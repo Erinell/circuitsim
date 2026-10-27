@@ -2,6 +2,7 @@
 
 pub mod canvas;
 pub mod command_palette;
+pub mod controls;
 pub mod erc;
 pub mod glyph;
 pub mod history;

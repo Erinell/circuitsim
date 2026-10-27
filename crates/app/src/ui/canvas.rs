@@ -14,6 +14,7 @@ use crate::document::{
     format_parameter, parameter_unit, ActionError, ClipboardItem, Document, SelectionChange,
     SelectionMode, WireEnd,
 };
+use crate::ui::controls::{control_fraction, control_value, ParameterControls};
 use crate::ui::glyph::{paint_symbol, GlyphColors, SymbolText};
 use crate::ui::theme::{CanvasSettings, CanvasTheme, CurrentDirection, VoltageScale};
 use crate::ui::{symbol_kind_name, Status, MUTED};
@@ -45,6 +46,7 @@ pub struct CanvasState {
     animation_speed: f64,
     power_brightness: f32,
     settings: CanvasSettings,
+    controls: ParameterControls,
     property_request: Option<SymbolId>,
     scope_request: Option<SignalId>,
     label_dialog: Option<LabelDialog>,
@@ -109,6 +111,7 @@ impl CanvasState {
             animation_speed: 1.0,
             power_brightness: 0.6,
             settings: CanvasSettings::default(),
+            controls: ParameterControls::default(),
             property_request: None,
             scope_request: None,
             label_dialog: None,
@@ -344,7 +347,11 @@ impl CanvasState {
 
         if interactive {
             self.handle_placement_keys(ui, tool);
-            self.handle_input(ui, &response, rect, document, tool, status, focus_point);
+            let controls_handled =
+                self.handle_parameter_controls(ui, &response, rect, document, status);
+            if !controls_handled {
+                self.handle_input(ui, &response, rect, document, tool, status, focus_point);
+            }
         }
         let hovered_point = focus_point.or_else(|| {
             ui.input(|input| input.pointer.hover_pos())
@@ -356,6 +363,7 @@ impl CanvasState {
         self.paint_document(&painter, rect, document, live);
         self.paint_current_flow(&painter, rect, document, live, flow_time);
         self.paint_voltage_legend(&painter, rect, document, live);
+        self.paint_parameter_controls(&painter, rect, document);
         self.paint_wire_handles(&painter, rect, document);
         self.paint_hover(&painter, rect, document);
         let shift = ui.input(|input| input.modifiers.shift);
@@ -817,6 +825,27 @@ impl CanvasState {
                                         }
                                         Err(error) => status.error(error.user_message()),
                                     }
+                                    ui.close();
+                                }
+                            }
+                        });
+                        ui.menu_button("Ajouter un curseur", |ui| {
+                            let Some(symbol) = document.symbol(id) else {
+                                return;
+                            };
+                            let numeric = symbol
+                                .params
+                                .iter()
+                                .filter_map(|(key, value)| {
+                                    value.as_number().map(|value| (key.clone(), value))
+                                })
+                                .collect::<Vec<_>>();
+                            if numeric.is_empty() {
+                                ui.label("Aucun paramètre numérique.");
+                            }
+                            for (key, value) in numeric {
+                                if ui.button(format!("{} = {value}", key)).clicked() {
+                                    self.controls.add(id, key, value);
                                     ui.close();
                                 }
                             }
@@ -1745,6 +1774,149 @@ impl CanvasState {
                 palette.muted,
             );
         }
+    }
+
+    fn paint_parameter_controls(&self, painter: &Painter, rect: Rect, document: &Document) {
+        if self.controls.is_empty() {
+            return;
+        }
+        let palette = self.settings.palette();
+        for control in self.controls.items() {
+            let Some(symbol) = document.symbol(control.symbol) else {
+                continue;
+            };
+            let track = self.control_rect(rect, symbol);
+            let range = control.range();
+            let fraction = control_fraction(control.draft, range);
+            let unit = parameter_unit(&symbol.kind, &control.key);
+            let label = format!(
+                "{} : {}",
+                control.key,
+                format_parameter(control.draft, unit)
+            );
+            painter.rect_filled(track.expand(4.0), 4.0, palette.live_badge);
+            painter.rect_stroke(
+                track.expand(4.0),
+                4.0,
+                Stroke::new(1.0, palette.major_grid),
+                StrokeKind::Inside,
+            );
+            painter.text(
+                track.left_top() + Vec2::new(0.0, -12.0),
+                Align2::LEFT_BOTTOM,
+                label,
+                FontId::proportional(9.5),
+                palette.muted,
+            );
+            painter.line_segment(
+                [
+                    Pos2::new(track.left() + 7.0, track.center().y),
+                    Pos2::new(track.right() - 7.0, track.center().y),
+                ],
+                Stroke::new(2.0, palette.major_grid),
+            );
+            let knob_x = track.left() + 7.0 + (track.width() - 14.0) * fraction as f32;
+            painter.circle_filled(Pos2::new(knob_x, track.center().y), 4.5, palette.accent);
+        }
+    }
+
+    fn handle_parameter_controls(
+        &mut self,
+        ui: &Ui,
+        response: &egui::Response,
+        rect: Rect,
+        document: &mut Document,
+        status: &mut Status,
+    ) -> bool {
+        if self.controls.is_empty() || !response.hovered() {
+            return false;
+        }
+        let Some(pointer) = ui.input(|input| input.pointer.hover_pos()) else {
+            return false;
+        };
+        let (pressed, released, down, scroll) = ui.input(|input| {
+            (
+                input.pointer.primary_pressed(),
+                input.pointer.primary_released(),
+                input.pointer.primary_down(),
+                input.smooth_scroll_delta.y,
+            )
+        });
+        let tracks = self
+            .controls
+            .items()
+            .iter()
+            .map(|control| {
+                document
+                    .symbol(control.symbol)
+                    .map(|symbol| self.control_rect(rect, symbol))
+            })
+            .collect::<Vec<_>>();
+        let mut handled = false;
+        for (control, track) in self.controls.items_mut().iter_mut().zip(tracks) {
+            let Some(track) = track else {
+                continue;
+            };
+            let hit = track.expand(5.0).contains(pointer);
+            if pressed && hit {
+                control.dragging = true;
+            }
+            if control.dragging {
+                handled = true;
+                let fraction =
+                    ((pointer.x - (track.left() + 7.0)) / (track.width() - 14.0)).clamp(0.0, 1.0);
+                let range = control.range();
+                control.draft = control_value(f64::from(fraction), range);
+                if released || !down {
+                    let Some(symbol) = document.symbol(control.symbol).cloned() else {
+                        control.dragging = false;
+                        continue;
+                    };
+                    let mut changed = symbol;
+                    changed.params.insert(
+                        control.key.clone(),
+                        sim_core::netlist::ParamValue::Number(control.draft),
+                    );
+                    match document.update_symbol(changed) {
+                        Ok(()) => {
+                            control.value = control.draft;
+                            status.success(format!("{} mis à jour.", control.key));
+                        }
+                        Err(error) => status.error(error.user_message()),
+                    }
+                    control.dragging = false;
+                }
+            } else if hit && scroll.abs() > 0.1 {
+                handled = true;
+                let range = control.range();
+                let step = (range.1 - range.0) * 0.02;
+                control.draft =
+                    (control.draft + step * f64::from(scroll.signum())).clamp(range.0, range.1);
+                if let Some(symbol) = document.symbol(control.symbol).cloned() {
+                    let mut changed = symbol;
+                    changed.params.insert(
+                        control.key.clone(),
+                        sim_core::netlist::ParamValue::Number(control.draft),
+                    );
+                    match document.update_symbol(changed) {
+                        Ok(()) => control.value = control.draft,
+                        Err(error) => status.error(error.user_message()),
+                    }
+                }
+            }
+            if hit {
+                handled = true;
+            }
+        }
+        handled
+    }
+
+    fn control_rect(&self, rect: Rect, symbol: &Symbol) -> Rect {
+        let center = self.viewport.grid_to_screen(rect, symbol.at);
+        Rect::from_min_size(
+            center + Vec2::new(-70.0, self.viewport.scale() * 3.5),
+            Vec2::new(140.0, 10.0),
+        )
     }
 
     fn paint_led_glow(

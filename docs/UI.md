@@ -65,6 +65,11 @@ nets peuvent être masqués séparément. Le thème **Clair**, la **petite grill
 le style de résistance **européen** ou **américain** complètent les thèmes
 Sombre et Contraste élevé.
 
+Le menu **Exemples** charge des circuits originaux : RC, diviseur, LED,
+interrupteur et RLC. Un clic droit sur un composant propose **Ajouter un
+curseur** : le curseur apparaît sous le symbole, se règle par glisser ou molette
+et applique la valeur à chaud en une seule étape annulable.
+
 ## 2. Interactions
 
 - Clic : sélectionne l'objet sous le curseur ou vide la sélection ; sur un
@@ -82,8 +87,9 @@ Sombre et Contraste élevé.
 - Glisser une extrémité libre : allonge ou raccourcit le fil sur son axe.
 - Survol : une bulle affiche le type, le nom, les paramètres, V aux broches, I
   et P. Elle reste lisible en pause et signale un résultat antérieur.
-- Clic droit : propriétés, rotation, miroir, duplication, suppression, mesures
-  et coupe de fil ; sur le fond, sous-menus **Ajouter** par catégorie.
+- Clic droit : propriétés, rotation, miroir, duplication, suppression, mesures,
+  curseur de réglage et coupe de fil ; sur le fond, sous-menus **Ajouter** par
+  catégorie.
 - `Ctrl+A` : tout sélectionner ; `Échap` : annuler l'outil, le collage ou la sélection.
 - `Espace` : marche/arrêt de la simulation continue ; `F5` : reset à `t = 0`.
 - `Ctrl+C`, `Ctrl+V`, `Ctrl+D` : copier, coller avec aperçu, dupliquer.
