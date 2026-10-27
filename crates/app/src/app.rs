@@ -883,6 +883,7 @@ impl CircuitApp {
             .set_animation_speed(self.instruments.animation_speed());
         self.canvas
             .set_power_brightness(self.instruments.power_brightness());
+        self.canvas.set_scope_signals(self.scopes.active_signals());
         self.canvas.set_theme(match self.preferences.theme {
             ThemeMode::Dark => CanvasTheme::Dark,
             ThemeMode::HighContrast => CanvasTheme::HighContrast,
