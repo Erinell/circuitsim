@@ -29,7 +29,7 @@ bas (210–620 px, visible par défaut), barre d'état. Les outils, composants,
 transformations, alignements, exemples et commandes de vue sont dans les menus et
 la palette. `Ctrl+K` ouvre la palette de commandes. Les onglets **Portées**,
 **Spectre** et **Bode** partagent le même panneau. La démonstration présélectionne
-`V1`, `5 V` et `OUT`.
+`V1`, `10 V` et `Vc`.
 
 À l'ouverture d'un schéma valide, la session temps réel démarre seule : le
 circuit est déjà en marche et les instruments affichent le signal sans clic.

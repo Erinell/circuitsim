@@ -3412,7 +3412,7 @@ mod tests {
         );
         let at = canvas
             .viewport()
-            .grid_to_screen(screen(), GridPos::new(-2, -8));
+            .grid_to_screen(screen(), GridPos::new(-1, -10));
         click(&context, &mut canvas, &mut document, &mut status, &tool, at);
 
         let resistor = document
@@ -3662,12 +3662,18 @@ mod tests {
             .symbols()
             .find(|symbol| symbol.kind == editor_core::SymbolKind::Resistor)
             .unwrap();
+        let left_net = document
+            .net_name_at(GridPos::new(-3, -10))
+            .expect("R1 left net");
+        let right_net = document
+            .net_name_at(GridPos::new(1, -10))
+            .expect("R1 right net");
         let live = LiveValues {
             document_revision: document.revision(),
             time: Some(1e-3),
             node_voltages: [
-                ("VIN".to_owned(), 5.0),
-                ("OUT".to_owned(), 2.5),
+                (left_net.clone(), 10.0),
+                (right_net.clone(), 9.0),
                 ("0".to_owned(), 0.0),
             ]
             .into_iter()
@@ -3675,9 +3681,9 @@ mod tests {
             branch_currents: BTreeMap::new(),
         };
         let flows = net_flows(&document, &live);
-        assert!(flows.contains_key("VIN"));
-        assert!(flows.contains_key("OUT"));
-        assert!(flows.get("VIN").is_some_and(|flow| flow.strength > 0.0));
+        assert!(flows.contains_key(&left_net));
+        assert!(flows.contains_key(&right_net));
+        assert!(flows.get(&left_net).is_some_and(|flow| flow.strength > 0.0));
         assert!(document
             .symbol(resistor.id)
             .is_some_and(|symbol| symbol.kind == editor_core::SymbolKind::Resistor));
@@ -3730,21 +3736,30 @@ mod tests {
     #[test]
     fn hover_current_comes_from_the_hovered_net() {
         let document = Document::demo().unwrap();
+        let left_net = document
+            .net_name_at(GridPos::new(-3, -10))
+            .expect("R1 left net");
+        let right_net = document
+            .net_name_at(GridPos::new(1, -10))
+            .expect("R1 right net");
         let live = LiveValues {
             document_revision: document.revision(),
             time: Some(1e-3),
             node_voltages: [
-                ("VIN".to_owned(), 5.0),
-                ("OUT".to_owned(), 2.5),
+                (left_net.clone(), 10.0),
+                (right_net, 9.0),
                 ("0".to_owned(), 0.0),
             ]
             .into_iter()
             .collect(),
             branch_currents: BTreeMap::new(),
         };
-        let current = net_current(&document, &live, "VIN").unwrap();
-        assert!((current - 2.5e-3).abs() < 1e-12, "current = {current}");
-        assert_eq!(net_current(&document, &LiveValues::default(), "VIN"), None);
+        let current = net_current(&document, &live, &left_net).unwrap();
+        assert!((current - 1e-3).abs() < 1e-12, "current = {current}");
+        assert_eq!(
+            net_current(&document, &LiveValues::default(), &left_net),
+            None
+        );
     }
 
     #[test]
@@ -4010,7 +4025,7 @@ mod tests {
         );
         let at = canvas
             .viewport()
-            .grid_to_screen(screen(), GridPos::new(-7, -8));
+            .grid_to_screen(screen(), GridPos::new(-9, -10));
         let modifiers = Modifiers {
             alt: true,
             ..Modifiers::default()

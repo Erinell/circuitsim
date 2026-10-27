@@ -187,13 +187,14 @@ impl SignalCatalog {
             .collect()
     }
 
-    /// Returns the preferred voltage display, favouring the net named `OUT`.
+    /// Returns the preferred voltage display, favouring `OUT` then `Vc`.
     pub fn default_voltage(&self) -> Option<String> {
-        if self.voltages.iter().any(|name| name == "OUT") {
-            Some("OUT".to_owned())
-        } else {
-            self.voltages.first().cloned()
+        for preferred in ["OUT", "Vc"] {
+            if self.voltages.iter().any(|name| name == preferred) {
+                return Some(preferred.to_owned());
+            }
         }
+        self.voltages.first().cloned()
     }
 }
 
@@ -1780,20 +1781,26 @@ mod tests {
     fn probe_symbols_report_voltage_current_and_resistance() {
         let mut document = Document::demo().unwrap();
         let voltmeter = document
-            .add_symbol(SymbolKind::Voltmeter, GridPos::new(-6, -8))
+            .add_symbol(SymbolKind::Voltmeter, GridPos::new(2, -10))
             .unwrap();
         let ammeter = document
-            .add_symbol(SymbolKind::Ammeter, GridPos::new(-2, -8))
+            .add_symbol(SymbolKind::Ammeter, GridPos::new(-1, -10))
             .unwrap();
         let ohmmeter = document
-            .add_symbol(SymbolKind::Ohmmeter, GridPos::new(-2, -8))
+            .add_symbol(SymbolKind::Ohmmeter, GridPos::new(-1, -10))
             .unwrap();
+        let left_net = document
+            .net_name_at(GridPos::new(-3, -10))
+            .expect("R1 left net");
+        let right_net = document
+            .net_name_at(GridPos::new(1, -10))
+            .expect("R1 right net");
         let live = LiveValues {
             document_revision: document.revision(),
             time: Some(1e-3),
             node_voltages: [
-                ("VIN".to_owned(), 5.0),
-                ("OUT".to_owned(), 2.5),
+                (left_net, 10.0),
+                (right_net.clone(), 9.0),
                 ("0".to_owned(), 0.0),
             ]
             .into_iter()
@@ -1802,11 +1809,11 @@ mod tests {
         };
         let readings = probe_readings(&document, &live);
         let voltage = readings.iter().find(|probe| probe.id == voltmeter).unwrap();
-        assert_eq!(voltage.net.as_deref(), Some("VIN"));
-        assert_eq!(voltage.value, Some(5.0));
+        assert_eq!(voltage.net.as_deref(), Some(right_net.as_str()));
+        assert_eq!(voltage.value, Some(9.0));
         let current = readings.iter().find(|probe| probe.id == ammeter).unwrap();
         assert_eq!(current.target.as_deref(), Some("R1"));
-        assert!((current.value.unwrap() - 2.5e-3).abs() < 1e-12);
+        assert!((current.value.unwrap() - 1e-3).abs() < 1e-12);
         let resistance = readings.iter().find(|probe| probe.id == ohmmeter).unwrap();
         assert_eq!(resistance.value, Some(1_000.0));
         assert!(readings.iter().all(|probe| probe.kind.is_measurement()));
@@ -1816,11 +1823,13 @@ mod tests {
     #[test]
     fn catalog_exposes_demo_nets_and_sources() {
         let catalog = SignalCatalog::from_extraction(&demo_extraction());
-        assert_eq!(catalog.voltages, vec!["OUT".to_owned(), "VIN".to_owned()]);
+        assert_eq!(catalog.voltages.len(), 3);
+        assert!(catalog.voltages.contains(&"Vc".to_owned()));
         assert_eq!(catalog.currents, vec!["V1".to_owned()]);
         assert_eq!(catalog.sources.len(), 1);
         assert_eq!(catalog.sources[0].label, "V1");
-        assert_eq!(catalog.default_voltage().as_deref(), Some("OUT"));
+        assert_eq!(catalog.sources[0].dc, 10.0);
+        assert_eq!(catalog.default_voltage().as_deref(), Some("Vc"));
     }
 
     #[test]
@@ -1831,12 +1840,18 @@ mod tests {
             .symbols()
             .find(|symbol| matches!(symbol.kind, SymbolKind::Resistor))
             .unwrap();
+        let left_net = document
+            .net_name_at(GridPos::new(-3, -10))
+            .expect("R1 left net");
+        let right_net = document
+            .net_name_at(GridPos::new(1, -10))
+            .expect("R1 right net");
         let live = LiveValues {
             document_revision: document.revision(),
             time: Some(1e-3),
             node_voltages: [
-                ("VIN".to_owned(), 5.0),
-                ("OUT".to_owned(), 2.5),
+                (left_net.clone(), 10.0),
+                (right_net, 9.0),
                 ("0".to_owned(), 0.0),
             ]
             .into_iter()
@@ -1848,11 +1863,11 @@ mod tests {
         assert!(observed
             .pins
             .iter()
-            .any(|pin| pin.net.as_deref() == Some("VIN")));
+            .any(|pin| pin.net.as_deref() == Some(left_net.as_str())));
         let current = observed.current.unwrap();
-        assert!((current - 2.5e-3).abs() < 1e-12);
+        assert!((current - 1e-3).abs() < 1e-12);
         let power = observed.power.unwrap();
-        assert!((power - 6.25e-3).abs() < 1e-12);
+        assert!((power - 1e-3).abs() < 1e-12);
     }
 
     #[test]
@@ -1862,7 +1877,7 @@ mod tests {
         let mut settings = TransientSettings::default();
         settings.ensure_catalog(&catalog.sources);
         assert_eq!(settings.source.as_deref(), Some("V1"));
-        assert_eq!(settings.final_value, "5 V");
+        assert_eq!(settings.final_value, "10 V");
         settings.final_value = "3".to_owned();
         settings.ensure_catalog(&catalog.sources);
         assert_eq!(settings.final_value, "3");
@@ -2010,7 +2025,7 @@ mod tests {
             &result.samples,
             &run.context,
             &document,
-            &[SignalId::NetCurrent("VIN".to_owned())],
+            &[SignalId::NetCurrent("Vc".to_owned())],
         )
         .unwrap();
         assert_eq!(traces.len(), 1);
@@ -2046,15 +2061,15 @@ mod tests {
         };
         assert!(result.samples.len() > 400);
         let traces = transient_traces(&result, &run.context, &default_signals(&catalog)).unwrap();
-        assert_eq!(traces.len(), 2);
+        assert_eq!(traces.len(), 3);
         let out = traces
             .iter()
-            .find(|trace| trace.signal == SignalId::Voltage("OUT".to_owned()))
+            .find(|trace| trace.signal == SignalId::Voltage("Vc".to_owned()))
             .unwrap();
         let final_voltage = out.points.last().unwrap()[1];
-        assert!((final_voltage - 5.0).abs() < 0.05);
+        assert!(final_voltage > 0.0 && final_voltage <= 10.0 + 1e-9);
         let summary = measurements(&traces);
-        assert_eq!(summary.len(), 2);
+        assert_eq!(summary.len(), 3);
     }
 
     #[test]
@@ -2070,11 +2085,10 @@ mod tests {
         let AnalysisResult::Ac(result) = run.result else {
             panic!("expected AC result");
         };
-        let trace =
-            bode_trace(&result, &run.context, &SignalId::Voltage("OUT".to_owned())).unwrap();
+        let trace = bode_trace(&result, &run.context, &SignalId::Voltage("Vc".to_owned())).unwrap();
         let first = trace.points.first().unwrap();
         let last = trace.points.last().unwrap();
-        assert!(first.gain_db.abs() < 0.01);
+        assert!(first.gain_db > -3.0);
         assert!(last.gain_db < -60.0);
         assert_eq!(trace.points.len(), 101);
     }

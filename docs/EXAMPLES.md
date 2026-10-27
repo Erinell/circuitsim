@@ -61,7 +61,8 @@ cargo xtask web-build
 cargo xtask web-serve
 ```
 
-L'application ouvre le circuit RC de démonstration et le panneau Instruments.
+L'application ouvre le circuit RC de démonstration (`V1 = 10 V`, `R1 = 1 kΩ`,
+`C1 = 100 µF`, `SW1` fermé, sortie `Vc`) et le panneau Instruments.
 La galerie **Fichier → Exemples** contient RC, diviseur, LED, interrupteur, RLC
 série et RLC parallèle commuté.
 `web-build` produit `dist/`, `web-serve` écoute sur `http://127.0.0.1:8080`.

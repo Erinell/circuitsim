@@ -1997,20 +1997,21 @@ mod tests {
         let context = egui::Context::default();
         let mut state = InstrumentsState::new();
         let document = Document::demo().unwrap();
+        let catalog = SignalCatalog::from_extraction(document.extraction().unwrap());
         frame(&context, &mut state, &document);
-        assert_eq!(
-            state.selected,
-            BTreeSet::from([
-                SignalId::Voltage("OUT".to_owned()),
-                SignalId::Voltage("VIN".to_owned()),
-            ])
-        );
+        let expected = catalog
+            .voltages
+            .iter()
+            .cloned()
+            .map(SignalId::Voltage)
+            .collect::<BTreeSet<_>>();
+        assert_eq!(state.selected, expected);
         assert_eq!(
             state.spectrum_signal,
-            Some(SignalId::Voltage("OUT".to_owned()))
+            catalog.default_voltage().map(SignalId::Voltage)
         );
-        assert_eq!(state.ac.output.as_deref(), Some("OUT"));
-        assert_eq!(state.transient.final_value, "5 V");
+        assert_eq!(state.ac.output.as_deref(), Some("Vc"));
+        assert_eq!(state.transient.final_value, "10 V");
     }
 
     #[test]
