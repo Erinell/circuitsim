@@ -8,7 +8,7 @@ sont séparés, testables sans navigateur et compilables pour
 ## État
 
 Version **0.4.0**. Les dix étapes du projet et les lots G1 à G8 sont livrés :
-261 tests natifs, clippy strict, cible WASM, benchmarks, exemples, CI et
+264 tests natifs, clippy strict, cible WASM, benchmarks, exemples, CI et
 distribution web.
 
 - **Cœur** : unités SI, netlist validée, MNA dense, DC, transitoire à pas fixe,
@@ -23,10 +23,11 @@ distribution web.
   puissance, LED lumineuses, interrupteurs cliquables, lecture au survol,
   câblage par glisser, menus contextuels, raccourcis de placement, curseurs de
   réglage, galerie d’exemples, édition par double-clic, portées incrustées,
-  thème clair, sondes V/A/Ω, transitoire temps réel avec pause et vitesse,
-  curseurs A/B, marqueur Bode, mini-carte, dispositions fiables, guide de
-  démarrage, contraste élevé et taille réglable, portée, mesures, FFT de Hann,
-  Bode, export CSV, échelon de source.
+  préférences persistées, écran À propos, thème clair, sondes V/A/Ω,
+  transitoire temps réel avec pause et vitesse, curseurs A/B, marqueur Bode,
+  mini-carte, dispositions fiables, guide de démarrage, contraste élevé et
+  taille réglable, portée, mesures, FFT de Hann, Bode, export CSV, échelon de
+  source.
 - **Transport** : protocole binaire `CSIM`, worker borné à un job, coalescence
   à 60 Hz, révisions croissantes, pont WASM.
 

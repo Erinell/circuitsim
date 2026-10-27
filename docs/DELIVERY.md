@@ -62,7 +62,7 @@ SVG intégrée et un thème sombre sans requête externe.
 
 | Contrôle | Résultat |
 | --- | --- |
-| `cargo xtask check` | format, clippy strict, 261 tests |
+| `cargo xtask check` | format, clippy strict, 264 tests |
 | `cargo deny check licenses` | licences compatibles |
 | `cargo xtask wasm-check` | bibliothèques, worker, app compilés pour WASM |
 | `cargo bench --workspace --no-run` | benchmarks compilés |
@@ -71,6 +71,7 @@ SVG intégrée et un thème sombre sans requête externe.
 | Release natif | binaire construit et interface vérifiée |
 | `cargo xtask web-build` | `dist/` produit |
 | Chromium headless | chargement, transitoire, CSV, zéro erreur console |
+| Préférences | fichier natif ou `localStorage`, versionnées, valeurs par défaut |
 
 Scénario navigateur : chargement de `index.html`, disparition du loading, schéma
 RC et instruments, transitoire de 502 échantillons (501 pas), export et

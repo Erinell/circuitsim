@@ -216,10 +216,14 @@ Les raccourcis sont ignorés lorsqu’un champ texte a le focus, à l’exceptio
 - Les préférences d’affichage proposent les thèmes sombre, contrasté ou clair,
   une taille d’interface de 85 à 130 %, la réduction des animations, la petite
   grille et le style de résistance européen ou américain.
+- Les préférences, calques, favoris, vitesses et panneaux visibles sont
+  enregistrés automatiquement puis restaurés au lancement. Un stockage
+  indisponible ou invalide revient aux valeurs par défaut sans bloquer l’usage.
+- **À propos** présente la version, la licence et les licences tierces.
 - `Tab` et `Maj+Tab` parcourent les contrôles, `Entrée` active, `Échap` ferme.
   Toutes les actions principales ont un libellé texte et une infobulle.
-- Les préférences sont appliquées immédiatement et restent valables pour la
-  session ; leur persistance est prévue ultérieurement.
+- Les préférences sont appliquées immédiatement et enregistrées
+  automatiquement pour les prochains lancements.
 
 ## 11. Inspecteur, valeurs et historique
 
@@ -281,7 +285,7 @@ La sélection rectangle, le presse-papiers, la duplication, la rotation et le
 miroir de groupe, l’édition directe E12/E24/E96, l’inspecteur avec valeurs
 simulées, les menus contextuels, l’historique nommé, les dispositions fiables,
 la mini-carte, le calcul rapide, le rafraîchissement automatique, les curseurs de
-portée, le marqueur Bode, le guide de démarrage et les préférences
-d’accessibilité sont livrés. Le dockage libre reste hors périmètre et la
-persistance des préférences appartient à la finalisation. Voir [UI.md](UI.md),
-[INSTRUMENTS.md](INSTRUMENTS.md) et [EDITOR.md](EDITOR.md).
+portée, le marqueur Bode, le guide de démarrage, les préférences
+d’accessibilité et leur persistance sont livrés. Le dockage libre reste hors
+périmètre et la persistance des projets appartient à la finalisation. Voir
+[UI.md](UI.md), [INSTRUMENTS.md](INSTRUMENTS.md) et [EDITOR.md](EDITOR.md).

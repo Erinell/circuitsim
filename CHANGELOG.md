@@ -30,6 +30,9 @@ sémantique.
 - Portées incrustées consolidées : échelle automatique ou manuelle, signaux
   superposés ou séparés, FFT, curseurs A/B, réordonnancement, fusion, cache de
   traces et marqueurs de couleur sur le schéma.
+- Préférences versionnées persistées en natif et dans `localStorage`, avec
+  restauration des thèmes, calques, favoris, vitesses et panneaux visibles.
+- Écran **À propos** avec version, licence et licences tierces.
 
 ### Changed
 

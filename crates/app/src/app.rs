@@ -10,6 +10,7 @@ use std::time::Duration;
 use crate::analysis::probe_readings;
 
 use crate::document::{Alignment, DistributionAxis, Document};
+use crate::preferences::PersistedPreferences;
 use crate::ui::canvas::CanvasState;
 use crate::ui::command_palette::{CommandAction, CommandPalette};
 use crate::ui::history;
@@ -38,9 +39,13 @@ pub struct CircuitApp {
     auto: AutoRefresh,
     preferences: DisplayPreferences,
     preferences_dirty: bool,
+    last_persisted: Option<PersistedPreferences>,
+    last_persist_time: f64,
+    persist_error: bool,
     show_help: bool,
     show_onboarding: bool,
     show_preferences: bool,
+    show_about: bool,
     show_palette: bool,
     show_inspector: bool,
     show_instruments: bool,
@@ -80,6 +85,22 @@ impl ThemeMode {
             Self::Dark => "Sombre",
             Self::HighContrast => "Contraste élevé",
             Self::Light => "Clair",
+        }
+    }
+
+    const fn canvas_theme(self) -> CanvasTheme {
+        match self {
+            Self::Dark => CanvasTheme::Dark,
+            Self::HighContrast => CanvasTheme::HighContrast,
+            Self::Light => CanvasTheme::Light,
+        }
+    }
+
+    const fn from_canvas(theme: CanvasTheme) -> Self {
+        match theme {
+            CanvasTheme::Dark => Self::Dark,
+            CanvasTheme::HighContrast => Self::HighContrast,
+            CanvasTheme::Light => Self::Light,
         }
     }
 }
@@ -179,7 +200,15 @@ impl AutoRefresh {
 impl CircuitApp {
     /// Creates the application and configures the egui style.
     pub fn new(cc: &eframe::CreationContext<'_>) -> Self {
-        let preferences = DisplayPreferences::default();
+        let stored = crate::preferences::load();
+        let mut preferences = DisplayPreferences::default();
+        if let Some(stored) = &stored {
+            preferences.theme = ThemeMode::from_canvas(stored.canvas.theme);
+            if UI_SCALES.contains(&stored.scale) {
+                preferences.scale = stored.scale;
+            }
+            preferences.reduce_motion = stored.reduce_motion;
+        }
         apply_style(&cc.egui_ctx, preferences);
         let (document, status) = match Document::demo() {
             Ok(document) => (
@@ -194,15 +223,32 @@ impl CircuitApp {
                 )),
             ),
         };
-        let instruments = InstrumentsState::new();
-        let scopes = InlineScopes::with_signals(instruments.selected_signals());
+        let mut canvas = CanvasState::new();
+        let mut palette_state = PaletteState::default();
+        let mut instruments = InstrumentsState::new();
+        let mut scopes = InlineScopes::with_signals(instruments.selected_signals());
+        let mut show_palette = true;
+        let mut show_inspector = true;
+        let mut show_instruments = false;
+        if let Some(stored) = &stored {
+            *canvas.settings_mut() = stored.canvas;
+            canvas.set_theme(stored.canvas.theme);
+            palette_state.set_favorites(stored.favorites.iter().cloned());
+            instruments.set_realtime_speed(stored.realtime_speed);
+            instruments.set_animation_speed(stored.animation_speed);
+            instruments.set_power_brightness(stored.power_brightness);
+            scopes.set_visible(stored.show_inline_scopes);
+            show_palette = stored.show_palette;
+            show_inspector = stored.show_inspector;
+            show_instruments = stored.show_instruments;
+        }
         Self {
             document,
             tool: Tool::Select,
             keymap: Keymap::default(),
             filter: String::new(),
-            palette_state: PaletteState::default(),
-            canvas: CanvasState::new(),
+            palette_state,
+            canvas,
             inspector: InspectorState::default(),
             instruments,
             scopes,
@@ -212,12 +258,16 @@ impl CircuitApp {
             auto: AutoRefresh::default(),
             preferences,
             preferences_dirty: false,
+            last_persisted: stored,
+            last_persist_time: 0.0,
+            persist_error: false,
             show_help: false,
             show_onboarding: true,
             show_preferences: false,
-            show_palette: true,
-            show_inspector: true,
-            show_instruments: false,
+            show_about: false,
+            show_palette,
+            show_inspector,
+            show_instruments,
             live_autostart: true,
         }
     }
@@ -298,6 +348,47 @@ impl CircuitApp {
         ) {
             self.instruments
                 .run_transient_now(&self.document, now, &mut self.status);
+        }
+    }
+
+    fn stored_preferences(&self) -> PersistedPreferences {
+        PersistedPreferences {
+            version: crate::preferences::PREFERENCES_VERSION,
+            scale: self.preferences.scale,
+            reduce_motion: self.preferences.reduce_motion,
+            canvas: *self.canvas.settings(),
+            show_palette: self.show_palette,
+            show_inspector: self.show_inspector,
+            show_instruments: self.show_instruments,
+            show_inline_scopes: self.scopes.visible(),
+            realtime_speed: self.instruments.realtime_speed(),
+            animation_speed: self.instruments.animation_speed(),
+            power_brightness: self.instruments.power_brightness(),
+            favorites: self.palette_state.favorites().collect(),
+        }
+    }
+
+    fn persist_if_due(&mut self, now: f64) {
+        let current = self.stored_preferences();
+        if self.last_persisted.as_ref() == Some(&current) {
+            return;
+        }
+        if self.last_persisted.is_some() && now - self.last_persist_time < 0.6 {
+            return;
+        }
+        match crate::preferences::save(&current) {
+            Ok(()) => {
+                self.last_persisted = Some(current);
+                self.last_persist_time = now;
+                self.persist_error = false;
+            }
+            Err(error) => {
+                if !self.persist_error {
+                    self.status
+                        .error(format!("Préférences non enregistrées : {error}"));
+                    self.persist_error = true;
+                }
+            }
         }
     }
 
@@ -735,6 +826,13 @@ impl CircuitApp {
                 self.palette.open(self.canvas.last_pointer_grid());
             }
             if ui
+                .button("À propos")
+                .on_hover_text("Version, licence et licences tierces")
+                .clicked()
+            {
+                self.show_about = true;
+            }
+            if ui
                 .button("Aide")
                 .on_hover_text("Raccourcis et fonctionnement (?)")
                 .clicked()
@@ -884,11 +982,7 @@ impl CircuitApp {
         self.canvas
             .set_power_brightness(self.instruments.power_brightness());
         self.canvas.set_scope_signals(self.scopes.active_signals());
-        self.canvas.set_theme(match self.preferences.theme {
-            ThemeMode::Dark => CanvasTheme::Dark,
-            ThemeMode::HighContrast => CanvasTheme::HighContrast,
-            ThemeMode::Light => CanvasTheme::Light,
-        });
+        self.canvas.set_theme(self.preferences.theme.canvas_theme());
         ui::canvas::CanvasState::show(
             &mut self.canvas,
             ui,
@@ -1416,6 +1510,54 @@ impl CircuitApp {
         self.show_onboarding = open;
     }
 
+    fn about_window(&mut self, context: &Context) {
+        if !self.show_about {
+            return;
+        }
+        let mut open = true;
+        egui::Window::new("À propos")
+            .open(&mut open)
+            .anchor(Align2::CENTER_CENTER, Vec2::ZERO)
+            .collapsible(false)
+            .resizable(true)
+            .default_width(520.0)
+            .show(context, |ui| {
+                ui.heading(format!("CircuitSim {}", env!("CARGO_PKG_VERSION")));
+                ui.label("Simulateur analogique natif et WASM.");
+                ui.label("Licence : MIT OR Apache-2.0 · Cédric Debois, 2026.");
+                ui.separator();
+                ui.label(
+                    "Les préférences sont enregistrées dans le stockage local du \
+                     navigateur ou dans le fichier de configuration natif.",
+                );
+                egui::CollapsingHeader::new("Licences tierces")
+                    .default_open(false)
+                    .show(ui, |ui| {
+                        egui::ScrollArea::vertical()
+                            .max_height(320.0)
+                            .id_salt("third_party_licenses")
+                            .show(ui, |ui| {
+                                ui.add(
+                                    egui::Label::new(
+                                        RichText::new(include_str!(
+                                            "../../../THIRD_PARTY_LICENSES.md"
+                                        ))
+                                        .monospace()
+                                        .small(),
+                                    )
+                                    .wrap(),
+                                );
+                            });
+                    });
+                if ui.button("Fermer").clicked() {
+                    self.show_about = false;
+                }
+            });
+        if !open {
+            self.show_about = false;
+        }
+    }
+
     fn preferences_window(&mut self, context: &Context) {
         if !self.show_preferences {
             return;
@@ -1688,7 +1830,9 @@ impl eframe::App for CircuitApp {
         self.help_window(ui.ctx());
         self.onboarding_window(ui.ctx());
         self.preferences_window(ui.ctx());
+        self.about_window(ui.ctx());
         self.symbol_dialog_window(ui.ctx());
+        self.persist_if_due(now);
     }
 }
 
