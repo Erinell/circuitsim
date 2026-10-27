@@ -1650,6 +1650,9 @@ fn apply_style(context: &Context, preferences: DisplayPreferences) {
         style
             .text_styles
             .insert(egui::TextStyle::Heading, FontId::proportional(19.0));
+        style
+            .text_styles
+            .insert(egui::TextStyle::Small, FontId::proportional(10.0));
     });
     context.set_zoom_factor(preferences.scale);
 }
@@ -1713,6 +1716,18 @@ fn shortcut(ui: &mut Ui, keys: &str, description: &str) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn small_text_is_slightly_larger_than_the_egui_default() {
+        let context = egui::Context::default();
+        apply_style(&context, DisplayPreferences::default());
+        let size = context
+            .style_of(egui::Theme::Dark)
+            .text_styles
+            .get(&egui::TextStyle::Small)
+            .map_or(0.0, |font| font.size);
+        assert!(size >= 10.0, "small text size = {size}");
+    }
 
     #[test]
     fn selection_helper_detects_selected_symbols() {

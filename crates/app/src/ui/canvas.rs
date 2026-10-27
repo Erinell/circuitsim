@@ -1641,28 +1641,28 @@ impl CanvasState {
             panel.left_top() + Vec2::new(8.0, 4.0),
             Align2::LEFT_TOP,
             "Tension",
-            FontId::proportional(10.5),
+            FontId::proportional(11.0),
             palette.muted,
         );
         painter.text(
             bar.left_bottom() + Vec2::new(0.0, 2.0),
             Align2::LEFT_TOP,
             format_si_precision(-scale.max_abs(), Unit::Volt, 2),
-            FontId::proportional(9.5),
+            FontId::proportional(10.0),
             palette.muted,
         );
         painter.text(
             bar.center_bottom() + Vec2::new(0.0, 2.0),
             Align2::CENTER_TOP,
             "0 V",
-            FontId::proportional(9.5),
+            FontId::proportional(10.0),
             palette.muted,
         );
         painter.text(
             bar.right_bottom() + Vec2::new(0.0, 2.0),
             Align2::RIGHT_TOP,
             format_si_precision(scale.max_abs(), Unit::Volt, 2),
-            FontId::proportional(9.5),
+            FontId::proportional(10.0),
             palette.muted,
         );
     }
@@ -1835,7 +1835,7 @@ impl CanvasState {
                 panel.left_top() + Vec2::new(8.0, 24.0 + index as f32 * 14.0),
                 Align2::LEFT_TOP,
                 line,
-                FontId::proportional(10.5),
+                FontId::proportional(11.0),
                 palette.muted,
             );
         }
@@ -1870,7 +1870,7 @@ impl CanvasState {
                 track.left_top() + Vec2::new(0.0, -12.0),
                 Align2::LEFT_BOTTOM,
                 label,
-                FontId::proportional(9.5),
+                FontId::proportional(10.0),
                 palette.muted,
             );
             painter.line_segment(
@@ -2766,14 +2766,14 @@ impl CanvasState {
             badge.left_top() + Vec2::new(10.0, 25.0),
             Align2::LEFT_TOP,
             hint,
-            FontId::proportional(10.5),
+            FontId::proportional(11.0),
             palette.muted,
         );
         painter.text(
             rect.left_bottom() + Vec2::new(10.0, -10.0),
             Align2::LEFT_BOTTOM,
             "Molette : zoom · bouton milieu : déplacer · mini-carte : cliquer",
-            FontId::proportional(10.0),
+            FontId::proportional(10.5),
             palette.muted.gamma_multiply(0.7),
         );
     }
