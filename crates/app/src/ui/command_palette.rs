@@ -48,6 +48,10 @@ pub enum CommandAction {
     LoadDemo,
     /// Open display and accessibility preferences.
     Preferences,
+    /// Open the project JSON dialog.
+    Project,
+    /// Open the About window.
+    About,
     /// Open help.
     Help,
 }
@@ -204,7 +208,7 @@ impl CommandPalette {
             &mut entries,
             query,
             "Outil Sélection",
-            "V",
+            "Échap / outil par défaut",
             CommandAction::Tool(Tool::Select),
         );
         push_match(
@@ -225,7 +229,7 @@ impl CommandPalette {
             &mut entries,
             query,
             "Outil Label",
-            "L",
+            "N",
             CommandAction::Tool(Tool::Label),
         );
         push_match(
@@ -356,6 +360,20 @@ impl CommandPalette {
             "Afficher les instruments",
             "panneau",
             CommandAction::Instruments,
+        );
+        push_match(
+            &mut entries,
+            query,
+            "Projet JSON",
+            "Fichier · enregistrer, charger, partager",
+            CommandAction::Project,
+        );
+        push_match(
+            &mut entries,
+            query,
+            "À propos",
+            "version, licence, licences tierces",
+            CommandAction::About,
         );
         push_match(
             &mut entries,

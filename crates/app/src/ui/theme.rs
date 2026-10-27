@@ -403,4 +403,43 @@ mod tests {
             CanvasTheme::Light.palette().background
         );
     }
+
+    #[test]
+    fn canvas_palettes_meet_contrast_targets() {
+        for theme in [
+            CanvasTheme::Dark,
+            CanvasTheme::HighContrast,
+            CanvasTheme::Light,
+        ] {
+            let palette = theme.palette();
+            for (name, color, minimum) in [
+                ("label", palette.label, 4.5),
+                ("muted", palette.muted, 4.5),
+                ("wire", palette.wire, 3.0),
+                ("symbol", palette.symbol, 3.0),
+                ("accent", palette.accent, 3.0),
+            ] {
+                let ratio = contrast_ratio(color, palette.background);
+                assert!(ratio >= minimum, "{theme:?} {name}: {ratio:.2} < {minimum}");
+            }
+        }
+    }
+
+    fn contrast_ratio(a: Color32, b: Color32) -> f64 {
+        let left = luminance(a);
+        let right = luminance(b);
+        (left.max(right) + 0.05) / (left.min(right) + 0.05)
+    }
+
+    fn luminance(color: Color32) -> f64 {
+        let channel = |value: u8| {
+            let value = f64::from(value) / 255.0;
+            if value <= 0.03928 {
+                value / 12.92
+            } else {
+                ((value + 0.055) / 1.055).powf(2.4)
+            }
+        };
+        0.2126 * channel(color.r()) + 0.7152 * channel(color.g()) + 0.0722 * channel(color.b())
+    }
 }
