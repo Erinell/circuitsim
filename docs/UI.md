@@ -116,8 +116,10 @@ actions propres à l’objet et, sur le vide, le collage et la vue ; sa cible re
 celle du clic d’ouverture même si la souris se déplace.
 
 Le placement utilise la grille avec un label unique et reste actif pour des
-placements répétés. `R`/`F` orientent l’aperçu. Un composant à deux broches déposé
-sur un fil est inséré en série. L'outil Fil part d'une grille, d'une broche ou
+placements répétés. `R`/`F` orientent l’aperçu. Au bout d’un fil ou sur une
+broche, une broche du composant est alignée sur la cible au lieu de centrer le
+symbole. Un composant à deux broches déposé au milieu d’un fil est inséré en
+série. L'outil Fil part d'une grille, d'une broche ou
 d'un point de fil ; le tracé est orthogonal, évite les symboles et `Maj` change
 le premier coude. Une extrémité identique ou un fil existant est refusé sans
 consommer d'identifiant. Jonction refuse les doublons ; Label propose les nets
@@ -196,7 +198,10 @@ live.
 
 - **Portées** : le panneau inférieur unique empile une ou plusieurs portées
   redimensionnables. Chaque portée accepte plusieurs tensions et courants, avec
-  légende, zoom, déplacement, double-clic d’auto-échelle et infobulle. Les valeurs
+  légende, zoom, déplacement, double-clic d’auto-échelle et infobulle. Le menu
+  **Signaux** sépare les tensions des courants ; chaque composant non-masse
+  expose son courant, y compris les résistances et condensateurs par dérivation
+  des tensions d’échantillon. Les valeurs
   courantes et les mesures sont affichées dans une colonne à **droite** du tracé
   pour préserver la hauteur du graphique. Le bouton **Ajouter une portée** est
   placé dans les contrôles, avec l’aide des gestes. Le menu **Affichage** règle la

@@ -2,7 +2,9 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
-use editor_core::{GridPos, ObjectRef, Orientation, SnapTarget, Symbol, SymbolId, WireId};
+use editor_core::{
+    GridPos, ObjectRef, Orientation, SnapKind, SnapTarget, Symbol, SymbolId, WireId,
+};
 use eframe::egui::{
     self, Align2, Color32, CursorIcon, FontId, Key, Painter, PointerButton, Pos2, Rect, Sense,
     Stroke, StrokeKind, Ui, Vec2,
@@ -165,6 +167,50 @@ impl CanvasState {
         if opened {
             self.context_menu_point = current;
         }
+    }
+
+    fn placement_origin(
+        &self,
+        document: &Document,
+        kind: &editor_core::SymbolKind,
+        target: GridPos,
+    ) -> GridPos {
+        let Some(definition) = document.registry().get(kind) else {
+            return target;
+        };
+        let Some(snap) = self.snap_target else {
+            return target;
+        };
+        let pin_index = match snap.kind {
+            SnapKind::Pin(_) => 0,
+            SnapKind::Wire(id) => {
+                let Some(wire) = document.wire(id) else {
+                    return target;
+                };
+                if snap.at == wire.b {
+                    0
+                } else if snap.at == wire.a {
+                    1
+                } else {
+                    return target;
+                }
+            }
+        };
+        let Some(pin) = definition.pins.get(pin_index) else {
+            return target;
+        };
+        let preview = Symbol::from_def(
+            SymbolId(0),
+            definition,
+            GridPos::default(),
+            "",
+            self.placement_orientation,
+            self.placement_mirrored,
+        );
+        let Some(offset) = preview.pin_position_of(pin) else {
+            return target;
+        };
+        target.checked_sub(offset).unwrap_or(target)
     }
 
     /// Rotates the placement ghost.
@@ -1131,15 +1177,25 @@ impl CanvasState {
                     .registry()
                     .get(kind)
                     .is_some_and(|definition| definition.pins.len() == 2);
-                if let Some(ObjectRef::Wire(wire)) = document.object_at(point) {
+                let wire_interior = match self.snap_target {
+                    Some(SnapTarget {
+                        at,
+                        kind: SnapKind::Wire(id),
+                    }) => document
+                        .wire(id)
+                        .filter(|wire| at != wire.a && at != wire.b)
+                        .map(|_| (id, at)),
+                    _ => None,
+                };
+                if let Some((wire, at)) = wire_interior {
                     if insertable {
-                        match document.insert_symbol_on_wire(kind.clone(), wire, point) {
+                        match document.insert_symbol_on_wire(kind.clone(), wire, at) {
                             Ok(_) => {
                                 status.success(format!(
                                     "{} inséré en série à ({}, {}).",
                                     symbol_kind_name(kind),
-                                    point.x,
-                                    point.y
+                                    at.x,
+                                    at.y
                                 ));
                                 return;
                             }
@@ -1150,18 +1206,30 @@ impl CanvasState {
                         }
                     }
                 }
+                let origin = self.placement_origin(document, kind, point);
                 match document.add_symbol_oriented(
                     kind.clone(),
-                    point,
+                    origin,
                     self.placement_orientation,
                     self.placement_mirrored,
                 ) {
-                    Ok(_) => status.success(format!(
-                        "{} ajouté à ({}, {}).",
-                        symbol_kind_name(kind),
-                        point.x,
-                        point.y
-                    )),
+                    Ok(_) => {
+                        if origin == point {
+                            status.success(format!(
+                                "{} ajouté à ({}, {}).",
+                                symbol_kind_name(kind),
+                                origin.x,
+                                origin.y
+                            ));
+                        } else {
+                            status.success(format!(
+                                "{} ajouté, broche alignée sur ({}, {}).",
+                                symbol_kind_name(kind),
+                                point.x,
+                                point.y
+                            ));
+                        }
+                    }
                     Err(error) => status.error(error.user_message()),
                 }
             }
@@ -2281,10 +2349,11 @@ impl CanvasState {
         if let crate::ui::Tool::Place(kind) = tool {
             if let Some(point) = hovered_point {
                 if let Some(definition) = document.registry().get(kind) {
+                    let origin = self.placement_origin(document, kind, point);
                     let preview = Symbol::from_def(
                         SymbolId(0),
                         definition,
-                        point,
+                        origin,
                         "",
                         self.placement_orientation,
                         self.placement_mirrored,
@@ -2295,7 +2364,7 @@ impl CanvasState {
                         &ghost_painter,
                         &preview,
                         Some(definition),
-                        self.viewport.grid_to_screen(rect, point),
+                        self.viewport.grid_to_screen(rect, origin),
                         self.viewport.scale(),
                         GlyphColors {
                             body: palette.symbol,
@@ -2316,7 +2385,16 @@ impl CanvasState {
                         }
                     }
                 }
-                if matches!(document.object_at(point), Some(ObjectRef::Wire(_)))
+                let insert_preview = match self.snap_target {
+                    Some(SnapTarget {
+                        at,
+                        kind: SnapKind::Wire(id),
+                    }) => document
+                        .wire(id)
+                        .is_some_and(|wire| at != wire.a && at != wire.b),
+                    _ => false,
+                };
+                if insert_preview
                     && document
                         .registry()
                         .get(kind)
@@ -3992,6 +4070,39 @@ mod tests {
         click(&context, &mut canvas, &mut document, &mut status, &tool, at);
         assert_eq!(document.schematic().symbols().count(), 1);
         assert_eq!(document.schematic().wires().count(), 2);
+    }
+
+    #[test]
+    fn canvas_placement_at_a_wire_end_snaps_a_pin() {
+        let context = egui::Context::default();
+        let mut canvas = CanvasState::new();
+        let mut document = Document::new();
+        document
+            .add_wire(GridPos::new(0, 0), GridPos::new(8, 0))
+            .unwrap();
+        let mut status = Status::new_info("");
+        let tool = crate::ui::Tool::Place(editor_core::SymbolKind::Resistor);
+        frame(
+            &context,
+            &mut canvas,
+            &mut document,
+            &mut status,
+            &tool,
+            Vec::new(),
+        );
+        let at = canvas
+            .viewport()
+            .grid_to_screen(screen(), GridPos::new(8, 0));
+        click(&context, &mut canvas, &mut document, &mut status, &tool, at);
+
+        let symbol = document.schematic().symbols().next().unwrap();
+        assert_eq!(symbol.at, GridPos::new(10, 0));
+        assert_eq!(document.schematic().wires().count(), 1);
+        let definition = document.registry().get(&symbol.kind).unwrap();
+        assert_eq!(
+            symbol.pin_position_of(&definition.pins[0]),
+            Some(GridPos::new(8, 0))
+        );
     }
 
     #[test]

@@ -1142,6 +1142,158 @@ pub fn prepare_realtime(
     })
 }
 
+/// Lists components whose current can be plotted by the scopes.
+pub fn component_current_labels(document: &crate::document::Document) -> Vec<String> {
+    let mut labels = document
+        .schematic()
+        .symbols()
+        .filter(|symbol| {
+            !symbol.kind.is_measurement()
+                && !symbol.kind.is_ground()
+                && !matches!(symbol.kind, SymbolKind::Custom(_))
+        })
+        .map(|symbol| symbol.label.clone())
+        .collect::<Vec<_>>();
+    labels.sort();
+    labels.dedup();
+    labels
+}
+
+/// Extracts traces from an arbitrary sample buffer, deriving component currents
+/// that the solver does not expose as branch variables.
+pub fn transient_traces_from_samples_with_document(
+    samples: &[TransientSample],
+    context: &RunContext,
+    document: &crate::document::Document,
+    signals: &[SignalId],
+) -> Result<Vec<Trace>, SimulationError> {
+    let extraction = document.extraction();
+    let mut traces = Vec::with_capacity(signals.len());
+    for signal in signals {
+        let mut points = Vec::with_capacity(samples.len());
+        match signal {
+            SignalId::Voltage(name) => {
+                let node = context
+                    .nodes
+                    .get(name)
+                    .copied()
+                    .ok_or_else(|| SimulationError::MissingSignal(signal.label()))?;
+                for sample in samples {
+                    if let Some(value) = sample.node_voltage(node) {
+                        points.push([sample.time, value]);
+                    }
+                }
+            }
+            SignalId::Current(name) => {
+                let component = context
+                    .components
+                    .get(name)
+                    .copied()
+                    .ok_or_else(|| SimulationError::MissingSignal(signal.label()))?;
+                let spec = extraction.and_then(|extraction| {
+                    extraction
+                        .netlist
+                        .components
+                        .iter()
+                        .find(|spec| spec.id == component)
+                });
+                for (index, sample) in samples.iter().enumerate() {
+                    let previous = index.checked_sub(1).and_then(|index| samples.get(index));
+                    let value = sample.branch_current(component).or_else(|| {
+                        spec.and_then(|spec| derived_component_current(spec, sample, previous))
+                    });
+                    if let Some(value) = value {
+                        points.push([sample.time, value]);
+                    }
+                }
+            }
+        }
+        if points.is_empty() {
+            return Err(SimulationError::NoData);
+        }
+        traces.push(Trace {
+            signal: signal.clone(),
+            points,
+        });
+    }
+    Ok(traces)
+}
+
+fn derived_component_current(
+    spec: &ComponentSpec,
+    sample: &TransientSample,
+    previous: Option<&TransientSample>,
+) -> Option<f64> {
+    if spec.pins.len() != 2 {
+        return None;
+    }
+    let a = sample.node_voltage(spec.pins[0])?;
+    let b = sample.node_voltage(spec.pins[1])?;
+    let voltage = a - b;
+    match spec.kind {
+        ComponentKind::Resistor => {
+            let resistance = component_number(spec, "resistance")?;
+            (resistance.abs() > f64::MIN_POSITIVE).then_some(voltage / resistance)
+        }
+        ComponentKind::Switch => {
+            let closed = spec
+                .params
+                .get("closed")
+                .and_then(ParamValue::as_bool)
+                .unwrap_or(false);
+            let resistance = component_number(spec, if closed { "ron" } else { "roff" })?;
+            (resistance.abs() > f64::MIN_POSITIVE).then_some(voltage / resistance)
+        }
+        ComponentKind::Capacitor => {
+            let capacitance = component_number(spec, "capacitance")?;
+            let previous = previous?;
+            let dt = sample.time - previous.time;
+            if dt <= 0.0 {
+                return None;
+            }
+            let previous_voltage =
+                previous.node_voltage(spec.pins[0])? - previous.node_voltage(spec.pins[1])?;
+            Some(capacitance * (voltage - previous_voltage) / dt)
+        }
+        ComponentKind::CurrentSource => component_number(spec, "dc"),
+        ComponentKind::Diode | ComponentKind::Led | ComponentKind::Zener => {
+            diode_current(spec, voltage)
+        }
+        _ => None,
+    }
+}
+
+fn diode_current(spec: &ComponentSpec, voltage: f64) -> Option<f64> {
+    const THERMAL_VOLTAGE: f64 = 0.025_864_925_786_329;
+    let saturation = component_number(spec, "is")?;
+    let emission = component_number(spec, "n")?;
+    if emission <= 0.0 {
+        return None;
+    }
+    let forward = (voltage / (emission * THERMAL_VOLTAGE)).min(80.0).exp();
+    let mut current = saturation * (forward - 1.0);
+    if spec.kind == ComponentKind::Zener {
+        let breakdown = component_number(spec, "bv")?;
+        let breakdown_saturation = component_number(spec, "ibv")?;
+        let breakdown_emission = component_number(spec, "nbv")?;
+        if breakdown_emission <= 0.0 {
+            return None;
+        }
+        let reverse = (-(voltage + breakdown) / (breakdown_emission * THERMAL_VOLTAGE))
+            .min(80.0)
+            .exp();
+        current -= breakdown_saturation * (reverse - 1.0);
+    }
+    Some(current)
+}
+
+fn component_number(spec: &ComponentSpec, key: &str) -> Option<f64> {
+    spec.params
+        .get(key)
+        .and_then(ParamValue::as_number)
+        .filter(|value| value.is_finite())
+}
+
 /// Extracts traces from an arbitrary sample buffer.
 pub fn transient_traces_from_samples(
     samples: &[TransientSample],
@@ -1756,6 +1908,35 @@ mod tests {
                 ..
             })
         ));
+    }
+
+    #[test]
+    fn scope_component_current_traces_derive_resistor_currents() {
+        let document = Document::demo().unwrap();
+        let extraction = document.extraction().unwrap().clone();
+        let catalog = SignalCatalog::from_extraction(&extraction);
+        let mut settings = TransientSettings::default();
+        settings.ensure_catalog(&catalog.sources);
+        let prepared = prepare_transient(&extraction, &settings, 0).unwrap();
+        let mut client = SimulationClient::new().unwrap();
+        client.submit(prepared).unwrap();
+        let run = client.poll(1.0).unwrap().unwrap();
+        let AnalysisResult::Transient(result) = run.result else {
+            panic!("expected transient result");
+        };
+        let labels = component_current_labels(&document);
+        assert!(labels.contains(&"R1".to_owned()));
+        assert!(labels.contains(&"C1".to_owned()));
+        let traces = transient_traces_from_samples_with_document(
+            &result.samples,
+            &run.context,
+            &document,
+            &[SignalId::Current("R1".to_owned())],
+        )
+        .unwrap();
+        assert_eq!(traces.len(), 1);
+        assert!(traces[0].points.len() > 400);
+        assert!(traces[0].points.iter().all(|point| point[1].is_finite()));
     }
 
     #[test]

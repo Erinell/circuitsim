@@ -13,9 +13,9 @@ use worker::protocol::{AnalysisKind, AnalysisResult};
 use crate::analysis::prepare_transient;
 use crate::analysis::{
     analysis_name, bode_csv, bode_trace, compute_spectrum, prepare_ac, spectrum_csv, transient_csv,
-    transient_traces, transient_traces_from_samples, AcSettings, BodePoint, BodeTrace,
-    CompletedRun, SignalCatalog, SignalId, SignalUnit, SimulationClient, SimulationError, Spectrum,
-    Trace, TransientSettings, MAX_AC_POINTS,
+    transient_traces, transient_traces_from_samples, transient_traces_from_samples_with_document,
+    AcSettings, BodePoint, BodeTrace, CompletedRun, SignalCatalog, SignalId, SignalUnit,
+    SimulationClient, SimulationError, Spectrum, Trace, TransientSettings, MAX_AC_POINTS,
 };
 use crate::document::Document;
 use crate::export;
@@ -609,7 +609,7 @@ impl InstrumentsState {
                                 .color(MUTED),
                             );
                             ui.separator();
-                            self.export_controls(ui, status);
+                            self.export_controls(ui, document, status);
                         });
                 },
             );
@@ -810,7 +810,7 @@ impl InstrumentsState {
             }
         }
         ui.separator();
-        self.export_controls(ui, status);
+        self.export_controls(ui, document, status);
     }
 
     fn spectrum_controls(
@@ -1109,7 +1109,7 @@ impl InstrumentsState {
         }
     }
 
-    fn export_controls(&mut self, ui: &mut Ui, status: &mut Status) {
+    fn export_controls(&mut self, ui: &mut Ui, document: &Document, status: &mut Status) {
         egui::CollapsingHeader::new("Export CSV")
             .default_open(false)
             .show(ui, |ui| {
@@ -1137,7 +1137,7 @@ impl InstrumentsState {
                     }
                 });
                 if copy || persist {
-                    match self.export_payload() {
+                    match self.export_payload(document) {
                         Ok(Some((filename, contents))) => {
                             if copy {
                                 ui.ctx().copy_text(contents.clone());
@@ -1201,13 +1201,16 @@ impl InstrumentsState {
             });
     }
 
-    fn export_payload(&self) -> Result<Option<(String, String)>, SimulationError> {
+    fn export_payload(
+        &self,
+        document: &Document,
+    ) -> Result<Option<(String, String)>, SimulationError> {
         match self.tab {
             InstrumentTab::Scope => {
                 if self.scope_signals.is_empty() {
                     return Ok(None);
                 }
-                let Some(traces) = self.traces_for(&self.scope_signals)? else {
+                let Some(traces) = self.traces_for(document, &self.scope_signals)? else {
                     return Ok(None);
                 };
                 if traces.is_empty() {
@@ -1247,6 +1250,7 @@ impl InstrumentsState {
     /// Returns traces for an arbitrary signal set.
     pub fn traces_for(
         &self,
+        document: &Document,
         signals: &BTreeSet<SignalId>,
     ) -> Result<Option<Vec<Trace>>, SimulationError> {
         if let Some(run) = &self.realtime {
@@ -1258,8 +1262,13 @@ impl InstrumentsState {
             let latest = samples.last().map_or(0.0, |sample| sample.time);
             let start = latest - self.scope_window;
             let first = samples.partition_point(|sample| sample.time < start);
-            return transient_traces_from_samples(&samples[first..], run.context(), &signals)
-                .map(Some);
+            return transient_traces_from_samples_with_document(
+                &samples[first..],
+                run.context(),
+                document,
+                &signals,
+            )
+            .map(Some);
         }
         let Some(run) = &self.transient_run else {
             return Ok(None);
@@ -1274,7 +1283,13 @@ impl InstrumentsState {
         let latest = result.samples.last().map_or(0.0, |sample| sample.time);
         let start = latest - self.scope_window;
         let first = result.samples.partition_point(|sample| sample.time < start);
-        transient_traces_from_samples(&result.samples[first..], &run.context, &signals).map(Some)
+        transient_traces_from_samples_with_document(
+            &result.samples[first..],
+            &run.context,
+            document,
+            &signals,
+        )
+        .map(Some)
     }
 
     fn spectrum_data(&self) -> Result<Option<(Trace, Spectrum)>, SimulationError> {
@@ -2059,7 +2074,10 @@ mod tests {
         assert_eq!(state.transient_time(), Some(advanced));
         state.step_realtime(&document, &mut status);
         assert!(state.transient_time().unwrap() > advanced);
-        let traces = state.traces_for(&state.selected).unwrap().unwrap();
+        let traces = state
+            .traces_for(&document, &state.selected)
+            .unwrap()
+            .unwrap();
         assert!(!traces.is_empty());
         assert!(state.live_values().time.is_some());
     }
@@ -2097,12 +2115,12 @@ mod tests {
         assert!(!state.is_busy());
         assert!(state.can_simulate(&document));
         state.scope_signals = state.selected.clone();
-        let (filename, csv) = state.export_payload().unwrap().unwrap();
+        let (filename, csv) = state.export_payload(&document).unwrap().unwrap();
         assert_eq!(filename, "circuitsim-portee.csv");
         assert!(csv.starts_with("signal,unit,time_s,value\n"));
         assert!(state.spectrum_data().unwrap().is_some());
         state.tab = InstrumentTab::Spectrum;
-        let (filename, csv) = state.export_payload().unwrap().unwrap();
+        let (filename, csv) = state.export_payload(&document).unwrap().unwrap();
         assert_eq!(filename, "circuitsim-spectre.csv");
         assert!(csv.starts_with("signal,unit,frequency_hz,magnitude\n"));
     }
@@ -2150,7 +2168,7 @@ mod tests {
         assert!(state.ac_run.is_some());
         let trace = state.bode_data().unwrap().unwrap();
         assert_eq!(trace.points.len(), 101);
-        let (filename, csv) = state.export_payload().unwrap().unwrap();
+        let (filename, csv) = state.export_payload(&document).unwrap().unwrap();
         assert_eq!(filename, "circuitsim-bode.csv");
         assert!(csv.starts_with("signal,frequency_hz,magnitude_v,gain_db,phase_deg\n"));
     }

@@ -7,8 +7,8 @@ use eframe::egui::{self, Color32, RichText, Ui, Vec2};
 use egui_plot::{Corner, Legend, Line, Plot, VLine};
 
 use crate::analysis::{
-    compute_spectrum, measurements, probe_readings, SignalCatalog, SignalId, SignalUnit, Spectrum,
-    Trace,
+    component_current_labels, compute_spectrum, measurements, probe_readings, SignalCatalog,
+    SignalId, SignalUnit, Spectrum, Trace,
 };
 use crate::document::Document;
 use crate::ui::instruments::{
@@ -194,6 +194,7 @@ impl InlineScopes {
                                 scope.show(
                                     ui,
                                     instruments,
+                                    document,
                                     &catalog,
                                     index > 0,
                                     index + 1 < scope_count,
@@ -313,25 +314,28 @@ impl Scope {
         &mut self,
         ui: &mut Ui,
         instruments: &InstrumentsState,
+        document: &Document,
         catalog: &SignalCatalog,
         can_move_up: bool,
         can_move_down: bool,
     ) -> ScopeAction {
         let mut action = ScopeAction::None;
-        let live_traces = self.traces(instruments);
+        let live_traces = self.traces(instruments, document);
         let mut freeze_now = false;
         let reset_view = std::mem::take(&mut self.reset_view);
         ui.horizontal_wrapped(|ui| {
             ui.label(RichText::new(&self.title).strong());
             ui.menu_button("Signaux", |ui| {
                 let mut changed = false;
+                ui.label(RichText::new("Tensions").strong());
                 for name in &catalog.voltages {
                     changed |=
                         signal_checkbox(ui, &mut self.signals, SignalId::Voltage(name.clone()));
                 }
-                for name in &catalog.currents {
-                    changed |=
-                        signal_checkbox(ui, &mut self.signals, SignalId::Current(name.clone()));
+                ui.separator();
+                ui.label(RichText::new("Courants").strong());
+                for name in component_current_labels(document) {
+                    changed |= signal_checkbox(ui, &mut self.signals, SignalId::Current(name));
                 }
                 if changed {
                     self.frozen = false;
@@ -508,7 +512,7 @@ impl Scope {
         }
     }
 
-    fn traces(&mut self, instruments: &InstrumentsState) -> Arc<Vec<Trace>> {
+    fn traces(&mut self, instruments: &InstrumentsState, document: &Document) -> Arc<Vec<Trace>> {
         if self.frozen {
             return self.frozen_traces.clone().unwrap_or_default();
         }
@@ -520,7 +524,7 @@ impl Scope {
         }
         let traces = Arc::new(
             instruments
-                .traces_for(&self.signals)
+                .traces_for(document, &self.signals)
                 .unwrap_or_default()
                 .unwrap_or_default(),
         );
