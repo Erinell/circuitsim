@@ -55,6 +55,9 @@ sémantique.
 
 ### Fixed
 
+- Le panneau des portées n’affiche plus de barre de défilement superflue ni de
+  séparateur au-dessus de la première portée. Ajouter une portée conserve des
+  hauteurs identiques pour tous les tracés.
 - Le courant animé s’arrête quand l’interrupteur est ouvert, y compris lorsque le
   solveur renvoie un courant de fuite résiduel.
 - Les sources de tension des exemples diviseur, LED, interrupteur et RLC sont

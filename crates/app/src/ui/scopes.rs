@@ -174,29 +174,39 @@ impl InlineScopes {
             }
         }
         self.probe_strip(ui, instruments, document, &catalog);
-        ui.separator();
-        let available = ui.available_height();
+        let available = (ui.available_height() - 4.0).max(120.0);
         let count = self.scopes.len().max(1) as f32;
-        let plot_height = ((available - 24.0) / count - 56.0).clamp(96.0, 640.0);
+        let gap = 6.0_f32;
+        let scope_height = ((available - gap * (count - 1.0)) / count).max(80.0);
         let scope_count = self.scopes.len();
         egui::ScrollArea::vertical()
             .id_salt("inline_scopes")
             .auto_shrink([false, false])
             .show(ui, |ui| {
+                let scope_width = ui.available_width();
                 let mut actions = Vec::new();
                 for (index, scope) in self.scopes.iter_mut().enumerate() {
-                    let action = scope.show(
-                        ui,
-                        instruments,
-                        &catalog,
-                        plot_height,
-                        index > 0,
-                        index + 1 < scope_count,
-                    );
+                    let action = ui
+                        .allocate_ui_with_layout(
+                            Vec2::new(scope_width, scope_height),
+                            egui::Layout::top_down(egui::Align::Min),
+                            |ui| {
+                                scope.show(
+                                    ui,
+                                    instruments,
+                                    &catalog,
+                                    index > 0,
+                                    index + 1 < scope_count,
+                                )
+                            },
+                        )
+                        .inner;
                     if action != ScopeAction::None {
                         actions.push((scope.id, action));
                     }
-                    ui.separator();
+                    if index + 1 < scope_count {
+                        ui.add_space(gap);
+                    }
                 }
                 actions.sort_by_key(|(id, _)| std::cmp::Reverse(*id));
                 for (id, action) in actions {
@@ -304,7 +314,6 @@ impl Scope {
         ui: &mut Ui,
         instruments: &InstrumentsState,
         catalog: &SignalCatalog,
-        plot_height: f32,
         can_move_up: bool,
         can_move_down: bool,
     ) -> ScopeAction {
@@ -426,6 +435,7 @@ impl Scope {
             );
             return action;
         }
+        let plot_height = ui.available_height().max(40.0);
         let unit = common_unit(&traces);
         let side_width = if ui.available_width() >= 560.0 {
             200.0
@@ -456,6 +466,9 @@ impl Scope {
                     |ui| {
                         egui::ScrollArea::vertical()
                             .id_salt(format!("scope_values_{}", self.id))
+                            .scroll_bar_visibility(
+                                egui::scroll_area::ScrollBarVisibility::AlwaysHidden,
+                            )
                             .max_height(plot_height)
                             .auto_shrink([false, false])
                             .show(ui, |ui| {
