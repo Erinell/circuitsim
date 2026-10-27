@@ -196,8 +196,11 @@ live.
 
 - **Portées** : le panneau inférieur unique empile une ou plusieurs portées
   redimensionnables. Chaque portée accepte plusieurs tensions et courants, avec
-  légende, valeurs courantes, zoom, déplacement, double-clic d’auto-échelle et
-  infobulle. Le menu **Affichage** règle la superposition ou la séparation des
+  légende, zoom, déplacement, double-clic d’auto-échelle et infobulle. Les valeurs
+  courantes et les mesures sont affichées dans une colonne à **droite** du tracé
+  pour préserver la hauteur du graphique. Le bouton **Ajouter une portée** est
+  placé dans les contrôles, avec l’aide des gestes. Le menu **Affichage** règle la
+  superposition ou la séparation des
   signaux, l’échelle Y automatique ou manuelle et la vue temporelle ou FFT. Les
   curseurs A/B se posent au clic et affichent tA, tB, Δt et les valeurs par
   signal. **Figer** conserve le tracé, **Effacer** le vide, les flèches

@@ -92,8 +92,9 @@ La zone **Instruments et portées** en bas de la fenêtre réutilise les mêmes
 de signaux, son gel, son cache de traces, ses curseurs A/B, son échelle
 automatique ou manuelle et son identifiant de graphe stable pour conserver le zoom
 entre les frames. Elle peut afficher les signaux superposés ou séparés, en
-temporel ou en FFT. Les valeurs courantes sont lues sur le dernier point de chaque
-trace. Un marqueur de couleur rappelle sur le schéma le fil ou le composant tracé.
+temporel ou en FFT. Les valeurs courantes et les mesures sont lues sur le dernier
+point de chaque trace et affichées dans une colonne à droite du graphique. Le
+bouton **Ajouter une portée** est dans les contrôles. Un marqueur de couleur rappelle sur le schéma le fil ou le composant tracé.
 Le même panneau reste la référence pour le Bode et les exports.
 
 Chaque signal devient une `Trace` de points `[temps_s, valeur_SI]` en ordre

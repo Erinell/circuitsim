@@ -40,6 +40,9 @@ sémantique.
   restent lisibles dans les projets existants.
 - Le survol d’un fil ou d’une broche affiche l’intensité sous la tension, avec la
   masse commune comme référence.
+- Dans les portées, **Ajouter une portée** passe dans les contrôles et les
+  valeurs/mesures s’affichent à droite du tracé. La section **Sondes** est repliée
+  par défaut, ce qui rend de la hauteur au graphique.
 - Plusieurs symboles de masse sur un même canevas sont fusionnés dans le nœud
   commun `0`, même sans fil partagé. L’ERC signale la fusion en information au
   lieu de la refuser.
