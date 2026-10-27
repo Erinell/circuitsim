@@ -229,7 +229,7 @@ impl Default for TransientSettings {
             start_time: "0".to_owned(),
             stop_time: "5m".to_owned(),
             step: "10u".to_owned(),
-            step_enabled: true,
+            step_enabled: false,
             source: None,
             initial_value: "0".to_owned(),
             event_time: "0".to_owned(),
@@ -1638,6 +1638,15 @@ mod tests {
     }
 
     #[test]
+    fn realtime_default_does_not_apply_a_source_step() {
+        let extraction = demo_extraction();
+        let settings = TransientSettings::default();
+        let setup = prepare_realtime(&extraction, &settings, 0).unwrap();
+        assert!(setup.options.events.is_empty());
+        assert_eq!(setup.options.stop_time, f64::MAX);
+    }
+
+    #[test]
     fn transient_source_step_overrides_the_dc_value_without_mutating_the_document() {
         let extraction = demo_extraction();
         let original = extraction
@@ -1648,7 +1657,10 @@ mod tests {
             .and_then(|component| component.params.get("dc"))
             .and_then(ParamValue::as_number);
         assert!(original.is_some());
-        let mut settings = TransientSettings::default();
+        let mut settings = TransientSettings {
+            step_enabled: true,
+            ..TransientSettings::default()
+        };
         settings.ensure_catalog(&SignalCatalog::from_extraction(&extraction).sources);
         let prepared = prepare_transient(&extraction, &settings, 4).unwrap();
         assert_eq!(prepared.context.document_revision, 4);
@@ -1698,7 +1710,10 @@ mod tests {
     fn invalid_analysis_settings_are_rejected_before_submission() {
         let extraction = demo_extraction();
         let catalog = SignalCatalog::from_extraction(&extraction);
-        let mut transient = TransientSettings::default();
+        let mut transient = TransientSettings {
+            step_enabled: true,
+            ..TransientSettings::default()
+        };
         transient.ensure_catalog(&catalog.sources);
         transient.event_time = "5m".to_owned();
         assert!(matches!(

@@ -39,6 +39,7 @@ pub struct CircuitApp {
     show_palette: bool,
     show_inspector: bool,
     show_instruments: bool,
+    live_autostart: bool,
 }
 
 /// Reliable panel arrangement offered by the View menu.
@@ -205,6 +206,7 @@ impl CircuitApp {
             show_palette: true,
             show_inspector: true,
             show_instruments: true,
+            live_autostart: true,
         }
     }
 
@@ -231,19 +233,46 @@ impl CircuitApp {
         self.status.success("Vue cadrée sur la sélection.");
     }
 
-    fn simulate(&mut self, now: f64) {
-        if !self.instruments.can_simulate(&self.document) {
-            if self.instruments.is_busy() {
-                self.status.info("Une analyse est déjà en cours.");
+    fn toggle_live(&mut self, now: f64) {
+        if self.instruments.realtime_active() {
+            let paused = self.instruments.realtime_paused();
+            self.instruments.set_realtime_paused(!paused);
+            self.status.info(if paused {
+                "Simulation reprise."
             } else {
-                self.status
-                    .error("Aucune netlist valide n'est disponible pour la simulation.");
-            }
+                "Simulation en pause."
+            });
+            return;
+        }
+        if !self.instruments.can_simulate(&self.document) {
+            self.status
+                .error("Aucune netlist valide n'est disponible pour la simulation.");
             return;
         }
         self.auto.note_manual(self.document.revision());
         self.instruments
-            .run_transient_now(&self.document, now, &mut self.status);
+            .start_realtime(&self.document, now, &mut self.status);
+    }
+
+    fn reset_live(&mut self, now: f64) {
+        if !self.instruments.realtime_active() {
+            if !self.instruments.can_simulate(&self.document) {
+                self.status
+                    .error("Aucune netlist valide n'est disponible pour la simulation.");
+                return;
+            }
+            self.instruments
+                .start_realtime(&self.document, now, &mut self.status);
+            return;
+        }
+        self.auto.note_manual(self.document.revision());
+        self.instruments
+            .reset_realtime(&self.document, now, &mut self.status);
+    }
+
+    fn step_live(&mut self) {
+        self.instruments
+            .step_realtime(&self.document, &mut self.status);
     }
 
     fn tick_auto_simulation(&mut self, now: f64) {
@@ -267,6 +296,7 @@ impl CircuitApp {
                 self.instruments.clear_results();
                 self.canvas.cancel_interaction();
                 self.canvas.request_fit();
+                self.live_autostart = true;
                 self.status.success("Exemple RC chargé.");
             }
             Err(error) => self.status.error(error.user_message()),
@@ -447,16 +477,48 @@ impl CircuitApp {
                 }
             });
             ui.separator();
+            let now = ui.input(|input| input.time);
+            let running = self.instruments.realtime_active();
+            let paused = self.instruments.realtime_paused();
             if ui
                 .add_enabled(
-                    self.instruments.can_simulate(&self.document),
-                    egui::Button::new("Simuler"),
+                    running || self.instruments.can_simulate(&self.document),
+                    egui::Button::new(if running && !paused {
+                        "Pause"
+                    } else {
+                        "Marche"
+                    }),
                 )
-                .on_hover_text("Ctrl+Entrée / F5 : relancer le transitoire")
+                .on_hover_text("Espace : marche/arrêt de la simulation continue")
                 .clicked()
             {
-                let now = ui.input(|input| input.time);
-                self.simulate(now);
+                self.toggle_live(now);
+            }
+            if ui
+                .add_enabled(running, egui::Button::new("Reset"))
+                .on_hover_text("F5 : remet la session à t = 0")
+                .clicked()
+            {
+                self.reset_live(now);
+            }
+            if ui
+                .add_enabled(running && paused, egui::Button::new("Pas"))
+                .on_hover_text("Avance d'un pas lorsque la simulation est en pause")
+                .clicked()
+            {
+                self.step_live();
+            }
+            if self.instruments.live_lagging() {
+                ui.label(
+                    RichText::new(format!("trop lent (×{:.1})", self.instruments.live_ratio()))
+                        .small()
+                        .color(ui::ACCENT),
+                )
+                .on_hover_text("Le moteur ne suit pas la vitesse demandée");
+            }
+            if let Some(error) = self.instruments.live_error() {
+                ui.label(RichText::new("Circuit invalide").color(Color32::from_rgb(240, 128, 128)))
+                    .on_hover_text(error.to_owned());
             }
             if self.instruments.is_busy() {
                 ui.spinner();
@@ -643,6 +705,10 @@ impl CircuitApp {
         } else {
             ui.input(|input| input.time)
         };
+        self.canvas
+            .set_animation_speed(self.instruments.animation_speed());
+        self.canvas
+            .set_power_brightness(self.instruments.power_brightness());
         ui::canvas::CanvasState::show(
             &mut self.canvas,
             ui,
@@ -940,11 +1006,16 @@ impl CircuitApp {
             self.canvas.reset_zoom();
             return;
         }
+        if !command && context.input(|input| input.key_pressed(Key::Space)) {
+            let now = context.input(|input| input.time);
+            self.toggle_live(now);
+            return;
+        }
         if context.input(|input| {
             input.key_pressed(Key::F5) || (input.modifiers.command && input.key_pressed(Key::Enter))
         }) {
             let now = context.input(|input| input.time);
-            self.simulate(now);
+            self.reset_live(now);
             return;
         }
         let (pan_left, pan_right, pan_up, pan_down, alt) = context.input(|input| {
@@ -1359,8 +1430,20 @@ impl eframe::App for CircuitApp {
         self.apply_preferences(ui.ctx());
         self.handle_shortcuts(ui.ctx());
         let now = ui.input(|input| input.time);
+        if self.live_autostart {
+            self.live_autostart = false;
+            if !self.instruments.realtime_active() && self.instruments.can_simulate(&self.document)
+            {
+                self.instruments
+                    .start_realtime(&self.document, now, &mut self.status);
+            }
+        }
         self.tick_auto_simulation(now);
-        self.instruments.tick_realtime(now, &mut self.status);
+        self.instruments
+            .tick_realtime(&self.document, now, &mut self.status);
+        if self.instruments.take_diagnostic_request() {
+            self.show_inspector = true;
+        }
         if self.instruments.auto_refresh() && (self.auto.pending() || self.instruments.is_busy()) {
             ui.ctx().request_repaint_after(Duration::from_millis(40));
         }

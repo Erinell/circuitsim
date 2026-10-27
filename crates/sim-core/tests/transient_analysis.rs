@@ -112,6 +112,56 @@ fn rl_netlist() -> (Netlist, ComponentId, NodeId, ComponentId, NodeId) {
 }
 
 #[test]
+fn updates_parameters_without_resetting_the_session() {
+    let (netlist, source, output, _, _) = rc_netlist();
+    let options = TransientOptions {
+        stop_time: f64::MAX,
+        step: 1e-5,
+        events: vec![source_event(0.0, source, 5.0)],
+        ..TransientOptions::default()
+    };
+    let mut session = TransientSession::new(&netlist, &options).unwrap();
+    for _ in 0..10 {
+        session.step().unwrap();
+    }
+    let time = session.time();
+    let voltage = session.sample().unwrap().node_voltage(output).unwrap();
+
+    let mut changed = netlist.clone();
+    changed.components[1]
+        .params
+        .insert("resistance".to_owned(), ParamValue::Number(2_000.0));
+    session.update_netlist(&changed).unwrap();
+
+    assert_eq!(session.time(), time);
+    assert_eq!(
+        session.sample().unwrap().node_voltage(output).unwrap(),
+        voltage
+    );
+    assert!(session.step().unwrap().time > time);
+}
+
+#[test]
+fn rejects_a_live_update_that_changes_the_topology() {
+    let (netlist, source, _, _, _) = rc_netlist();
+    let options = TransientOptions {
+        stop_time: f64::MAX,
+        step: 1e-5,
+        events: vec![source_event(0.0, source, 5.0)],
+        ..TransientOptions::default()
+    };
+    let mut session = TransientSession::new(&netlist, &options).unwrap();
+    let mut changed = netlist.clone();
+    changed.components.pop();
+    assert!(matches!(
+        session.update_netlist(&changed),
+        Err(TransientError::TopologyChanged)
+    ));
+    assert_eq!(session.time(), 0.0);
+    assert!(session.step().is_ok());
+}
+
+#[test]
 fn incremental_session_matches_a_full_transient() {
     let (netlist, source, output, _, _) = rc_netlist();
     let mut options = TransientOptions {

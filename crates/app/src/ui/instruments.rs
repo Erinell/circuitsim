@@ -7,37 +7,24 @@ use editor_core::{SymbolId, SymbolKind};
 use eframe::egui::{self, Align, Align2, Color32, FontId, Layout, RichText, Ui, Vec2};
 use egui_plot::{Corner, HoverPosition, Legend, Line, Plot};
 use sim_core::units::{format_si_precision, Unit};
-use sim_core::{TransientSample, TransientSession};
 use worker::protocol::{AnalysisKind, AnalysisResult};
 
 #[cfg(test)]
 use crate::analysis::prepare_transient;
 use crate::analysis::{
     analysis_name, bode_csv, bode_trace, compute_spectrum, measurements, prepare_ac,
-    prepare_realtime, probe_readings, spectrum_csv, transient_csv, transient_traces,
-    transient_traces_from_samples, AcSettings, BodePoint, BodeTrace, CompletedRun, SignalCatalog,
-    SignalId, SignalUnit, SimulationClient, SimulationError, Spectrum, Trace, TransientSettings,
-    MAX_AC_POINTS,
+    probe_readings, spectrum_csv, transient_csv, transient_traces, transient_traces_from_samples,
+    AcSettings, BodePoint, BodeTrace, CompletedRun, SignalCatalog, SignalId, SignalUnit,
+    SimulationClient, SimulationError, Spectrum, Trace, TransientSettings, MAX_AC_POINTS,
 };
 use crate::document::Document;
 use crate::export;
+use crate::simulation::{LiveSimulation, TickOutcome, LIVE_SPEEDS};
 use crate::ui::{Status, ACCENT, HOVER, MUTED, SYMBOL};
 
 const ERROR: Color32 = Color32::from_rgb(240, 128, 128);
 const CONTROL_WIDTH: f32 = 304.0;
 const MAX_PLOT_POINTS: usize = 4096;
-const MAX_REALTIME_SAMPLES: usize = 100_000;
-const MAX_REALTIME_STEPS_PER_FRAME: usize = 800;
-const REALTIME_SPEEDS: [f64; 6] = [0.25, 0.5, 1.0, 2.0, 5.0, 10.0];
-
-/// Live transient stream driven by wall-clock time.
-struct RealtimeRun {
-    session: TransientSession,
-    context: crate::analysis::RunContext,
-    revision: u64,
-    samples: Vec<TransientSample>,
-    last_wall: f64,
-}
 
 const TRACE_COLORS: [Color32; 8] = [
     Color32::from_rgb(255, 190, 92),
@@ -93,9 +80,12 @@ pub struct InstrumentsState {
     error: Option<String>,
     selection_initialized: bool,
     auto_refresh: bool,
-    realtime: Option<RealtimeRun>,
+    realtime: Option<LiveSimulation>,
     realtime_speed: f64,
-    realtime_paused: bool,
+    animation_speed: f64,
+    power_brightness: f32,
+    live_error: Option<String>,
+    diagnostic_request: bool,
     scope_cursor_a: Option<f64>,
     scope_cursor_b: Option<f64>,
     scope_active_cursor: CursorSlot,
@@ -156,7 +146,10 @@ impl InstrumentsState {
             auto_refresh: false,
             realtime: None,
             realtime_speed: 1.0,
-            realtime_paused: false,
+            animation_speed: 1.0,
+            power_brightness: 0.6,
+            live_error: None,
+            diagnostic_request: false,
             scope_cursor_a: None,
             scope_cursor_b: None,
             scope_active_cursor: CursorSlot::A,
@@ -173,7 +166,7 @@ impl InstrumentsState {
         self.pending = None;
         self.error = None;
         self.realtime = None;
-        self.realtime_paused = false;
+        self.live_error = None;
         self.selection_initialized = false;
         self.scope_cursor_a = None;
         self.scope_cursor_b = None;
@@ -184,27 +177,7 @@ impl InstrumentsState {
     /// Returns the last transient sample mapped to names for the inspector.
     pub fn live_values(&self) -> crate::analysis::LiveValues {
         if let Some(run) = &self.realtime {
-            let Some(sample) = run.samples.last() else {
-                return crate::analysis::LiveValues::default();
-            };
-            let mut node_voltages = std::collections::BTreeMap::new();
-            for (name, node) in &run.context.nodes {
-                if let Some(voltage) = sample.node_voltage(*node) {
-                    node_voltages.insert(name.clone(), voltage);
-                }
-            }
-            let mut branch_currents = std::collections::BTreeMap::new();
-            for (name, component) in &run.context.components {
-                if let Some(current) = sample.branch_current(*component) {
-                    branch_currents.insert(name.clone(), current);
-                }
-            }
-            return crate::analysis::LiveValues {
-                document_revision: run.revision,
-                time: Some(sample.time),
-                node_voltages,
-                branch_currents,
-            };
+            return run.live_values();
         }
         let Some(run) = &self.transient_run else {
             return crate::analysis::LiveValues::default();
@@ -248,7 +221,7 @@ impl InstrumentsState {
     /// Returns the document revision of the last transient result.
     pub fn transient_revision(&self) -> Option<u64> {
         if let Some(run) = &self.realtime {
-            return Some(run.revision);
+            return Some(run.sample_revision());
         }
         self.transient_run
             .as_ref()
@@ -258,7 +231,7 @@ impl InstrumentsState {
     /// Returns the time of the last transient sample.
     pub fn transient_time(&self) -> Option<f64> {
         if let Some(run) = &self.realtime {
-            return run.samples.last().map(|sample| sample.time);
+            return run.last_sample().map(|sample| sample.time);
         }
         let run = self.transient_run.as_ref()?;
         let AnalysisResult::Transient(result) = &run.result else {
@@ -293,47 +266,52 @@ impl InstrumentsState {
 
     /// Runs the configured transient immediately.
     pub fn run_transient_now(&mut self, document: &Document, now: f64, status: &mut Status) {
-        self.start_realtime(document, now, status);
+        let paused = self.realtime_paused();
+        self.restart_realtime(document, now, paused, status);
     }
 
     /// Starts or restarts the open-ended real-time session.
     pub fn start_realtime(&mut self, document: &Document, now: f64, status: &mut Status) {
+        self.restart_realtime(document, now, false, status);
+    }
+
+    /// Resets the session to t = 0 with the current settings.
+    pub fn reset_realtime(&mut self, document: &Document, now: f64, status: &mut Status) {
+        let paused = self.realtime_paused();
+        self.restart_realtime(document, now, paused, status);
+    }
+
+    fn restart_realtime(
+        &mut self,
+        document: &Document,
+        now: f64,
+        paused: bool,
+        status: &mut Status,
+    ) {
         if self.pending.is_some() {
             status.error("Une analyse est déjà en cours.");
             return;
         }
-        let Some(extraction) = document.extraction() else {
-            status.error("Aucune netlist valide n'est disponible.");
-            return;
-        };
-        let setup = match prepare_realtime(extraction, &self.transient, document.revision()) {
-            Ok(setup) => setup,
+        match LiveSimulation::start(document, &self.transient, now) {
+            Ok(mut run) => {
+                run.set_speed(self.realtime_speed);
+                run.set_paused(paused);
+                self.realtime = Some(run);
+                self.live_error = None;
+                self.error = None;
+                status.info(if paused {
+                    "Simulation temps réel prête, en pause."
+                } else {
+                    "Simulation temps réel démarrée."
+                });
+            }
             Err(error) => {
+                let message = error.user_message();
+                self.live_error = Some(message.clone());
+                self.realtime = None;
                 self.fail(status, error);
-                return;
             }
-        };
-        let mut session = match TransientSession::new(&setup.netlist, &setup.options) {
-            Ok(session) => session,
-            Err(error) => {
-                self.fail(
-                    status,
-                    SimulationError::Transient(format!("démarrage temps réel : {error}")),
-                );
-                return;
-            }
-        };
-        let samples = session.drain_samples();
-        self.realtime = Some(RealtimeRun {
-            session,
-            context: setup.context,
-            revision: document.revision(),
-            samples,
-            last_wall: now,
-        });
-        self.realtime_paused = false;
-        self.error = None;
-        status.info("Simulation temps réel démarrée.");
+        }
     }
 
     /// Returns whether a real-time transient session exists.
@@ -342,18 +320,59 @@ impl InstrumentsState {
     }
 
     /// Advances the real-time session using the host clock.
-    pub fn tick_realtime(&mut self, now: f64, status: &mut Status) {
-        self.advance_realtime(now, status);
+    pub fn tick_realtime(&mut self, document: &Document, now: f64, status: &mut Status) {
+        let Some(mut run) = self.realtime.take() else {
+            return;
+        };
+        match run.tick(document, now) {
+            Ok(TickOutcome::NeedsRestart) => {
+                let paused = run.paused();
+                let speed = run.speed();
+                self.realtime_speed = speed;
+                self.restart_realtime(document, now, paused, status);
+                if self.realtime.is_some() {
+                    status.info("Topologie modifiée : session relancée.");
+                }
+            }
+            Ok(TickOutcome::Advanced | TickOutcome::Paused) => {
+                self.realtime = Some(run);
+            }
+            Err(error) => {
+                let message = error.user_message();
+                self.live_error = Some(message.clone());
+                self.fail(status, error);
+            }
+        }
+    }
+
+    /// Advances exactly one step and keeps the session paused.
+    pub fn step_realtime(&mut self, document: &Document, status: &mut Status) {
+        let Some(run) = self.realtime.as_mut() else {
+            status.info("Démarrez la simulation avant d'avancer d'un pas.");
+            return;
+        };
+        run.set_paused(true);
+        match run.step_once(document) {
+            Ok(()) => status.success("Un pas simulé."),
+            Err(error) => {
+                let message = error.user_message();
+                self.live_error = Some(message.clone());
+                self.realtime = None;
+                self.fail(status, error);
+            }
+        }
     }
 
     /// Pauses or resumes the current real-time session.
     pub fn set_realtime_paused(&mut self, paused: bool) {
-        self.realtime_paused = paused;
+        if let Some(run) = self.realtime.as_mut() {
+            run.set_paused(paused);
+        }
     }
 
     /// Returns whether the real-time session is paused.
-    pub const fn realtime_paused(&self) -> bool {
-        self.realtime_paused
+    pub fn realtime_paused(&self) -> bool {
+        self.realtime.as_ref().is_some_and(LiveSimulation::paused)
     }
 
     /// Returns the playback speed multiplier.
@@ -365,37 +384,54 @@ impl InstrumentsState {
     pub fn set_realtime_speed(&mut self, speed: f64) {
         if speed.is_finite() && speed > 0.0 {
             self.realtime_speed = speed;
+            if let Some(run) = self.realtime.as_mut() {
+                run.set_speed(speed);
+            }
         }
     }
 
-    fn advance_realtime(&mut self, now: f64, status: &mut Status) {
-        let Some(run) = self.realtime.as_mut() else {
-            return;
-        };
-        if self.realtime_paused {
-            run.last_wall = now;
-            return;
+    /// Returns the current-animation speed multiplier.
+    pub const fn animation_speed(&self) -> f64 {
+        self.animation_speed
+    }
+
+    /// Sets the current-animation speed multiplier.
+    pub fn set_animation_speed(&mut self, speed: f64) {
+        if speed.is_finite() && speed > 0.0 {
+            self.animation_speed = speed.clamp(0.1, 4.0);
         }
-        let elapsed = (now - run.last_wall).max(0.0);
-        run.last_wall = now;
-        let target = run.session.time() + elapsed * self.realtime_speed;
-        let mut steps = 0;
-        while run.session.time() < target && steps < MAX_REALTIME_STEPS_PER_FRAME {
-            if let Err(error) = run.session.step() {
-                let message = format!("simulation temps réel : {error}");
-                self.error = Some(message.clone());
-                status.error(message);
-                self.realtime = None;
-                return;
-            }
-            steps += 1;
+    }
+
+    /// Returns the component-power glow strength.
+    pub const fn power_brightness(&self) -> f32 {
+        self.power_brightness
+    }
+
+    /// Sets the component-power glow strength.
+    pub fn set_power_brightness(&mut self, brightness: f32) {
+        if brightness.is_finite() {
+            self.power_brightness = brightness.clamp(0.0, 1.0);
         }
-        let drained = run.session.drain_samples();
-        run.samples.extend(drained);
-        if run.samples.len() > MAX_REALTIME_SAMPLES {
-            let excess = run.samples.len() - MAX_REALTIME_SAMPLES;
-            run.samples.drain(0..excess);
-        }
+    }
+
+    /// Returns the ratio between simulated and requested time.
+    pub fn live_ratio(&self) -> f64 {
+        self.realtime.as_ref().map_or(1.0, LiveSimulation::ratio)
+    }
+
+    /// Returns whether the live engine cannot keep up.
+    pub fn live_lagging(&self) -> bool {
+        self.realtime.as_ref().is_some_and(LiveSimulation::lagging)
+    }
+
+    /// Returns the last live error, if any.
+    pub fn live_error(&self) -> Option<&str> {
+        self.live_error.as_deref()
+    }
+
+    /// Takes one request to reveal the diagnostic panel.
+    pub fn take_diagnostic_request(&mut self) -> bool {
+        std::mem::take(&mut self.diagnostic_request)
     }
 
     /// Draws the bottom instrument panel.
@@ -413,7 +449,7 @@ impl InstrumentsState {
         if self.pending.is_some() {
             ui.ctx().request_repaint_after(Duration::from_millis(20));
         }
-        if self.realtime.is_some() && !self.realtime_paused {
+        if self.realtime_active() && !self.realtime_paused() {
             ui.ctx().request_repaint_after(Duration::from_millis(16));
         }
         self.tab_bar(ui, document);
@@ -438,11 +474,146 @@ impl InstrumentsState {
                 },
             );
             ui.separator();
-            let plot_size = Vec2::new(ui.available_width(), height);
-            ui.allocate_ui_with_layout(plot_size, Layout::top_down(Align::Min), |ui| {
-                self.plots(ui);
-            });
+            let remaining = ui.available_width();
+            let side_width = if remaining > 460.0 { 178.0 } else { 0.0 };
+            let plot_width = (remaining - side_width - 8.0).max(120.0);
+            ui.allocate_ui_with_layout(
+                Vec2::new(plot_width, height),
+                Layout::top_down(Align::Min),
+                |ui| {
+                    self.plots(ui);
+                },
+            );
+            if side_width > 0.0 {
+                ui.separator();
+                ui.allocate_ui_with_layout(
+                    Vec2::new(side_width, height),
+                    Layout::top_down(Align::Min),
+                    |ui| {
+                        egui::ScrollArea::vertical()
+                            .id_salt("live_controls")
+                            .max_height(height)
+                            .auto_shrink([false, false])
+                            .show(ui, |ui| {
+                                self.live_controls(ui, document, now, status);
+                            });
+                    },
+                );
+            }
         });
+    }
+
+    fn live_controls(&mut self, ui: &mut Ui, document: &Document, now: f64, status: &mut Status) {
+        ui.heading("Contrôles");
+        let running = self.realtime_active();
+        let paused = self.realtime_paused();
+        ui.label(
+            RichText::new(if running {
+                if paused {
+                    "Pause"
+                } else {
+                    "En marche"
+                }
+            } else if self.live_error.is_some() {
+                "Circuit invalide"
+            } else {
+                "Arrêtée"
+            })
+            .strong(),
+        );
+        if self.live_lagging() {
+            ui.label(RichText::new(format!("trop lent (×{:.1})", self.live_ratio())).color(ERROR));
+        }
+        let live_error = self.live_error().map(str::to_owned);
+        if let Some(error) = live_error {
+            if ui
+                .link("Voir le diagnostic")
+                .on_hover_text(error.clone())
+                .clicked()
+            {
+                self.diagnostic_request = true;
+                status.info(error);
+            }
+        }
+        let mut speed = self.realtime_speed;
+        if ui
+            .add(
+                egui::Slider::new(&mut speed, 0.1..=10.0)
+                    .logarithmic(true)
+                    .text("Simulation"),
+            )
+            .on_hover_text("Rapport entre le temps simulé et le temps réel")
+            .changed()
+        {
+            self.set_realtime_speed(speed);
+        }
+        let mut animation = self.animation_speed;
+        if ui
+            .add(
+                egui::Slider::new(&mut animation, 0.1..=4.0)
+                    .logarithmic(true)
+                    .text("Courant"),
+            )
+            .on_hover_text("Vitesse des points animés sur les fils")
+            .changed()
+        {
+            self.set_animation_speed(animation);
+        }
+        let mut power = self.power_brightness;
+        if ui
+            .add(egui::Slider::new(&mut power, 0.0..=1.0).text("Puissance"))
+            .on_hover_text("Intensité du halo de puissance des composants")
+            .changed()
+        {
+            self.set_power_brightness(power);
+        }
+        ui.separator();
+        let can_run = self.can_simulate(document);
+        ui.horizontal_wrapped(|ui| {
+            if ui
+                .add_enabled(
+                    can_run || running,
+                    egui::Button::new(if running && !paused {
+                        "Pause"
+                    } else {
+                        "Marche"
+                    }),
+                )
+                .on_hover_text("Espace")
+                .clicked()
+            {
+                if running {
+                    self.set_realtime_paused(!paused);
+                } else {
+                    self.start_realtime(document, now, status);
+                }
+            }
+            if ui
+                .add_enabled(running, egui::Button::new("Reset"))
+                .on_hover_text("Remet la session à t = 0")
+                .clicked()
+            {
+                self.reset_realtime(document, now, status);
+            }
+            if ui
+                .add_enabled(running && paused, egui::Button::new("Pas"))
+                .on_hover_text("Avance d'un pas en pause")
+                .clicked()
+            {
+                self.step_realtime(document, status);
+            }
+        });
+        if let Some(time) = self.transient_time() {
+            ui.label(format!(
+                "t = {}",
+                format_si_precision(time, Unit::Second, 4)
+            ));
+        }
+        if let Some(error) = &self.error {
+            if self.live_error.is_none() {
+                ui.colored_label(ERROR, error);
+            }
+        }
     }
 
     fn tab_bar(&mut self, ui: &mut Ui, document: &Document) {
@@ -537,19 +708,30 @@ impl InstrumentsState {
             }
         }
         let can_run = self.can_run(document);
+        let mut speed = self.realtime_speed;
+        let paused = self.realtime_paused();
+        let running = self.realtime_active();
+        let ratio = self.live_ratio();
+        let lagging = self.live_lagging();
         let action = realtime_controls(
             ui,
             &mut self.transient,
             catalog,
             can_run,
-            &mut self.realtime_speed,
-            &mut self.realtime_paused,
-            self.realtime.is_some(),
+            &mut speed,
+            paused,
+            running,
+            ratio,
+            lagging,
         );
+        if speed != self.realtime_speed {
+            self.set_realtime_speed(speed);
+        }
         if matches!(action, RealtimeAction::Start) {
             self.start_realtime(document, now, status);
         } else if matches!(action, RealtimeAction::TogglePause) {
-            self.realtime_paused = !self.realtime_paused;
+            let paused = self.realtime_paused();
+            self.set_realtime_paused(!paused);
         }
         ui.separator();
         signal_controls(ui, &mut self.selected, catalog);
@@ -727,19 +909,30 @@ impl InstrumentsState {
         status: &mut Status,
     ) {
         let can_run = self.can_run(document);
+        let mut speed = self.realtime_speed;
+        let paused = self.realtime_paused();
+        let running = self.realtime_active();
+        let ratio = self.live_ratio();
+        let lagging = self.live_lagging();
         let action = realtime_controls(
             ui,
             &mut self.transient,
             catalog,
             can_run,
-            &mut self.realtime_speed,
-            &mut self.realtime_paused,
-            self.realtime.is_some(),
+            &mut speed,
+            paused,
+            running,
+            ratio,
+            lagging,
         );
+        if speed != self.realtime_speed {
+            self.set_realtime_speed(speed);
+        }
         if matches!(action, RealtimeAction::Start) {
             self.start_realtime(document, now, status);
         } else if matches!(action, RealtimeAction::TogglePause) {
-            self.realtime_paused = !self.realtime_paused;
+            let paused = self.realtime_paused();
+            self.set_realtime_paused(!paused);
         }
         ui.separator();
         spectrum_signal_control(ui, &mut self.spectrum_signal, catalog);
@@ -1280,15 +1473,15 @@ impl InstrumentsState {
                 return Ok(Some(Vec::new()));
             }
             let signals = self.selected.iter().cloned().collect::<Vec<_>>();
-            let samples = if let Some(step) = run.context.nominal_step {
-                let latest = run.samples.last().map_or(0.0, |sample| sample.time);
+            let samples = if let Some(step) = run.context().nominal_step {
+                let latest = run.last_sample().map_or(0.0, |sample| sample.time);
                 let start = latest - step * 500.0;
-                let first = run.samples.partition_point(|sample| sample.time < start);
-                &run.samples[first..]
+                let first = run.samples().partition_point(|sample| sample.time < start);
+                &run.samples()[first..]
             } else {
-                run.samples.as_slice()
+                run.samples()
             };
-            return transient_traces_from_samples(samples, &run.context, &signals).map(Some);
+            return transient_traces_from_samples(samples, run.context(), &signals).map(Some);
         }
         let Some(run) = &self.transient_run else {
             return Ok(None);
@@ -1309,15 +1502,15 @@ impl InstrumentsState {
         };
         if let Some(run) = &self.realtime {
             let trace = transient_traces_from_samples(
-                &run.samples,
-                &run.context,
+                run.samples(),
+                run.context(),
                 std::slice::from_ref(signal),
             )?
             .into_iter()
             .next()
             .ok_or(SimulationError::NoData)?;
             let step = run
-                .context
+                .context()
                 .nominal_step
                 .ok_or(SimulationError::InvalidSpectrumStep)?;
             let spectrum = compute_spectrum(&trace, step)?;
@@ -1364,7 +1557,7 @@ impl InstrumentsState {
     fn current_revision(&self) -> Option<u64> {
         self.realtime
             .as_ref()
-            .map(|run| run.revision)
+            .map(LiveSimulation::sample_revision)
             .or_else(|| self.active_run().map(|run| run.context.document_revision))
     }
 
@@ -1529,10 +1722,39 @@ fn realtime_controls(
     catalog: &SignalCatalog,
     can_run: bool,
     speed: &mut f64,
-    paused: &mut bool,
+    paused: bool,
     running: bool,
+    ratio: f64,
+    lagging: bool,
 ) -> RealtimeAction {
     ui.heading("Transitoire temps réel");
+    ui.horizontal(|ui| {
+        let state = if running {
+            if paused {
+                "Pause"
+            } else {
+                "En marche"
+            }
+        } else if can_run {
+            "Arrêtée"
+        } else {
+            "Circuit invalide"
+        };
+        ui.label(RichText::new(state).strong());
+        if lagging {
+            ui.label(
+                RichText::new(format!("trop lent (×{:.1})", ratio))
+                    .small()
+                    .color(ERROR),
+            );
+        } else if running {
+            ui.label(
+                RichText::new(format!("{:.0} % du temps réel", ratio * 100.0))
+                    .small()
+                    .color(MUTED),
+            );
+        }
+    });
     egui::Grid::new("realtime_time_fields")
         .num_columns(2)
         .spacing([8.0, 4.0])
@@ -1614,13 +1836,13 @@ fn realtime_controls(
         egui::ComboBox::from_id_salt("realtime_speed")
             .selected_text(format!("{speed:.2}×"))
             .show_ui(ui, |ui| {
-                for candidate in REALTIME_SPEEDS {
+                for candidate in LIVE_SPEEDS {
                     ui.selectable_value(speed, candidate, format!("{candidate:.2}×"));
                 }
             });
         if running
             && ui
-                .button(if *paused { "Reprendre" } else { "Pause" })
+                .button(if paused { "Reprendre" } else { "Pause" })
                 .clicked()
         {
             action = RealtimeAction::TogglePause;
@@ -2175,12 +2397,14 @@ mod tests {
         state.start_realtime(&document, 0.0, &mut status);
         assert!(state.realtime.is_some());
         let start = state.transient_time().unwrap();
-        state.advance_realtime(0.01, &mut status);
+        state.tick_realtime(&document, 0.01, &mut status);
         let advanced = state.transient_time().unwrap();
         assert!(advanced > start);
         state.set_realtime_paused(true);
-        state.advance_realtime(0.02, &mut status);
+        state.tick_realtime(&document, 0.02, &mut status);
         assert_eq!(state.transient_time(), Some(advanced));
+        state.step_realtime(&document, &mut status);
+        assert!(state.transient_time().unwrap() > advanced);
         let traces = state.current_traces().unwrap().unwrap();
         assert!(!traces.is_empty());
         assert!(state.live_values().time.is_some());

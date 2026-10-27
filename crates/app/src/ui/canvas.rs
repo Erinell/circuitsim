@@ -53,6 +53,8 @@ pub struct CanvasState {
     last_rect: Option<Rect>,
     minimap_visible: bool,
     current_flow: bool,
+    animation_speed: f64,
+    power_brightness: f32,
     property_request: Option<SymbolId>,
     label_dialog: Option<LabelDialog>,
 }
@@ -109,6 +111,8 @@ impl CanvasState {
             last_rect: None,
             minimap_visible: true,
             current_flow: true,
+            animation_speed: 1.0,
+            power_brightness: 0.6,
             property_request: None,
             label_dialog: None,
         }
@@ -225,6 +229,20 @@ impl CanvasState {
     /// Shows or hides the animated current flow.
     pub fn set_current_flow_visible(&mut self, visible: bool) {
         self.current_flow = visible;
+    }
+
+    /// Sets the current-animation speed multiplier.
+    pub fn set_animation_speed(&mut self, speed: f64) {
+        if speed.is_finite() && speed > 0.0 {
+            self.animation_speed = speed.clamp(0.1, 4.0);
+        }
+    }
+
+    /// Sets the component-power glow strength.
+    pub fn set_power_brightness(&mut self, brightness: f32) {
+        if brightness.is_finite() {
+            self.power_brightness = brightness.clamp(0.0, 1.0);
+        }
     }
 
     /// Takes one pending double-click property request.
@@ -1207,12 +1225,22 @@ impl CanvasState {
         painter.circle_filled(
             center,
             (self.viewport.scale() * 2.2).clamp(10.0, 42.0),
-            Color32::from_rgba_premultiplied(255, 220, 60, (90.0 * brightness) as u8),
+            Color32::from_rgba_premultiplied(
+                255,
+                220,
+                60,
+                (90.0 * brightness * self.power_brightness) as u8,
+            ),
         );
         painter.circle_filled(
             center,
             (self.viewport.scale() * 1.3).clamp(6.0, 26.0),
-            Color32::from_rgba_premultiplied(255, 245, 170, (150.0 * brightness) as u8),
+            Color32::from_rgba_premultiplied(
+                255,
+                245,
+                170,
+                (150.0 * brightness * self.power_brightness) as u8,
+            ),
         );
     }
 
@@ -1239,7 +1267,8 @@ impl CanvasState {
             let Some(flow) = flows.get(net.name.as_str()) else {
                 continue;
             };
-            let speed = 2.0 + (flow.strength * 1_000.0).ln_1p().clamp(0.0, 6.0) * 0.6;
+            let speed = (2.0 + (flow.strength * 1_000.0).ln_1p().clamp(0.0, 6.0) * 0.6)
+                * self.animation_speed;
             let phase = (now * speed).rem_euclid(f64::from(spacing)) as f32;
             let directions = wire_directions(document, net, flow.source);
             for id in &net.wires {

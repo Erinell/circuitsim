@@ -34,7 +34,8 @@
 | Flèches, `Maj`+flèches | Déplacer la vue |
 | `Home`, `Ctrl+Home` | Cadrer tout le schéma, cadrer la sélection |
 | `Ctrl+1`…`Ctrl+4` | Tout, Édition, Simulation, Canevas |
-| `Ctrl+Entrée`, `F5` | Relancer le transitoire |
+| `Espace` | Marche/arrêt de la simulation continue |
+| `F5`, `Ctrl+Entrée` | Reset de la session à `t = 0` |
 | `?` / `F1` | Ouvrir ou fermer l’aide |
 | `Ctrl+Maj+A` | Préférences d’affichage et accessibilité |
 | `Échap` | Annuler l’outil, le fil, le collage ou la sélection |
@@ -129,25 +130,34 @@ Les raccourcis sont ignorés lorsqu’un champ texte a le focus, à l’exceptio
 
 ## 8. Simulation interactive
 
-- **Simuler** dans la barre d’outils, `Ctrl+Entrée` ou `F5` démarrent une session
-  temps réel sans plage d’arrêt, sans ouvrir le panneau Instruments.
+- À l’ouverture d’un circuit valide, la session temps réel démarre seule. Le
+  circuit est lisible et animé sans clic préalable.
+- **Marche/Arrêt** dans la barre d’outils et `Espace` figent ou relancent la
+  session. **Reset** et `F5` reviennent à `t = 0`. **Pas** avance d’un pas en
+  pause.
+- Une modification de paramètre (valeur, interrupteur) est appliquée à chaud :
+  le temps simulé et les états des éléments sont conservés. Une modification de
+  topologie relance la session en conservant la pause et la vitesse.
 - Le pas de calcul reste réglable. La vitesse multiplie le temps simulé par
-  seconde réelle ; **Pause** fige la session et **Reprendre** la relance.
+  seconde réelle ; un rapport temps simulé/réel et un badge `trop lent` rendent
+  le retard visible.
+- L’échelon de source est désactivé par défaut. Il reste disponible pour les
+  scénarios qui en ont besoin.
+- Les contrôles live règlent la vitesse de simulation (échelle logarithmique),
+  la vitesse des points de courant et la luminosité de puissance.
 - La portée affiche une fenêtre glissante des derniers échantillons. Le tampon
   peut être mis en pause sans perdre les données ; il est plafonné en mémoire.
-- L’option **Auto** relance la session 0,35 s après une modification acceptée.
+- Un circuit invalide affiche l’état `Circuit invalide` et un lien vers le
+  diagnostic, sans modale bloquante.
 - Les tensions ne sont plus superposées aux labels du canevas. Un badge indique
-  `t = … · à jour` ou `antérieur`, et l’inspecteur reprend les tensions par
-  broche, le courant et la puissance.
+  `t = … · à jour/antérieur`, et l’inspecteur reprend les tensions par broche,
+  le courant et la puissance.
 - Les sondes **Voltmètre**, **Ampèremètre** et **Ohmmètre** se placent depuis la
   palette. Leur liste apparaît à côté du graphique avec **Afficher** et
   **Graphique**. Le voltmètre se pose sur un fil ; l’ampèremètre et l’ohmmètre
   mesurent le composant sous la sonde.
-- Une modification du schéma ne détruit pas le dernier résultat : il reste
-  visible, marqué comme antérieur, jusqu’au prochain démarrage manuel ou
-  automatique.
-- Le calcul reste synchrone dans le fil de l’interface ; le worker dédié et
-  `SharedArrayBuffer` restent hors périmètre.
+- Le calcul reste dans le fil de l’interface ; le worker dédié et
+  `SharedArrayBuffer` restent hors périmètre pour ce lot.
 
 ## 9. Curseurs et lecture
 

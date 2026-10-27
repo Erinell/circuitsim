@@ -6,6 +6,20 @@ sémantique.
 
 ## [Unreleased]
 
+### Added
+
+- Simulation continue au démarrage avec Marche/Arrêt, Reset, Pas et raccourcis
+  `Espace`/`F5`.
+- Mise à jour à chaud des paramètres et interrupteurs sans remise à zéro quand
+  la topologie reste compatible.
+- Contrôles live de vitesse, d’animation de courant et de luminosité de
+  puissance, avec rapport temps simulé/réel et badge de retard.
+
+### Changed
+
+- L’échelon de source est désactivé par défaut pour le mode live.
+- La barre d’outils remplace **Simuler** par les contrôles de session continue.
+
 ## [0.4.0] - 2026-10-26
 
 ### Added
