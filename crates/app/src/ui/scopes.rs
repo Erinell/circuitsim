@@ -7,8 +7,8 @@ use eframe::egui::{self, Color32, RichText, Ui, Vec2};
 use egui_plot::{Corner, Legend, Line, Plot, VLine};
 
 use crate::analysis::{
-    compute_spectrum, measurements, probe_readings, SignalCatalog, SignalId, SignalUnit, Spectrum,
-    Trace,
+    component_current_labels, compute_spectrum, measurements, probe_readings, SignalCatalog,
+    SignalId, SignalUnit, Spectrum, Trace,
 };
 use crate::document::Document;
 use crate::ui::instruments::{
@@ -333,10 +333,15 @@ impl Scope {
                         signal_checkbox(ui, &mut self.signals, SignalId::Voltage(name.clone()));
                 }
                 ui.separator();
-                ui.label(RichText::new("Courants").strong());
+                ui.label(RichText::new("Courants des nets").strong());
                 for name in &catalog.voltages {
                     changed |=
                         signal_checkbox(ui, &mut self.signals, SignalId::NetCurrent(name.clone()));
+                }
+                ui.separator();
+                ui.label(RichText::new("Courants des composants").strong());
+                for name in component_current_labels(document) {
+                    changed |= signal_checkbox(ui, &mut self.signals, SignalId::Current(name));
                 }
                 if changed {
                     self.frozen = false;

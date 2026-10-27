@@ -199,8 +199,9 @@ live.
 - **Portées** : le panneau inférieur unique empile une ou plusieurs portées
   redimensionnables. Chaque portée accepte plusieurs tensions et courants, avec
   légende, zoom, déplacement, double-clic d’auto-échelle et infobulle. Le menu
-  **Signaux** sépare les tensions des courants de **nets** ; chaque net expose
-  `I(nom)`, calculé à partir des courants de ses composants. Les valeurs
+  **Signaux** sépare les tensions, les courants de **nets** et les courants de
+  **composants** ; chaque net expose `I(nom)` et chaque composant `I(R1)`, etc.
+  Les valeurs
   courantes et les mesures sont affichées dans une colonne à **droite** du tracé
   pour préserver la hauteur du graphique. Le bouton **Ajouter une portée** est
   placé dans les contrôles, avec l’aide des gestes. Le menu **Affichage** règle la
