@@ -20,14 +20,15 @@ distribution web.
   simulation continue au démarrage avec Marche/Arrêt, Reset et Pas, inspecteur
   avec valeurs simulées, fils colorés par tension avec palettes daltoniennes,
   calques indépendants, courant animé orienté, erreurs ERC en rouge, halos de
-  puissance, LED lumineuses, interrupteurs cliquables, lecture au survol,
+  puissance, LED lumineuses, interrupteurs cliquables,
+  lecture au survol,
   câblage par glisser, menus contextuels, placement par palette/menu, curseurs de
-  réglage, galerie d’exemples, édition par double-clic, portées incrustées,
-  préférences persistées, projets JSON, écran À propos, thème clair, sondes
-  V/A/Ω, transitoire temps réel avec pause et vitesse, curseurs A/B, marqueur Bode,
-  mini-carte, dispositions fiables, guide de démarrage, contraste élevé et
-  taille réglable, portée, mesures, FFT de Hann, Bode, export CSV, échelon de
-  source.
+  réglage, galerie d’exemples, édition par double-clic, panneau unifié
+  instruments/portées, préférences persistées, projets JSON, écran À propos,
+  thème clair, sondes V/A/Ω, transitoire temps réel avec pause et vitesse,
+  curseurs A/B, marqueur Bode, mini-carte, dispositions fiables, guide de
+  démarrage, contraste élevé et taille réglable, portée, mesures, FFT de Hann,
+  Bode, export CSV, échelon de source.
 - **Transport** : protocole binaire `CSIM`, worker borné à un job, coalescence
   à 60 Hz, révisions croissantes, pont WASM.
 

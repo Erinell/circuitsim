@@ -19,17 +19,17 @@ La distribution web utilise `index.html` et Trunk.
 | `ui/history.rs` | historique nommé et sauts d’état |
 | `ui/palette.rs`, `ui/glyph.rs` | composants, favoris/récents et symboles |
 | `ui/properties.rs`, `ui/erc.rs` | inspecteur, ERC et nets |
-| `ui/instruments.rs` | panneau de simulation et graphiques |
+| `ui/instruments.rs`, `ui/scopes.rs` | panneau unifié de simulation, portées et graphiques |
 
 De haut en bas : barre d'outils avec menus **Fichier**, **Édition**, **Dessin**,
 **Afficher**, **Options** et **Aide**, puis uniquement les contrôles
 **Marche/Arrêt**, **Reset** et **Pas** ; palette filtrable à gauche, canevas
-central avec portées incrustées en bas, inspecteur/ERC à droite, panneau
-d'instruments optionnel en bas (210–560 px), barre d'état. Les outils,
-composants, transformations, alignements, exemples et commandes de vue sont dans
-les menus et la palette. `Ctrl+K` ouvre la palette de commandes. Les onglets
-**Portée**, **Spectre** et **Bode** du panneau classique conservent leurs
-résultats séparément. La démonstration présélectionne `V1`, `5 V` et `OUT`.
+central, inspecteur/ERC à droite, panneau unifié **Instruments et portées** en
+bas (210–620 px, visible par défaut), barre d'état. Les outils, composants,
+transformations, alignements, exemples et commandes de vue sont dans les menus et
+la palette. `Ctrl+K` ouvre la palette de commandes. Les onglets **Portées**,
+**Spectre** et **Bode** partagent le même panneau. La démonstration présélectionne
+`V1`, `5 V` et `OUT`.
 
 À l'ouverture d'un schéma valide, la session temps réel démarre seule : le
 circuit est déjà en marche et les instruments affichent le signal sans clic.
@@ -52,10 +52,12 @@ légende `-V / 0 / +V`. Le menu **Afficher** règle indépendamment les calques
 Tension, Courant, Puissance, Valeurs, Références et Labels de nets. Les erreurs
 ERC restent rouges et prioritaires. Le flux de courant utilise des points jaunes
 à halo sombre, avec densité et vitesse proportionnelles au courant et un choix
-entre sens conventionnel et sens des électrons. Un halo de puissance entoure les
-composants dissipatifs, avec une luminosité réglable. **Vue → Courant animé**
-reste un raccourci pour le calque courant. Une LED rayonne lorsque sa tension
-directe dépasse son seuil, et un clic sur un interrupteur l'ouvre ou le ferme.
+entre sens conventionnel et sens des électrons ; un interrupteur ouvert coupe
+l’animation. Un halo de puissance discret entoure les composants non résistifs,
+avec une luminosité réglable. **Vue → Courant animé** reste un raccourci pour le
+calque courant. Une LED rayonne derrière son symbole lorsque sa tension directe
+dépasse son seuil, avec un halo réduit au dézoom, et un clic sur un interrupteur
+l'ouvre ou le ferme.
 Une extrémité libre d'un fil peut être tirée le long de son axe pour l'allonger
 ou le raccourcir ; les extrémités connectées ne sont pas redimensionnables. La
 mini-carte du coin inférieur droit montre le contenu, la sélection et la fenêtre
@@ -105,10 +107,13 @@ et applique la valeur à chaud en une seule étape annulable.
   déplace aussi la vue sans modifier le schéma.
 - Mini-carte : clic pour recentrer la vue sur le contenu.
 
-Priorité au clic : label, jonction, symbole, fil. Le survol d'un fil ou d'une
-broche met en évidence le net complet. Des guides apparaissent pendant le
-déplacement lorsque des symboles partagent une coordonnée. Le menu contextuel
-propose les actions propres à l’objet et, sur le vide, le collage et la vue.
+Priorité au clic : label, jonction, symbole, fil. La zone de clic d’un symbole
+épouse ses broches et son corps, sans marge de grille supplémentaire ; le cadre de
+sélection reste resserré autour du dessin. Le survol d'un fil ou d'une broche met
+en évidence le net complet. Des guides apparaissent pendant le déplacement
+lorsque des symboles partagent une coordonnée. Le menu contextuel propose les
+actions propres à l’objet et, sur le vide, le collage et la vue ; sa cible reste
+celle du clic d’ouverture même si la souris se déplace.
 
 Le placement utilise la grille avec un label unique et reste actif pour des
 placements répétés. `R`/`F` orientent l’aperçu. Un composant à deux broches déposé
@@ -183,34 +188,34 @@ sans extraction valide, pendant une analyse ou si le worker est indisponible.
 Les résultats conservent la révision et les noms du document ; un résultat
 antérieur est signalé mais reste consultable. **Marche/Arrêt** dans la barre
 d’outils et `Espace` pilotent la session continue ; **Reset** et `F5` la
-remettent à `t = 0`, **Pas** avance d’un pas en pause. L’option **Auto** reste
-disponible pour relancer après une modification, mais les changements de
-paramètres sont désormais appliqués à chaud sans remise à zéro. L’échelon de
-source est désactivé par défaut pour ne pas fausser le démarrage live.
+remettent à `t = 0`, **Pas** avance d’un pas en pause. Le recalcul après
+modification est actif par défaut ; l’option **Auto** permet de le suspendre.
+Les changements de paramètres restent appliqués à chaud sans remise à zéro.
+L’échelon de source est désactivé par défaut pour ne pas fausser le démarrage
+live.
 
-- **Portées incrustées** : zone redimensionnable en bas du canevas, une ou
-  plusieurs portées empilées. Chaque portée accepte plusieurs tensions et
-  courants, avec légende, valeurs courantes, zoom, déplacement, double-clic
-  d’auto-échelle et infobulle. Le menu **Affichage** règle la superposition ou la
-  séparation des signaux, l’échelle Y automatique ou manuelle et la vue
-  temporelle ou FFT. Les curseurs A/B se posent au clic et affichent tA, tB, Δt
-  et les valeurs par signal. **Figer** conserve le tracé, **Effacer** le vide,
-  les flèches réordonnent, **Fusionner** joint la portée suivante et
-  **Supprimer** la retire. Les signaux tracés sont rappelés par un marqueur de
-  couleur sur le fil ou le composant correspondant.
+- **Portées** : le panneau inférieur unique empile une ou plusieurs portées
+  redimensionnables. Chaque portée accepte plusieurs tensions et courants, avec
+  légende, valeurs courantes, zoom, déplacement, double-clic d’auto-échelle et
+  infobulle. Le menu **Affichage** règle la superposition ou la séparation des
+  signaux, l’échelle Y automatique ou manuelle et la vue temporelle ou FFT. Les
+  curseurs A/B se posent au clic et affichent tA, tB, Δt et les valeurs par
+  signal. **Figer** conserve le tracé, **Effacer** le vide, les flèches
+  réordonnent, **Fusionner** joint la portée suivante et **Supprimer** la retire.
+  Les signaux tracés sont rappelés par un marqueur de couleur sur le fil ou le
+  composant correspondant. Le panneau reste accessible par **Afficher →
+  Instruments et portées**.
 - **Contrôles live** : état `En marche`, `Pause`, `Arrêtée` ou `Circuit
   invalide`, rapport temps simulé/réel, badge `trop lent (×0,3)`, vitesse de
   simulation logarithmique, vitesse des points de courant et luminosité de
   puissance. Le lien **Voir le diagnostic** ouvre l’inspecteur/ERC.
-- **Portée temps réel** : pas de calcul, échelon de source optionnel, vitesse de
-  lecture, pause/reprise. La session avance sans plage d’arrêt et la fenêtre
-  glisse sur les derniers échantillons. Mesures min/max, crête-à-crête, moyenne,
-  RMS et nombre d’échantillons. Deux curseurs A/B se placent par clic, avec Δt,
-  1/Δt, valeurs, min, max et RMS sur l’intervalle ; un clic droit ou `Maj` force
-  B.
+- **Fenêtre glissante** : la portée temps réel affiche les derniers
+  échantillons sans plage d’arrêt. Les mesures min/max, crête-à-crête, moyenne,
+  RMS et nombre d’échantillons restent disponibles lorsque le signal est
+  sélectionné.
 - **Sondes** : les composants **Voltmètre**, **Ampèremètre** et **Ohmmètre** sont
   placés depuis la palette. La liste des sondes apparaît dans la colonne des
-  contrôles, à côté du graphique, avec **Afficher** (valeur sur le canevas) et
+  contrôles, à côté des portées, avec **Afficher** (valeur sur le canevas) et
   **Graphique** (tracé quand le signal existe). Le voltmètre se pose sur un fil ;
   l’ampèremètre et l’ohmmètre mesurent le composant sous la sonde.
 - **Spectre** : réutilise le dernier transitoire, choisit un signal et affiche
@@ -272,11 +277,11 @@ navigateur non automatisés, transitoire à pas fixe, FFT plafonnée, pas de
 PNG/persistance de projet, opamp sans alimentation/pôle, pas de mobile
 spécifique, fils non extensibles par une extrémité connectée. Les panneaux sont
 masquables et redimensionnables, mais il n'y a pas de dockage libre ni de
-disposition persistée. Les portées incrustées couvrent le tracé temporel, la
-FFT, les signaux multiples, les curseurs A/B, le gel, le zoom, la séparation et
-la fusion par bouton ; le mode XY, la fusion par glisser et le Bode incrusté
-restent dans le panneau classique. Les préférences et les projets JSON sont
-persistés ; le partage de projet se fait par copie du JSON ou téléchargement.
+disposition persistée. Le panneau unifié couvre le tracé temporel, la FFT, les
+signaux multiples, les curseurs A/B, le gel, le zoom, la séparation, la fusion et
+l’export CSV ; le mode XY, la fusion par glisser et le Bode incrusté ne sont pas
+proposés. Les préférences et les projets JSON sont persistés ; le partage de
+projet se fait par copie du JSON ou téléchargement.
 
 Tests : `cargo test -p circuitsim-app` couvre document, vue, navigation,
 mini-carte, édition, palette, propriétés, historique, presse-papiers, sélection
