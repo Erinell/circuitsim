@@ -28,6 +28,9 @@ sémantique.
   de nouveau la sélection et `M` la met en miroir.
 - Le recalcul après modification est actif par défaut ; l’option **Auto** permet
   encore de le suspendre.
+- Les portées affichent une fenêtre glissante de **10 s de temps simulé**,
+  indépendante de la vitesse de lecture. Le tampon d’affichage est décimé à pas
+  fixe pour rester borné, tandis que le tampon complet alimente le spectre.
 - Les valeurs et références sont placées au plus près du corps du symbole, avec
   un décalage adapté à son orientation.
 - La zone de clic, le cadre de sélection et la marquise épousent le corps des

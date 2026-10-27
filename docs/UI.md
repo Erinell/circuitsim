@@ -204,7 +204,8 @@ live.
   réordonnent, **Fusionner** joint la portée suivante et **Supprimer** la retire.
   Les signaux tracés sont rappelés par un marqueur de couleur sur le fil ou le
   composant correspondant. Le panneau reste accessible par **Afficher →
-  Instruments et portées**.
+  Instruments et portées**. La fenêtre temporelle couvre **10 s de temps
+  simulé**, indépendamment de la vitesse de lecture.
 - **Contrôles live** : état `En marche`, `Pause`, `Arrêtée` ou `Circuit
   invalide`, rapport temps simulé/réel, badge `trop lent (×0,3)`, vitesse de
   simulation logarithmique, vitesse des points de courant et luminosité de
