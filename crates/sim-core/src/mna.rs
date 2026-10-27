@@ -14,6 +14,8 @@ const ELEMENTARY_CHARGE: f64 = 1.602_176_634e-19;
 const NOMINAL_TEMPERATURE: f64 = 300.15;
 const THERMAL_VOLTAGE: f64 = BOLTZMANN * NOMINAL_TEMPERATURE / ELEMENTARY_CHARGE;
 const MAX_EXPONENT: f64 = 80.0;
+/// Large conductance used only for the discharged-capacitor initial state.
+const INITIAL_CAPACITOR_CONDUCTANCE: f64 = 1e9;
 
 /// Error raised while compiling a validated netlist into MNA equations.
 #[derive(Clone, Debug, Error, PartialEq)]
@@ -58,6 +60,8 @@ pub enum MnaError {
 pub(crate) enum AssemblyMode<'a> {
     /// DC operating point: capacitors open and inductors shorted.
     Dc,
+    /// Transient initial state: capacitors discharged and inductors shorted.
+    Initial,
     /// Backward-Euler step from a previous solution.
     Transient {
         previous: &'a DVector<f64>,
@@ -198,23 +202,36 @@ impl MnaCircuit {
             );
         }
 
-        if let AssemblyMode::Transient { previous, step } = mode {
-            for capacitor in &self.capacitors {
-                let conductance_value = capacitor.capacitance / step;
-                let previous_voltage =
-                    node_voltage(previous, capacitor.a) - node_voltage(previous, capacitor.b);
-                stamp_conductance(
-                    &mut conductance,
-                    capacitor.a,
-                    capacitor.b,
-                    conductance_value,
-                );
-                stamp_current_source(
-                    &mut sources,
-                    capacitor.a,
-                    capacitor.b,
-                    -conductance_value * previous_voltage,
-                );
+        match mode {
+            AssemblyMode::Dc => {}
+            AssemblyMode::Initial => {
+                for capacitor in &self.capacitors {
+                    stamp_conductance(
+                        &mut conductance,
+                        capacitor.a,
+                        capacitor.b,
+                        INITIAL_CAPACITOR_CONDUCTANCE,
+                    );
+                }
+            }
+            AssemblyMode::Transient { previous, step } => {
+                for capacitor in &self.capacitors {
+                    let conductance_value = capacitor.capacitance / step;
+                    let previous_voltage =
+                        node_voltage(previous, capacitor.a) - node_voltage(previous, capacitor.b);
+                    stamp_conductance(
+                        &mut conductance,
+                        capacitor.a,
+                        capacitor.b,
+                        conductance_value,
+                    );
+                    stamp_current_source(
+                        &mut sources,
+                        capacitor.a,
+                        capacitor.b,
+                        -conductance_value * previous_voltage,
+                    );
+                }
             }
         }
 
@@ -485,7 +502,7 @@ impl MnaCircuit {
             .find(|element| element.component == component)
         {
             return match mode {
-                AssemblyMode::Dc => Some(0.0),
+                AssemblyMode::Dc | AssemblyMode::Initial => Some(0.0),
                 AssemblyMode::Transient { previous, step } => {
                     let voltage =
                         node_voltage(solution, capacitor.a) - node_voltage(solution, capacitor.b);

@@ -95,8 +95,10 @@ let result = simulate_transient(&netlist, options)?;
 Défauts : `start_time = 0`, `stop_time = 1 ms`, `step = 10 µs`,
 `max_steps = 1_000_000`, aucun événement.
 
-Le point initial est le DC de la netlist non modifiée : condensateur ouvert,
-inductance court-circuitée. S'il échoue, `InitialDc` ; aucun échantillon partiel.
+Le point initial du transitoire force les condensateurs à **tension nulle**
+(charge complètement déchargée) et court-circuite les inductances, comme en DC.
+Le calcul DC classique reste condensateur ouvert. Si le point initial échoue,
+`InitialDc` ; aucun échantillon partiel.
 Chaque intervalle `[t_n, t_{n+1}]` utilise Euler arrière avec `h` :
 
 ```text
@@ -184,8 +186,9 @@ non-linéarités sont figées au point DC.
 | Balayage/excitation/point DC AC | `AcError::InvalidSweep`, `InvalidExcitation`, `OperatingPoint` |
 | Matrice ou solution AC | `AcError::SingularMatrix`, `NonFiniteSystem`, `NonFiniteSolution` |
 
-Un nœud relié seulement par un condensateur est flottant en DC : le point
-initial échoue, ce qui est un diagnostic normal. Le worker renvoie
+Un nœud relié seulement par un condensateur est résolu par le court-circuit
+initial du transitoire ; le calcul DC classique le laisse flottant et échoue,
+ce qui reste un diagnostic normal. Le worker renvoie
 `AnalysisFailureKind::Dc` et l'interface conserve le dernier résultat valide.
 
 ## 8. Déterminisme, tests et limites

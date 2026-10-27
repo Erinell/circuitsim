@@ -358,25 +358,44 @@ fn preserves_events_close_to_the_time_bounds() {
 }
 
 #[test]
+fn capacitors_start_discharged_at_time_zero() {
+    let (mut netlist, _, output, capacitor, ground) = rc_netlist();
+    let source = netlist
+        .components
+        .iter_mut()
+        .find(|component| component.id != capacitor && component.label == "V1")
+        .expect("source exists");
+    source
+        .params
+        .insert("dc".to_owned(), ParamValue::Number(5.0));
+    netlist.validate_for_simulation().unwrap();
+    let options = TransientOptions {
+        stop_time: 5e-3,
+        step: 1e-5,
+        ..TransientOptions::default()
+    };
+    let result = simulate_transient(&netlist, options).unwrap();
+    let first = result.samples.first().unwrap();
+    let initial = first.node_voltage(output).unwrap() - first.node_voltage(ground).unwrap();
+    assert!(
+        initial.abs() < 1e-6,
+        "initial capacitor voltage = {initial}"
+    );
+    let last = result.samples.last().unwrap();
+    assert!(last.node_voltage(output).unwrap() > 1.0);
+}
+
+#[test]
 fn reports_an_initial_dc_failure_before_transient_steps() {
     let mut builder = NetlistBuilder::new();
     let ground = builder.add_node("0", NodeKind::Ground).unwrap();
-    let input = builder.add_node("in", NodeKind::Electrical).unwrap();
     let floating = builder.add_node("floating", NodeKind::Electrical).unwrap();
     builder
         .add_component(
-            ComponentKind::VoltageSource,
-            "V1",
+            ComponentKind::CurrentSource,
+            "I1",
             number("dc", 1.0),
-            vec![input, ground],
-        )
-        .unwrap();
-    builder
-        .add_component(
-            ComponentKind::Capacitor,
-            "C1",
-            number("capacitance", 1e-6),
-            vec![input, floating],
+            vec![floating, ground],
         )
         .unwrap();
     let netlist = builder.build().unwrap();
@@ -465,7 +484,7 @@ fn applies_a_switch_event_without_changing_the_capacitor_voltage() {
         .iter()
         .find(|sample| (sample.time - 1.1e-3).abs() < 1e-12)
         .unwrap();
-    assert!((at_event.node_voltage(output).unwrap() - 5.0).abs() < 1e-5);
+    assert!((at_event.node_voltage(output).unwrap() - 3.16).abs() < 0.1);
     assert!(after_event.node_voltage(output).unwrap() < 0.1);
 }
 

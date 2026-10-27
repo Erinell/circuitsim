@@ -691,7 +691,7 @@ fn solve_initial(
     solve_robust(
         circuit,
         config,
-        AssemblyMode::Dc,
+        AssemblyMode::Initial,
         &initial,
         &junction_voltages,
     )
