@@ -43,7 +43,7 @@ Au 27 octobre 2026, `cargo test --workspace` exécute **267 tests** :
 | `sim-core` transitoire | 19 | RC/RL, événements, diode, opamp, énergie, session incrémentale, mise à jour à chaud |
 | `sim-core` AC | 15 | RC/RL/RLC, phase, diode, opamp, balayages, erreurs |
 | `editor-core` | 48 | grille, symboles, schéma, historique, ERC, extraction, masses communes, JSON, séries E, snap/routage |
-| `circuitsim-app` | 147 | document, projet JSON, vue, navigation, mini-carte, UI, petits textes à 10 px, inspecteur, historique, presse-papiers, simulation continue, mise à jour à chaud, calques, palettes, survol avec tension et intensité de fil, placement aligné sur broche, câblage direct, raccourcis, aide générée, contrastes, panneau unifié et portées, courants de nets et de composants dérivés, ajout de portée depuis les contrôles, valeurs à droite, fenêtre réglable 0,5–30 s, 10 s par défaut et décimation, réordonnancement et recentrage, sondes intégrées, FFT et curseurs A/B, curseurs de réglage, exemples, diviseur, RLC et polarité, préférences persistées et migration, À propos, onboarding, accessibilité, ohmmètre, instruments, worker, FFT, Bode, CSV |
+| `circuitsim-app` | 148 | document, projet JSON, vue, navigation, mini-carte, UI, petits textes à 10 px, inspecteur, historique, presse-papiers, simulation continue, mise à jour à chaud, calques, palettes, survol avec tension et intensité de fil, placement aligné sur broche, câblage direct, raccourcis, aide générée, contrastes, panneau unifié et portées, courants de nets et de composants dérivés, ajout de portée depuis les contrôles, valeurs à droite, fenêtre réglable 0,5–30 s, 10 s par défaut et décimation, réordonnancement et recentrage, sondes intégrées, FFT et curseurs A/B, curseurs de réglage, exemples dont le RC de démonstration, diviseur, RLC et polarité, préférences persistées et migration, À propos, onboarding, accessibilité, ohmmètre, instruments, worker, FFT, Bode, CSV |
 | `worker-protocol` | 11 | trames, version, netlist, erreurs, transports |
 | `worker` | 13 | coalescence, cadence, révisions, DC/transitoire/AC |
 | `editor_invariants` | 2 | proptest undo/redo et extraction |
@@ -72,7 +72,8 @@ portées, placement aligné sur une broche au bout d’un fil, survol avec tensi
 de fil référencée à la masse, palette sans voltmètre ni ampèremètre, sondes
 intégrées et FFT,
 curseurs A/B, fusion et réordonnancement, curseurs de réglage, exemples originaux
-dont le diviseur et le RLC redessinés ainsi que le RLC parallèle commuté,
+dont le RC de démonstration, le diviseur et le RLC redessinés ainsi que le RLC
+parallèle commuté,
 polarité positive des sources, préférences versionnées et
 À propos, sondes V/A/Ω, redimensionnement
 d’extrémités, déplacement de segment sans embout, fils en erreur ERC, basculement

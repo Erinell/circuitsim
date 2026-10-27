@@ -43,8 +43,9 @@ rayonnent derrière leur symbole selon leur tension directe.
 - courants de branche disponibles (sources de tension, inductances, opamps) ;
 - sources indépendantes avec valeur `dc` en SI.
 
-Les valeurs sont formatées à quatre chiffres significatifs. `OUT` est prioritaire
-pour le spectre et le Bode ; sinon le premier net alphabétique. La sélection de
+Les valeurs sont formatées à quatre chiffres significatifs. La tension `OUT` est
+prioritaire, puis `Vc`, pour le spectre et le Bode ; sinon le premier net
+alphabétique. La sélection de
 portée est un `BTreeSet`, donc l'ordre des courbes et lignes CSV est stable.
 
 ## 3. Transitoire et échelon

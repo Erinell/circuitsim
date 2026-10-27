@@ -8,6 +8,9 @@ sémantique.
 
 ### Added
 
+- Le circuit de démonstration **RC** est remplacé par le montage fourni :
+  `V1 = 10 V`, `R1 = 1 kΩ`, `C1 = 100 µF`, `SW1` fermé, masse commune et
+  sortie `Vc`.
 - Panneau inférieur unique **Instruments et portées** : les contrôles live, les
   sondes, l’export et les portées empilées partagent désormais la même zone, avec
   les onglets **Portées**, **Spectre** et **Bode**. Les sondes sont regroupées

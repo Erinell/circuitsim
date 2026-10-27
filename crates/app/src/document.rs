@@ -270,28 +270,29 @@ impl Document {
     /// Creates the editable demonstration circuit.
     pub fn demo() -> Result<Self, ActionError> {
         let mut document = Self::new();
-
         let source = document.add_symbol(SymbolKind::VoltageSource, GridPos::new(-10, -6))?;
         set_orientation(&mut document, source, Orientation::R90)?;
-        document.add_symbol(SymbolKind::Resistor, GridPos::new(-2, -8))?;
-        let capacitor = document.add_symbol(SymbolKind::Capacitor, GridPos::new(6, -3))?;
+        set_number(&mut document, source, "dc", 10.0)?;
+        document.add_symbol(SymbolKind::Ground, GridPos::new(-10, -1))?;
+        let resistor = document.add_symbol(SymbolKind::Resistor, GridPos::new(-1, -10))?;
+        set_number(&mut document, resistor, "resistance", 1_000.0)?;
+        let capacitor = document.add_symbol(SymbolKind::Capacitor, GridPos::new(2, -6))?;
         set_orientation(&mut document, capacitor, Orientation::R90)?;
-        document.add_symbol(SymbolKind::Ground, GridPos::new(-10, -2))?;
+        set_number(&mut document, capacitor, "capacitance", 100e-6)?;
+        let switch = document.add_symbol(SymbolKind::Switch, GridPos::new(-6, -10))?;
+        set_bool(&mut document, switch, "closed", true)?;
 
-        document.add_wire(GridPos::new(-10, -8), GridPos::new(-4, -8))?;
-        document.add_wire(GridPos::new(0, -8), GridPos::new(6, -8))?;
-        document.add_wire(GridPos::new(6, -8), GridPos::new(6, -5))?;
-        document.add_wire(GridPos::new(6, -1), GridPos::new(-10, -1))?;
-        document.add_wire(GridPos::new(-10, -1), GridPos::new(-10, -2))?;
+        document.add_wire(GridPos::new(-10, -2), GridPos::new(-10, -1))?;
         document.add_wire(GridPos::new(-10, -4), GridPos::new(-10, -2))?;
-        document.add_label(GridPos::new(-6, -8), "VIN")?;
-        document.add_label(GridPos::new(6, -8), "OUT")?;
-
-        document.history.clear();
-        document.selected.clear();
-        document.dirty = false;
-        document.revision = 0;
-        Ok(document)
+        document.add_wire(GridPos::new(1, -10), GridPos::new(2, -10))?;
+        document.add_wire(GridPos::new(2, -10), GridPos::new(2, -8))?;
+        document.add_wire(GridPos::new(-10, -10), GridPos::new(-8, -10))?;
+        document.add_wire(GridPos::new(-10, -10), GridPos::new(-10, -8))?;
+        document.add_wire(GridPos::new(-10, -1), GridPos::new(2, -1))?;
+        document.add_wire(GridPos::new(2, -4), GridPos::new(2, -1))?;
+        document.add_wire(GridPos::new(-4, -10), GridPos::new(-3, -10))?;
+        document.add_label(GridPos::new(2, -10), "Vc")?;
+        finish_example(document)
     }
 
     /// Creates a resistive divider example.
@@ -1981,6 +1982,22 @@ fn set_number(
     document.update_symbol(symbol)
 }
 
+fn set_bool(
+    document: &mut Document,
+    id: SymbolId,
+    key: &str,
+    value: bool,
+) -> Result<(), ActionError> {
+    let mut symbol = document
+        .symbol(id)
+        .ok_or(ActionError::MissingObject)?
+        .clone();
+    symbol
+        .params
+        .insert(key.to_owned(), sim_core::netlist::ParamValue::Bool(value));
+    document.update_symbol(symbol)
+}
+
 fn single_or_composite(mut commands: Vec<Command>) -> Command {
     if commands.len() == 1 {
         commands.remove(0)
@@ -2409,12 +2426,94 @@ mod tests {
     }
 
     #[test]
+    fn demo_matches_the_requested_rc_layout() {
+        let document = Document::demo().unwrap();
+        let source = document
+            .schematic()
+            .symbols()
+            .find(|symbol| symbol.kind == SymbolKind::VoltageSource)
+            .unwrap();
+        assert_eq!(source.at, GridPos::new(-10, -6));
+        assert_eq!(source.orientation, Orientation::R90);
+        assert_eq!(
+            source
+                .params
+                .get("dc")
+                .and_then(sim_core::netlist::ParamValue::as_number),
+            Some(10.0)
+        );
+        let switch = document
+            .schematic()
+            .symbols()
+            .find(|symbol| symbol.kind == SymbolKind::Switch)
+            .unwrap();
+        assert_eq!(switch.at, GridPos::new(-6, -10));
+        assert_eq!(
+            switch
+                .params
+                .get("closed")
+                .and_then(sim_core::netlist::ParamValue::as_bool),
+            Some(true)
+        );
+        for (label, at, orientation, key, value) in [
+            (
+                "R1",
+                GridPos::new(-1, -10),
+                Orientation::R0,
+                "resistance",
+                1_000.0,
+            ),
+            (
+                "C1",
+                GridPos::new(2, -6),
+                Orientation::R90,
+                "capacitance",
+                100e-6,
+            ),
+        ] {
+            let symbol = document
+                .schematic()
+                .symbols()
+                .find(|symbol| symbol.label == label)
+                .unwrap();
+            assert_eq!(symbol.at, at);
+            assert_eq!(symbol.orientation, orientation);
+            assert_eq!(
+                symbol
+                    .params
+                    .get(key)
+                    .and_then(sim_core::netlist::ParamValue::as_number),
+                Some(value)
+            );
+        }
+        assert!(document
+            .schematic()
+            .labels()
+            .any(|label| label.text == "Vc" && label.at == GridPos::new(2, -10)));
+        assert!(document
+            .schematic()
+            .symbols()
+            .any(|symbol| symbol.kind == SymbolKind::Ground && symbol.at == GridPos::new(-10, -1)));
+        let extraction = document.extraction().unwrap();
+        let result = sim_core::solve_dc(&extraction.netlist, sim_core::DcOptions::default())
+            .expect("demo has a DC operating point");
+        let out = extraction
+            .netlist
+            .nodes
+            .iter()
+            .find(|node| node.name.as_str() == "Vc")
+            .unwrap();
+        let voltage = result.node_voltage(out.id).unwrap();
+        assert!((voltage - 10.0).abs() < 1e-9, "Vc = {voltage}");
+    }
+
+    #[test]
     fn demo_extracts_a_clean_netlist() {
         let document = Document::demo().unwrap();
         let extraction = document.extraction().unwrap();
         assert!(extraction.erc.is_empty());
-        assert_eq!(extraction.netlist.nodes.len(), 3);
-        assert_eq!(extraction.netlist.components.len(), 4);
+        assert_eq!(extraction.netlist.nodes.len(), 4);
+        assert_eq!(extraction.netlist.components.len(), 5);
         assert!(document.extraction_error().is_none());
     }
 
@@ -2547,15 +2646,15 @@ mod tests {
     fn hit_testing_prefers_labels_and_symbols() {
         let document = Document::demo().unwrap();
         assert!(matches!(
-            document.object_at(GridPos::new(6, -8)),
+            document.object_at(GridPos::new(2, -10)),
             Some(ObjectRef::Label(_))
         ));
         assert!(matches!(
-            document.object_at(GridPos::new(-2, -8)),
+            document.object_at(GridPos::new(-1, -10)),
             Some(ObjectRef::Symbol(_))
         ));
         assert!(matches!(
-            document.object_at(GridPos::new(-7, -8)),
+            document.object_at(GridPos::new(-9, -10)),
             Some(ObjectRef::Wire(_))
         ));
     }
@@ -2798,15 +2897,15 @@ mod tests {
     #[test]
     fn selects_a_whole_net_and_lists_names() {
         let mut document = Document::demo().unwrap();
-        let at = GridPos::new(-6, -8);
-        assert_eq!(document.net_name_at(at).as_deref(), Some("VIN"));
+        let at = GridPos::new(2, -10);
+        assert_eq!(document.net_name_at(at).as_deref(), Some("Vc"));
         let count = document.select_net_at(at).unwrap();
         assert!(count > 2);
         assert!(document
             .selection()
             .iter()
             .any(|object| matches!(object, ObjectRef::Wire(_))));
-        assert!(document.existing_net_names().contains(&"OUT".to_owned()));
+        assert!(document.existing_net_names().contains(&"Vc".to_owned()));
     }
 
     #[test]
