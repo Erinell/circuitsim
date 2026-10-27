@@ -16,6 +16,7 @@ use crate::ui::history;
 use crate::ui::instruments::InstrumentsState;
 use crate::ui::palette::PaletteState;
 use crate::ui::properties::{InspectorState, SymbolDialog};
+use crate::ui::shortcuts::Keymap;
 use crate::ui::theme::CanvasTheme;
 use crate::ui::{self, Status, Tool};
 
@@ -23,6 +24,7 @@ use crate::ui::{self, Status, Tool};
 pub struct CircuitApp {
     document: Document,
     tool: Tool,
+    keymap: Keymap,
     filter: String,
     palette_state: PaletteState,
     canvas: CanvasState,
@@ -193,6 +195,7 @@ impl CircuitApp {
         Self {
             document,
             tool: Tool::Select,
+            keymap: Keymap::default(),
             filter: String::new(),
             palette_state: PaletteState::default(),
             canvas: CanvasState::new(),
@@ -316,6 +319,7 @@ impl CircuitApp {
     }
 
     fn toolbar(&mut self, ui: &mut Ui) {
+        let compact = self.compact_symbols();
         ui.add_space(2.0);
         ui.horizontal_wrapped(|ui| {
             ui.label(RichText::new("CircuitSim").strong().size(16.0));
@@ -375,10 +379,24 @@ impl CircuitApp {
             );
             tool_toggle(ui, &mut self.tool, &mut self.canvas, Tool::Label, "Label");
             ui.separator();
+            for kind in compact {
+                let short = compact_symbol_label(&kind);
+                let name = ui::symbol_kind_name(&kind);
+                let selected = self.tool == Tool::Place(kind.clone());
+                if ui
+                    .selectable_label(selected, short)
+                    .on_hover_text(format!("{name} : placer"))
+                    .clicked()
+                {
+                    self.set_tool(Tool::Place(kind));
+                    self.canvas.cancel_interaction();
+                }
+            }
+            ui.separator();
 
             let has_symbols = selection_has_symbols(&self.document);
             ui.add_enabled_ui(has_symbols, |ui| {
-                if ui.button("Pivoter").on_hover_text("R").clicked() {
+                if ui.button("Pivoter").on_hover_text("Maj+R").clicked() {
                     self.rotate();
                 }
                 if ui.button("Miroir").on_hover_text("M").clicked() {
@@ -695,9 +713,42 @@ impl CircuitApp {
         ui.add_space(2.0);
     }
 
+    fn compact_symbols(&self) -> Vec<editor_core::SymbolKind> {
+        const DEFAULTS: [editor_core::SymbolKind; 9] = [
+            editor_core::SymbolKind::Resistor,
+            editor_core::SymbolKind::Capacitor,
+            editor_core::SymbolKind::Inductor,
+            editor_core::SymbolKind::Diode,
+            editor_core::SymbolKind::VoltageSource,
+            editor_core::SymbolKind::Ground,
+            editor_core::SymbolKind::Switch,
+            editor_core::SymbolKind::Led,
+            editor_core::SymbolKind::OpAmp,
+        ];
+        let mut symbols = self.palette_state.favorites().take(9).collect::<Vec<_>>();
+        for kind in DEFAULTS {
+            if symbols.len() >= 9 {
+                break;
+            }
+            if !symbols.contains(&kind) {
+                symbols.push(kind);
+            }
+        }
+        symbols
+    }
+
     fn status_bar(&mut self, ui: &mut Ui) {
         ui.horizontal(|ui| {
             self.status.show(ui);
+            ui.separator();
+            let tool = match &self.tool {
+                Tool::Select => "Sélection".to_owned(),
+                Tool::Place(kind) => format!("Placement : {}", ui::symbol_kind_name(kind)),
+                Tool::Wire => "Fil".to_owned(),
+                Tool::Junction => "Jonction".to_owned(),
+                Tool::Label => "Label".to_owned(),
+            };
+            ui.label(RichText::new(format!("Outil : {tool}")).small());
             ui.separator();
             let (nets, components) = self.document.extraction().map_or((0, 0), |extraction| {
                 (extraction.nets.len(), extraction.netlist.components.len())
@@ -1004,10 +1055,11 @@ impl CircuitApp {
             return;
         }
 
-        let (command, shift, escape, delete, home) = context.input(|input| {
+        let (command, shift, alt, escape, delete, home) = context.input(|input| {
             (
                 input.modifiers.command,
                 input.modifiers.shift,
+                input.modifiers.alt,
                 input.key_pressed(Key::Escape),
                 input.key_pressed(Key::Delete) || input.key_pressed(Key::Backspace),
                 input.key_pressed(Key::Home),
@@ -1094,13 +1146,12 @@ impl CircuitApp {
             self.reset_live(now);
             return;
         }
-        let (pan_left, pan_right, pan_up, pan_down, alt) = context.input(|input| {
+        let (pan_left, pan_right, pan_up, pan_down) = context.input(|input| {
             (
                 input.key_pressed(Key::ArrowLeft),
                 input.key_pressed(Key::ArrowRight),
                 input.key_pressed(Key::ArrowUp),
                 input.key_pressed(Key::ArrowDown),
-                input.modifiers.alt,
             )
         });
         if (pan_left || pan_right || pan_up || pan_down) && !command && !alt {
@@ -1154,15 +1205,25 @@ impl CircuitApp {
             self.canvas.request_fit();
             return;
         }
-        if context.input(|input| input.key_pressed(Key::V)) {
-            self.set_tool(Tool::Select);
-        } else if context.input(|input| input.key_pressed(Key::W)) {
+        if !command && !shift && !alt {
+            if let Some(kind) = self.keymap.bindings().iter().find_map(|binding| {
+                context
+                    .input(|input| input.key_pressed(binding.key))
+                    .then_some(binding.kind)
+            }) {
+                self.set_tool(Tool::Place(kind.symbol_kind()));
+                self.status.info(format!("Placement : {}.", kind.label()));
+                return;
+            }
+        }
+        if context.input(|input| input.key_pressed(Key::W)) {
             self.set_tool(Tool::Wire);
         } else if context.input(|input| input.key_pressed(Key::J)) {
             self.set_tool(Tool::Junction);
-        } else if context.input(|input| input.key_pressed(Key::L)) {
+        } else if context.input(|input| input.key_pressed(Key::N)) {
             self.set_tool(Tool::Label);
-        } else if context.input(|input| input.key_pressed(Key::R))
+        } else if shift
+            && context.input(|input| input.key_pressed(Key::R))
             && !matches!(self.tool, Tool::Place(_))
         {
             if selection_has_symbols(&self.document) {
@@ -1214,14 +1275,14 @@ impl CircuitApp {
                     (
                         2,
                         "Câbler",
-                        "Appuyez sur W, partez d’une broche ou d’un fil, puis cliquez \
-                         l’extrémité. Maj change le coude.",
+                        "Glissez depuis une broche, ou utilisez W puis cliquez l’extrémité. \
+                         Maj change le coude.",
                     ),
                     (
                         3,
                         "Simuler",
-                        "Ctrl+Entrée lance le transitoire. Les tensions des nets \
-                         apparaissent sur le canevas.",
+                        "Le circuit tourne dès l’ouverture. Les fils sont colorés par tension \
+                         et Espace met la session en pause.",
                     ),
                     (
                         4,
@@ -1422,17 +1483,20 @@ impl CircuitApp {
                     .num_columns(2)
                     .spacing([18.0, 3.0])
                     .show(ui, |ui| {
-                        shortcut(ui, "V", "outil Sélection");
-                        shortcut(ui, "W", "outil Fil");
-                        shortcut(ui, "J", "outil Jonction");
-                        shortcut(ui, "L", "outil Label");
-                        shortcut(ui, "R / M", "pivoter / miroir");
+                        shortcut(ui, "W / J / N", "outils Fil / Jonction / Label");
+                        shortcut(
+                            ui,
+                            "R C L D V G S",
+                            "placer résistance, condensateur, bobine, diode, source, masse, interrupteur",
+                        );
+                        shortcut(ui, "Maj+R / M", "pivoter / miroir");
                         shortcut(ui, "R / F en pose", "tourner / miroir de l’aperçu");
                         shortcut(ui, "Ctrl+K", "palette de commandes");
                         shortcut(ui, "Alt+clic", "sélectionner tout le net");
                         shortcut(ui, "Ctrl+C / Ctrl+V", "copier / coller avec aperçu");
                         shortcut(ui, "Ctrl+D", "dupliquer la sélection");
-                        shortcut(ui, "Ctrl+Entrée / F5", "relancer le transitoire");
+                        shortcut(ui, "Espace", "marche/arrêt de la simulation");
+                        shortcut(ui, "F5 / Ctrl+Entrée", "reset de la session");
                         shortcut(ui, "Suppr", "supprimer la sélection");
                         shortcut(ui, "Ctrl+Z", "annuler");
                         shortcut(ui, "Ctrl+Y", "rétablir");
@@ -1455,9 +1519,10 @@ impl CircuitApp {
                      à une valeur initiale avant d'appliquer sa valeur finale.",
                 );
                 ui.label(
-                    "Simuler (Ctrl+Entrée ou F5) démarre le temps réel ; la vitesse et la pause \
-                     sont dans le panneau. Les fils affichent un flux animé et les sondes V/A/Ω \
-                     se placent depuis la palette.",
+                    "La simulation continue démarre à l'ouverture. Espace l'arrête ou la reprend ; \
+                     Reset et F5 reviennent à t = 0. Les paramètres sont appliqués à chaud tant que \
+                     la topologie reste compatible. Les fils sont colorés par tension et les sondes \
+                     V/A/Ω se placent depuis la palette.",
                 );
                 ui.label(
                     "Dans la portée, deux clics placent les curseurs A et B ; les écarts et \
@@ -1654,6 +1719,26 @@ fn selection_has_symbols(document: &Document) -> bool {
         .selection()
         .iter()
         .any(|object| matches!(object, ObjectRef::Symbol(_)))
+}
+
+fn compact_symbol_label(kind: &editor_core::SymbolKind) -> &'static str {
+    match kind {
+        editor_core::SymbolKind::Resistor => "R",
+        editor_core::SymbolKind::Capacitor => "C",
+        editor_core::SymbolKind::Inductor => "L",
+        editor_core::SymbolKind::Diode => "D",
+        editor_core::SymbolKind::VoltageSource => "V",
+        editor_core::SymbolKind::CurrentSource => "I",
+        editor_core::SymbolKind::Ground => "GND",
+        editor_core::SymbolKind::Switch => "SW",
+        editor_core::SymbolKind::Led => "LED",
+        editor_core::SymbolKind::Zener => "Z",
+        editor_core::SymbolKind::OpAmp => "AOP",
+        editor_core::SymbolKind::Voltmeter => "V",
+        editor_core::SymbolKind::Ammeter => "A",
+        editor_core::SymbolKind::Ohmmeter => "Ω",
+        editor_core::SymbolKind::Custom(_) => "?",
+    }
 }
 
 fn shortcut(ui: &mut Ui, keys: &str, description: &str) {

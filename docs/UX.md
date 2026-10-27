@@ -18,8 +18,9 @@
 | Touche | Action |
 | --- | --- |
 | `Ctrl+K` | Palette de commandes |
-| `V`, `W`, `J`, `L` | Sélection, Fil, Jonction, Label |
-| `R`, `M` | Pivoter ou mettre en miroir la sélection |
+| `W`, `J`, `N` | Fil, Jonction, Label |
+| `R`, `C`, `L`, `D`, `V`, `G`, `S` | Placer résistance, condensateur, bobine, diode, source, masse, interrupteur |
+| `Maj+R`, `M` | Pivoter ou mettre en miroir la sélection |
 | `R`, `F` | Pivoter ou mettre en miroir l’aperçu de placement |
 | `Maj` + clic | Ajouter ou retirer de la sélection |
 | `Ctrl` + clic | Inverser un objet dans la sélection |
@@ -134,6 +135,16 @@ Les raccourcis sont ignorés lorsqu’un champ texte a le focus, à l’exceptio
   l’action est annulable.
 - Un double-clic sur un symbole ouvre une fenêtre centrée d’édition de ses
   propriétés, avec les mêmes validations que l’inspecteur.
+- Le survol affiche une bulle avec le type, le nom, les paramètres, les tensions
+  de broches, le courant et la puissance. Aucun clic n’est nécessaire.
+- En mode Sélection, un glisser démarré sur une broche câble directement avec
+  aperçu, accroche et annulation en une action. L’outil Fil `W` reste disponible.
+- Le menu contextuel propose les propriétés, les transformations, la
+  duplication, la suppression, les mesures et, sur un fil, la coupe, une
+  jonction ou un label. Sur le fond, il propose les sous-menus **Ajouter**.
+- La barre d’outils compacte affiche les composants favoris puis les composants
+  fréquents, avec la lettre de placement en infobulle. La barre d’état rappelle
+  l’outil actif.
 - Un clic sur une broche ou un fil met en évidence le net complet. `Alt` + clic
   sélectionne tous ses objets.
 
@@ -219,10 +230,11 @@ Les raccourcis sont ignorés lorsqu’un champ texte a le focus, à l’exceptio
 - L’historique nommé liste les modifications appliquées et rétablies. Cliquer
   un état ramène le schéma exactement à cet état, sans perdre les commandes
   futures.
-- Le menu contextuel est spécifique à la cible : symbole (pivoter, miroir),
-  label (renommer, sélectionner le net), fil ou jonction (sélectionner le net),
-  puis copier, dupliquer, supprimer. Sur le vide, il propose coller, tout
-  sélectionner, ajuster, annuler et rétablir.
+- Le menu contextuel est spécifique à la cible : symbole (propriétés, pivoter,
+  miroir, mesurer), label (renommer, sélectionner le net), fil (couper, jonction,
+  label, sélectionner le net) ou jonction, puis copier, dupliquer, supprimer.
+  Sur le vide, il propose **Ajouter** par catégorie, coller, tout sélectionner,
+  ajuster, annuler et rétablir.
 
 ## 12. Résultats et erreurs
 

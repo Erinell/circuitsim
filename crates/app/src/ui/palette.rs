@@ -39,6 +39,11 @@ impl PaletteState {
         self.favorites.contains(kind)
     }
 
+    /// Returns favorite kinds in deterministic order.
+    pub(crate) fn favorites(&self) -> impl Iterator<Item = SymbolKind> + '_ {
+        self.favorites.iter().cloned()
+    }
+
     fn toggle_favorite(&mut self, kind: &SymbolKind) {
         if !self.favorites.remove(kind) {
             self.favorites.insert(kind.clone());

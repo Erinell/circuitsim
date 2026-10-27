@@ -11,7 +11,8 @@ use sim_core::units::{format_si_precision, Unit};
 
 use crate::analysis::{LiveValues, ProbeReading};
 use crate::document::{
-    ActionError, ClipboardItem, Document, SelectionChange, SelectionMode, WireEnd,
+    format_parameter, parameter_unit, ActionError, ClipboardItem, Document, SelectionChange,
+    SelectionMode, WireEnd,
 };
 use crate::ui::glyph::{paint_symbol, GlyphColors, SymbolText};
 use crate::ui::theme::{CanvasSettings, CanvasTheme, CurrentDirection, VoltageScale};
@@ -64,6 +65,11 @@ enum DragState {
         end: WireEnd,
         start: GridPos,
         current: GridPos,
+    },
+    WireFromPin {
+        start: GridPos,
+        current: GridPos,
+        prefer_horizontal: bool,
     },
     Marquee {
         start: GridPos,
@@ -306,7 +312,11 @@ impl CanvasState {
             .input(|input| input.pointer.hover_pos())
             .filter(|position| rect.contains(*position))
             .and_then(|position| self.viewport.screen_to_grid(rect, position));
-        self.snap_target = if matches!(tool, crate::ui::Tool::Wire | crate::ui::Tool::Place(_)) {
+        let pin_hover = raw_point.is_some_and(|point| document.pin_at(point).is_some());
+        let snapping = matches!(tool, crate::ui::Tool::Wire | crate::ui::Tool::Place(_))
+            || matches!(self.drag, Some(DragState::WireFromPin { .. }))
+            || (matches!(tool, crate::ui::Tool::Select) && pin_hover);
+        self.snap_target = if snapping {
             raw_point.and_then(|point| document.nearest_snap(point))
         } else {
             None
@@ -354,7 +364,12 @@ impl CanvasState {
         self.paint_simulation_badge(&painter, rect, document, live);
         self.paint_minimap(&painter, rect, document);
         self.paint_probe_values(&painter, rect, document, probes, visible_probes);
-        self.set_cursor(ui, &response, tool);
+        if interactive && self.drag.is_none() && !self.paste_preview {
+            if let Some(position) = ui.input(|input| input.pointer.hover_pos()) {
+                self.paint_hover_readout(&painter, rect, document, live, position);
+            }
+        }
+        self.set_cursor(ui, &response, tool, document);
         if interactive {
             self.context_menu(&response, document, status);
         }
@@ -565,7 +580,13 @@ impl CanvasState {
                 } else {
                     SelectionChange::Replace
                 };
-                if let Some((wire, end, start)) =
+                if !ctrl && !shift && document.pin_at(point).is_some() {
+                    self.drag = Some(DragState::WireFromPin {
+                        start: point,
+                        current: point,
+                        prefer_horizontal: true,
+                    });
+                } else if let Some((wire, end, start)) =
                     self.free_endpoint_near(rect, latest_pos, document)
                 {
                     document.select_only(Some(ObjectRef::Wire(wire)));
@@ -618,6 +639,7 @@ impl CanvasState {
                         DragState::Objects { current, .. }
                         | DragState::Segment { current, .. }
                         | DragState::WireEndpoint { current, .. }
+                        | DragState::WireFromPin { current, .. }
                         | DragState::Marquee { current, .. } => {
                             *current = point;
                         }
@@ -676,6 +698,30 @@ impl CanvasState {
                             }
                         }
                     }
+                    DragState::WireFromPin {
+                        start,
+                        current,
+                        prefer_horizontal,
+                    } => {
+                        let target = self
+                            .snap_target
+                            .map_or(latest_point.unwrap_or(current), |snap| snap.at);
+                        let prefer_horizontal = if shift {
+                            !prefer_horizontal
+                        } else {
+                            prefer_horizontal
+                        };
+                        if target != start {
+                            let path = document.route_path(start, target, prefer_horizontal);
+                            match document.add_wire_path(&path) {
+                                Ok(wires) => {
+                                    let count = wires.len();
+                                    status.success(format!("{count} segment(s) de fil créé(s)."));
+                                }
+                                Err(error) => status.error(error.user_message()),
+                            }
+                        }
+                    }
                     DragState::Marquee {
                         start,
                         current,
@@ -724,7 +770,11 @@ impl CanvasState {
                     document.select_only(Some(object));
                 }
                 match object {
-                    ObjectRef::Symbol(_) => {
+                    ObjectRef::Symbol(id) => {
+                        if ui.button("Propriétés…").clicked() {
+                            self.property_request = Some(id);
+                            ui.close();
+                        }
                         if ui.button("Pivoter").clicked() {
                             report(status, document.rotate_selection(), "Symbole(s) pivoté(s).");
                             ui.close();
@@ -737,6 +787,33 @@ impl CanvasState {
                             );
                             ui.close();
                         }
+                        ui.menu_button("Mesurer ici", |ui| {
+                            let Some(symbol) = document.symbol(id) else {
+                                return;
+                            };
+                            let definition = document.registry().get(&symbol.kind);
+                            let pin_at = definition
+                                .and_then(|definition| definition.pins.first())
+                                .and_then(|pin| symbol.pin_position_of(pin))
+                                .unwrap_or(symbol.at);
+                            let body_at = symbol.at;
+                            for (kind, label, at) in [
+                                (editor_core::SymbolKind::Voltmeter, "Voltmètre", pin_at),
+                                (editor_core::SymbolKind::Ammeter, "Ampèremètre", body_at),
+                                (editor_core::SymbolKind::Ohmmeter, "Ohmmètre", body_at),
+                            ] {
+                                if ui.button(label).clicked() {
+                                    match document.add_symbol(kind, at) {
+                                        Ok(probe) => {
+                                            document.select_only(Some(ObjectRef::Symbol(probe)));
+                                            status.success(format!("{label} ajouté."));
+                                        }
+                                        Err(error) => status.error(error.user_message()),
+                                    }
+                                    ui.close();
+                                }
+                            }
+                        });
                     }
                     ObjectRef::Label(id) => {
                         if ui.button("Renommer").clicked() {
@@ -759,7 +836,40 @@ impl CanvasState {
                             ui.close();
                         }
                     }
-                    ObjectRef::Wire(_) | ObjectRef::Junction(_) => {
+                    ObjectRef::Wire(id) => {
+                        if ui.button("Couper ici").clicked() {
+                            report(status, document.split_wire(id, point), "Fil coupé.");
+                            ui.close();
+                        }
+                        if ui.button("Ajouter une jonction").clicked() {
+                            report(
+                                status,
+                                document.add_junction(point).map(|_| ()),
+                                "Jonction ajoutée.",
+                            );
+                            ui.close();
+                        }
+                        if ui.button("Ajouter un label").clicked() {
+                            self.label_dialog = Some(LabelDialog {
+                                at: point,
+                                text: document
+                                    .net_name_at(point)
+                                    .unwrap_or_else(|| "NET".to_owned()),
+                                error: None,
+                                focus: true,
+                            });
+                            ui.close();
+                        }
+                        if ui.button("Sélectionner le net").clicked() {
+                            report(
+                                status,
+                                document.select_net_at(point).map(|_| ()),
+                                "Net sélectionné.",
+                            );
+                            ui.close();
+                        }
+                    }
+                    ObjectRef::Junction(_) => {
                         if ui.button("Sélectionner le net").clicked() {
                             report(
                                 status,
@@ -788,6 +898,64 @@ impl CanvasState {
                     ui.close();
                 }
             } else {
+                ui.menu_button("Ajouter", |ui| {
+                    for (category, items) in [
+                        (
+                            "Sources",
+                            vec![
+                                (editor_core::SymbolKind::VoltageSource, "Source de tension"),
+                                (editor_core::SymbolKind::CurrentSource, "Source de courant"),
+                            ],
+                        ),
+                        (
+                            "Passifs",
+                            vec![
+                                (editor_core::SymbolKind::Resistor, "Résistance"),
+                                (editor_core::SymbolKind::Capacitor, "Condensateur"),
+                                (editor_core::SymbolKind::Inductor, "Bobine"),
+                            ],
+                        ),
+                        (
+                            "Semi-conducteurs",
+                            vec![
+                                (editor_core::SymbolKind::Diode, "Diode"),
+                                (editor_core::SymbolKind::Led, "LED"),
+                                (editor_core::SymbolKind::Zener, "Zener"),
+                                (editor_core::SymbolKind::OpAmp, "Amplificateur"),
+                            ],
+                        ),
+                        (
+                            "Mesures",
+                            vec![
+                                (editor_core::SymbolKind::Voltmeter, "Voltmètre"),
+                                (editor_core::SymbolKind::Ammeter, "Ampèremètre"),
+                                (editor_core::SymbolKind::Ohmmeter, "Ohmmètre"),
+                            ],
+                        ),
+                        (
+                            "Divers",
+                            vec![
+                                (editor_core::SymbolKind::Ground, "Masse"),
+                                (editor_core::SymbolKind::Switch, "Interrupteur"),
+                            ],
+                        ),
+                    ] {
+                        ui.menu_button(category, |ui| {
+                            for (kind, label) in items {
+                                if ui.button(label).clicked() {
+                                    match document.add_symbol(kind, point) {
+                                        Ok(id) => {
+                                            document.select_only(Some(ObjectRef::Symbol(id)));
+                                            status.success(format!("{label} ajouté."));
+                                        }
+                                        Err(error) => status.error(error.user_message()),
+                                    }
+                                    ui.close();
+                                }
+                            }
+                        });
+                    }
+                });
                 if document.clipboard().is_some() {
                     if ui.button("Coller ici").clicked() {
                         report(
@@ -1391,6 +1559,144 @@ impl CanvasState {
         );
     }
 
+    fn paint_hover_readout(
+        &self,
+        painter: &Painter,
+        rect: Rect,
+        document: &Document,
+        live: &LiveValues,
+        pointer: Pos2,
+    ) {
+        let Some(point) = self.last_pointer_grid else {
+            return;
+        };
+        let mut title = String::new();
+        let mut lines = Vec::new();
+        let palette = self.settings.palette();
+        if let Some(key) = document.pin_at(point) {
+            if let Some(symbol) = document.symbol(key.symbol) {
+                if let Some(definition) = document.registry().get(&symbol.kind) {
+                    let pin_name = definition
+                        .pins
+                        .get(usize::from(key.pin))
+                        .map_or("—", |pin| pin.name.as_str());
+                    title = format!("Broche {pin_name} · {}", symbol.label);
+                    let observed = live.symbol(document, symbol);
+                    if let Some(pin) = observed.pins.get(usize::from(key.pin)) {
+                        if let Some(net) = &pin.net {
+                            lines.push(format!("Net : {net}"));
+                        }
+                        if let Some(voltage) = pin.voltage {
+                            lines.push(format!(
+                                "V : {}",
+                                format_si_precision(voltage, Unit::Volt, 4)
+                            ));
+                        }
+                    }
+                    if live.document_revision != document.revision() {
+                        lines.push("Résultat antérieur".to_owned());
+                    }
+                }
+            }
+        }
+        if title.is_empty() {
+            if let Some(object) = document.object_at(point) {
+                match object {
+                    ObjectRef::Symbol(id) => {
+                        if let Some(symbol) = document.symbol(id) {
+                            title =
+                                format!("{} · {}", symbol_kind_name(&symbol.kind), symbol.label);
+                            for (key, value) in symbol.params.iter().take(4) {
+                                lines.push(format!(
+                                    "{key} = {}",
+                                    format_hover_parameter(&symbol.kind, key, value)
+                                ));
+                            }
+                            let observed = live.symbol(document, symbol);
+                            for pin in &observed.pins {
+                                let Some(net) = &pin.net else {
+                                    continue;
+                                };
+                                let voltage = pin.voltage.map_or_else(
+                                    || "—".to_owned(),
+                                    |value| format_si_precision(value, Unit::Volt, 3),
+                                );
+                                lines.push(format!("{} · {net} : {voltage}", pin.name));
+                            }
+                            if let Some(current) = observed.current {
+                                lines.push(format!(
+                                    "I : {}",
+                                    format_si_precision(current, Unit::Ampere, 3)
+                                ));
+                            }
+                            if let Some(power) = observed.power {
+                                lines.push(format!(
+                                    "P : {}",
+                                    format_si_precision(power, Unit::Watt, 3)
+                                ));
+                            }
+                            if live.document_revision != document.revision() {
+                                lines.push("Résultat antérieur".to_owned());
+                            }
+                        }
+                    }
+                    ObjectRef::Wire(_) | ObjectRef::Junction(_) | ObjectRef::Label(_) => {
+                        if let Some(net) = document.net_name_at(point) {
+                            title = format!("Net {net}");
+                            if let Some(voltage) = live.voltage(&net) {
+                                lines.push(format!(
+                                    "V : {}",
+                                    format_si_precision(voltage, Unit::Volt, 4)
+                                ));
+                            }
+                            if live.document_revision != document.revision() {
+                                lines.push("Résultat antérieur".to_owned());
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        if title.is_empty() {
+            return;
+        }
+        let width = 250.0_f32.min(rect.width() - 16.0).max(120.0);
+        let height = 20.0 + lines.len() as f32 * 14.0;
+        let mut origin = pointer + Vec2::new(16.0, 18.0);
+        if origin.x + width > rect.right() {
+            origin.x = pointer.x - width - 12.0;
+        }
+        if origin.y + height > rect.bottom() {
+            origin.y = pointer.y - height - 12.0;
+        }
+        origin.x = origin.x.max(rect.left() + 4.0);
+        origin.y = origin.y.max(rect.top() + 4.0);
+        let panel = Rect::from_min_size(origin, Vec2::new(width, height));
+        painter.rect_filled(panel, 5.0, palette.panel_badge);
+        painter.rect_stroke(
+            panel,
+            5.0,
+            Stroke::new(1.0, palette.major_grid),
+            StrokeKind::Inside,
+        );
+        painter.text(
+            panel.left_top() + Vec2::new(8.0, 5.0),
+            Align2::LEFT_TOP,
+            title,
+            FontId::proportional(11.5),
+            palette.accent,
+        );
+        for (index, line) in lines.iter().enumerate() {
+            painter.text(
+                panel.left_top() + Vec2::new(8.0, 24.0 + index as f32 * 14.0),
+                Align2::LEFT_TOP,
+                line,
+                FontId::proportional(10.5),
+                palette.muted,
+            );
+        }
+    }
+
     fn paint_led_glow(
         &self,
         painter: &Painter,
@@ -1612,6 +1918,30 @@ impl CanvasState {
                         self.viewport.grid_to_screen(rect, target),
                         6.0,
                         Stroke::new(1.6, palette.accent),
+                    );
+                }
+            }
+            Some(DragState::WireFromPin {
+                start,
+                current,
+                prefer_horizontal,
+            }) => {
+                let target = self.snap_target.map_or(*current, |snap| snap.at);
+                if target != *start {
+                    let path = document.route_path(*start, target, *prefer_horizontal);
+                    for pair in path.windows(2) {
+                        painter.line_segment(
+                            [
+                                self.viewport.grid_to_screen(rect, pair[0]),
+                                self.viewport.grid_to_screen(rect, pair[1]),
+                            ],
+                            Stroke::new(3.0, palette.accent.gamma_multiply(0.85)),
+                        );
+                    }
+                    painter.circle_stroke(
+                        self.viewport.grid_to_screen(rect, target),
+                        7.0,
+                        Stroke::new(1.5, palette.hover),
                     );
                 }
             }
@@ -2119,7 +2449,7 @@ impl CanvasState {
         };
         let hint = match tool {
             crate::ui::Tool::Select => {
-                "Glisser pour déplacer · extrémité libre : redimensionner · Maj pour ajouter"
+                "Glisser une broche : câbler · glisser : déplacer · Maj : ajouter"
             }
             crate::ui::Tool::Wire => {
                 if self.wire_start.is_some() {
@@ -2160,7 +2490,13 @@ impl CanvasState {
         );
     }
 
-    fn set_cursor(&self, ui: &Ui, response: &egui::Response, tool: &crate::ui::Tool) {
+    fn set_cursor(
+        &self,
+        ui: &Ui,
+        response: &egui::Response,
+        tool: &crate::ui::Tool,
+        document: &Document,
+    ) {
         if !response.hovered() {
             return;
         }
@@ -2170,7 +2506,12 @@ impl CanvasState {
         } else {
             match tool {
                 crate::ui::Tool::Select => {
-                    if self.hover.is_some() {
+                    if self
+                        .last_pointer_grid
+                        .is_some_and(|point| document.pin_at(point).is_some())
+                    {
+                        CursorIcon::Crosshair
+                    } else if self.hover.is_some() {
                         CursorIcon::PointingHand
                     } else {
                         CursorIcon::Default
@@ -2329,6 +2670,22 @@ fn max_component_power(document: &Document, live: &LiveValues) -> f64 {
         .filter_map(|symbol| live.symbol(document, symbol).power)
         .filter(|power| power.is_finite() && *power > 0.0)
         .fold(0.0, f64::max)
+}
+
+fn format_hover_parameter(
+    kind: &editor_core::SymbolKind,
+    key: &str,
+    value: &sim_core::netlist::ParamValue,
+) -> String {
+    match value {
+        sim_core::netlist::ParamValue::Number(value) => {
+            format_parameter(*value, parameter_unit(kind, key))
+        }
+        sim_core::netlist::ParamValue::Bool(value) => {
+            if *value { "fermé" } else { "ouvert" }.to_owned()
+        }
+        sim_core::netlist::ParamValue::Text(value) => value.clone(),
+    }
 }
 
 fn segment_distance(point: Pos2, a: Pos2, b: Pos2) -> f32 {
@@ -2630,6 +2987,74 @@ mod tests {
             .selection()
             .iter()
             .any(|object| matches!(object, ObjectRef::Symbol(_))));
+    }
+
+    #[test]
+    fn canvas_drag_from_a_pin_creates_an_undoable_wire() {
+        let context = egui::Context::default();
+        let mut canvas = CanvasState::new();
+        let mut document = Document::demo().unwrap();
+        let mut status = Status::new_info("");
+        let tool = crate::ui::Tool::Select;
+        frame(
+            &context,
+            &mut canvas,
+            &mut document,
+            &mut status,
+            &tool,
+            Vec::new(),
+        );
+        let resistor = document
+            .schematic()
+            .symbols()
+            .find(|symbol| symbol.kind == editor_core::SymbolKind::Resistor)
+            .unwrap();
+        let definition = document.registry().get(&resistor.kind).unwrap();
+        let start_grid = resistor.pin_position_of(&definition.pins[0]).unwrap();
+        let end_grid = start_grid.checked_add(GridPos::new(0, 6)).unwrap();
+        let start = canvas.viewport().grid_to_screen(screen(), start_grid);
+        let end = canvas.viewport().grid_to_screen(screen(), end_grid);
+        let before = document.schematic().wires().count();
+        frame(
+            &context,
+            &mut canvas,
+            &mut document,
+            &mut status,
+            &tool,
+            vec![
+                Event::PointerMoved(start),
+                Event::PointerButton {
+                    pos: start,
+                    button: PointerButton::Primary,
+                    pressed: true,
+                    modifiers: Modifiers::default(),
+                },
+            ],
+        );
+        frame(
+            &context,
+            &mut canvas,
+            &mut document,
+            &mut status,
+            &tool,
+            vec![Event::PointerMoved(end)],
+        );
+        frame(
+            &context,
+            &mut canvas,
+            &mut document,
+            &mut status,
+            &tool,
+            vec![Event::PointerButton {
+                pos: end,
+                button: PointerButton::Primary,
+                pressed: false,
+                modifiers: Modifiers::default(),
+            }],
+        );
+        assert!(document.schematic().wires().count() > before);
+        document.undo().unwrap();
+        assert_eq!(document.schematic().wires().count(), before);
     }
 
     #[test]
