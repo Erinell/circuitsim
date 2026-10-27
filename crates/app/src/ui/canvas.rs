@@ -11,7 +11,7 @@ use eframe::egui::{
 };
 use sim_core::units::{format_si_precision, Unit};
 
-use crate::analysis::{LiveValues, ProbeReading, SignalCatalog, SignalId};
+use crate::analysis::{LiveValues, ProbeReading, SignalId};
 use crate::document::{
     format_parameter, parameter_unit, ActionError, ClipboardItem, Document, SelectionChange,
     SelectionMode, WireEnd,
@@ -908,16 +908,9 @@ impl CanvasState {
                             let Some(symbol) = document.symbol(id) else {
                                 return;
                             };
-                            let catalog = document
-                                .extraction()
-                                .map(SignalCatalog::from_extraction)
-                                .unwrap_or_default();
                             let mut signals = Vec::new();
-                            if catalog.currents.contains(&symbol.label) {
-                                signals.push(SignalId::Current(symbol.label.clone()));
-                            }
                             for (key, position) in document.pin_positions() {
-                                if key.symbol != id {
+                                if key.symbol != symbol.id {
                                     continue;
                                 }
                                 let Some(net) = document.net_name_at(position) else {
@@ -926,9 +919,12 @@ impl CanvasState {
                                 if net == "0" {
                                     continue;
                                 }
-                                let signal = SignalId::Voltage(net);
-                                if !signals.contains(&signal) {
-                                    signals.push(signal);
+                                for signal in
+                                    [SignalId::Voltage(net.clone()), SignalId::NetCurrent(net)]
+                                {
+                                    if !signals.contains(&signal) {
+                                        signals.push(signal);
+                                    }
                                 }
                             }
                             if signals.is_empty() {
@@ -996,9 +992,18 @@ impl CanvasState {
                             ui.close();
                         }
                         if let Some(net) = document.net_name_at(point) {
-                            if net != "0" && ui.button("Tracer dans une portée").clicked() {
-                                self.scope_request = Some(SignalId::Voltage(net));
-                                ui.close();
+                            if net != "0" {
+                                ui.menu_button("Tracer dans une portée", |ui| {
+                                    if ui.button("Tension").clicked() {
+                                        self.scope_request = Some(SignalId::Voltage(net.clone()));
+                                        ui.close();
+                                    }
+                                    if ui.button("Courant").clicked() {
+                                        self.scope_request =
+                                            Some(SignalId::NetCurrent(net.clone()));
+                                        ui.close();
+                                    }
+                                });
                             }
                         }
                     }
@@ -1626,7 +1631,7 @@ impl CanvasState {
         for signal in &self.scope_signals {
             let color = crate::ui::scopes::signal_color(signal);
             match signal {
-                SignalId::Voltage(name) => {
+                SignalId::Voltage(name) | SignalId::NetCurrent(name) => {
                     let Some(net) = document
                         .nets()
                         .iter()
