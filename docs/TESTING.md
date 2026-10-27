@@ -34,16 +34,16 @@ l'installe séparément.
 
 ## 3. Suite et couverture
 
-Au 26 octobre 2026, `cargo test --workspace` exécute **237 tests** :
+Au 27 octobre 2026, `cargo test --workspace` exécute **244 tests** :
 
 | Groupe | Tests | Points clés |
 | --- | ---: | --- |
 | `sim-core` unités | 17 | SI, parsing, formatage, netlist, erreurs |
 | `sim-core` DC | 18 | diviseur, sources, R/C/L, switch, diodes, opamp, erreurs |
-| `sim-core` transitoire | 17 | RC/RL, événements, diode, opamp, énergie, session incrémentale |
+| `sim-core` transitoire | 19 | RC/RL, événements, diode, opamp, énergie, session incrémentale, mise à jour à chaud |
 | `sim-core` AC | 15 | RC/RL/RLC, phase, diode, opamp, balayages, erreurs |
 | `editor-core` | 47 | grille, symboles, schéma, historique, ERC, extraction, JSON, séries E, snap/routage |
-| `circuitsim-app` | 97 | document, vue, navigation, mini-carte, UI, inspecteur, historique, presse-papiers, simulation temps réel, curseurs, onboarding, accessibilité, sondes, instruments, worker, FFT, Bode, CSV |
+| `circuitsim-app` | 102 | document, vue, navigation, mini-carte, UI, inspecteur, historique, presse-papiers, simulation continue, mise à jour à chaud, curseurs, onboarding, accessibilité, sondes, instruments, worker, FFT, Bode, CSV |
 | `worker-protocol` | 11 | trames, version, netlist, erreurs, transports |
 | `worker` | 13 | coalescence, cadence, révisions, DC/transitoire/AC |
 | `editor_invariants` | 2 | proptest undo/redo et extraction |
@@ -61,10 +61,11 @@ déplacement de segment, alignement/distribution, sélection de net et rectangle
 presse-papiers, duplication, rotation/miroir de groupe, valeurs simulées,
 recherche floue, placement sur canevas, zoom/pan, cadrage de sélection,
 mini-carte, dispositions, courant animé, session transitoire incrémentale,
-sondes V/A/Ω, redimensionnement d’extrémités, déplacement de segment sans
-embout, fils en erreur ERC, basculement d’interrupteur, propriétés par
-double-clic, debounce du rafraîchissement automatique, curseurs A/B, mesures
-d’intervalle, marqueur Bode, guide de démarrage et préférences d’affichage.
+mise à jour à chaud d'une session, démarrage live, pause/reset/pas, sondes
+V/A/Ω, redimensionnement d’extrémités, déplacement de segment sans embout, fils
+en erreur ERC, basculement d’interrupteur, propriétés par double-clic, debounce
+du rafraîchissement automatique, curseurs A/B, mesures d’intervalle, marqueur
+Bode, guide de démarrage et préférences d’affichage.
 
 Deux propriétés proptest utilisent 64 cas dans les invariants : undo/redo
 restaure exactement les contenus et l’historique final ; deux extractions du même

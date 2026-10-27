@@ -4,6 +4,7 @@ pub mod analysis;
 pub mod app;
 pub mod document;
 pub mod export;
+pub mod simulation;
 pub mod ui;
 pub mod view;
 

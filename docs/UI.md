@@ -22,11 +22,15 @@ La distribution web utilise `index.html` et Trunk.
 | `ui/instruments.rs` | panneau de simulation et graphiques |
 
 De haut en bas : barre d'outils (document, undo/redo, outils, transformations,
-alignement, **Cadrer sél.**, **Vue**, **Commandes**, aide), palette filtrable à
-gauche, canevas central, inspecteur/ERC à droite, instruments en bas (210–560 px),
-barre d'état. `Ctrl+K` ouvre la palette de commandes. Les onglets **Portée**,
-**Spectre** et **Bode** conservent leurs résultats séparément. La démonstration
-présélectionne `V1`, `5 V` et `OUT`.
+alignement, **Cadrer sél.**, **Marche/Arrêt**, **Reset**, **Pas**, **Vue**,
+**Commandes**, aide), palette filtrable à gauche, canevas central,
+inspecteur/ERC à droite, instruments en bas (210–560 px), barre d'état. `Ctrl+K`
+ouvre la palette de commandes. Les onglets **Portée**, **Spectre** et **Bode**
+conservent leurs résultats séparément. La démonstration présélectionne `V1`,
+`5 V` et `OUT`.
+
+À l'ouverture d'un schéma valide, la session temps réel démarre seule : le
+circuit est déjà en marche et les instruments affichent le signal sans clic.
 
 Le menu **Vue** masque chaque panneau, active la mini-carte et applique une
 disposition fiable : **Tout**, **Édition** (palette et inspecteur),
@@ -61,8 +65,8 @@ et la fenêtre visible ; un clic y recentre la vue.
   extrémités ; aucun fil supplémentaire n'est créé.
 - Glisser une extrémité libre : allonge ou raccourcit le fil sur son axe.
 - `Ctrl+A` : tout sélectionner ; `Échap` : annuler l'outil, le collage ou la sélection.
+- `Espace` : marche/arrêt de la simulation continue ; `F5` : reset à `t = 0`.
 - `Ctrl+C`, `Ctrl+V`, `Ctrl+D` : copier, coller avec aperçu, dupliquer.
-- `Ctrl+Entrée` ou `F5` : relancer le transitoire.
 - `Ctrl+Z`, `Ctrl+Y` : annuler, rétablir.
 - Molette : zoom centré sous le curseur (8–80 px/case).
 - `+`/`-` : zoom autour du centre ; `0` : zoom 100 %.
@@ -137,26 +141,33 @@ d'extraction bloque les nets et les analyses.
 Les contrôles acceptent `5m`, `10u`, etc. Le bouton de lancement est désactivé
 sans extraction valide, pendant une analyse ou si le worker est indisponible.
 Les résultats conservent la révision et les noms du document ; un résultat
-antérieur est signalé mais reste consultable. Le bouton **Simuler** de la barre
-d’outils et `Ctrl+Entrée`/`F5` relancent le transitoire courant. L’option
-**Auto** recalcule après une modification avec un délai de 0,35 s ; le canevas
-affiche alors le dernier échantillon et un badge `t = … · à jour/antérieur`.
+antérieur est signalé mais reste consultable. **Marche/Arrêt** dans la barre
+d’outils et `Espace` pilotent la session continue ; **Reset** et `F5` la
+remettent à `t = 0`, **Pas** avance d’un pas en pause. L’option **Auto** reste
+disponible pour relancer après une modification, mais les changements de
+paramètres sont désormais appliqués à chaud sans remise à zéro. L’échelon de
+source est désactivé par défaut pour ne pas fausser le démarrage live.
 
-- **Portée temps réel** : pas de calcul, échelon de source, vitesse de lecture,
-  pause/reprise. La session avance sans plage d’arrêt et la fenêtre glisse sur
-  les derniers échantillons. Mesures min/max, crête-à-crête, moyenne, RMS et
-  nombre d’échantillons. Deux curseurs A/B se placent par clic, avec Δt, 1/Δt,
-  valeurs, min, max et RMS sur l’intervalle ; un clic droit ou `Maj` force B.
+- **Contrôles live** : état `En marche`, `Pause`, `Arrêtée` ou `Circuit
+  invalide`, rapport temps simulé/réel, badge `trop lent (×0,3)`, vitesse de
+  simulation logarithmique, vitesse des points de courant et luminosité de
+  puissance. Le lien **Voir le diagnostic** ouvre l’inspecteur/ERC.
+- **Portée temps réel** : pas de calcul, échelon de source optionnel, vitesse de
+  lecture, pause/reprise. La session avance sans plage d’arrêt et la fenêtre
+  glisse sur les derniers échantillons. Mesures min/max, crête-à-crête, moyenne,
+  RMS et nombre d’échantillons. Deux curseurs A/B se placent par clic, avec Δt,
+  1/Δt, valeurs, min, max et RMS sur l’intervalle ; un clic droit ou `Maj` force
+  B.
 - **Sondes** : les composants **Voltmètre**, **Ampèremètre** et **Ohmmètre** sont
   placés depuis la palette. La liste des sondes apparaît dans la colonne des
   contrôles, à côté du graphique, avec **Afficher** (valeur sur le canevas) et
   **Graphique** (tracé quand le signal existe). Le voltmètre se pose sur un fil ;
   l’ampèremètre et l’ohmmètre mesurent le composant sous la sonde.
 - **Spectre** : réutilise le dernier transitoire, choisit un signal et affiche
-  pic non continu, fréquence et résolution.
+  pic non continu, fréquence et résolution. Il reste à la demande.
 - **Bode** : analyse AC logarithmique, source, amplitude, sortie ; gain et phase
   partagent l'axe des fréquences. Un clic pose un marqueur de fréquence et
-  affiche le gain et la phase au point choisi.
+  affiche le gain et la phase au point choisi. Il reste à la demande.
 - **Export CSV** : copie ou enregistre/télécharge toutes les valeurs de l'onglet
   actif ; le nom proposé dépend de l'onglet.
 
@@ -177,7 +188,8 @@ les formats de fichiers sont dans [INSTRUMENTS.md](INSTRUMENTS.md).
 | `Maj` pendant un fil | changer le coude |
 | `Alt` + clic | sélectionner le net complet |
 | `Ctrl+C`, `Ctrl+V`, `Ctrl+D` | copier, coller, dupliquer |
-| `Ctrl+Entrée`, `F5` | relancer le transitoire |
+| `Espace` | marche/arrêt de la simulation continue |
+| `F5`, `Ctrl+Entrée` | reset de la session à `t = 0` |
 | `Alt+↑`, `Alt+↓` | cycler la série E du paramètre |
 | `Suppr`, `Retour arrière` | supprimer |
 | `Ctrl+Z`, `Ctrl+Y` / `Ctrl+Maj+Z` | annuler, rétablir |
@@ -193,8 +205,8 @@ les formats de fichiers sont dans [INSTRUMENTS.md](INSTRUMENTS.md).
 | `Échap` | annuler l'outil, le collage ou la sélection |
 
 Les raccourcis sont ignorés si un champ texte a le focus, à l’exception de
-`Ctrl+K` pour la palette de commandes. Aucun raccourci global ne lance une
-simulation.
+`Ctrl+K` pour la palette de commandes. `Espace` et `F5` pilotent la session
+continue sans ouvrir de fenêtre.
 
 ## 7. Atomicité, limites et tests
 

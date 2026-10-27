@@ -22,11 +22,13 @@ job en cours. Le service tourne dans le fil de l'interface ; worker dédié et
 `SharedArrayBuffer` restent à brancher. Un résultat reste consultable après une
 modification du schéma, avec un avertissement s'il est antérieur.
 
-Le transitoire peut être lancé depuis le panneau, par **Simuler** dans la barre
-d'outils, `Ctrl+Entrée` ou `F5`. La portée utilise maintenant une **session
-temps réel** : aucun arrêt n'est demandé, le pas fixe est conservé, la vitesse
-de lecture et la pause sont réglables. Une modification du schéma peut relancer
-automatiquement la session si l'option **Auto** est active. Le dernier
+Le transitoire peut être lancé depuis le panneau, par **Marche/Arrêt** dans la
+barre d’outils, `Espace`, `F5` ou `Ctrl+Entrée`. À l’ouverture d’un schéma
+valide, il démarre automatiquement. La portée utilise une **session temps
+réel** : aucun arrêt n'est demandé, le pas fixe est conservé, la vitesse de
+lecture et la pause sont réglables. Les modifications de paramètres sont
+appliquées à chaud tant que la topologie reste compatible ; une modification de
+topologie relance la session en conservant pause et vitesse. Le dernier
 échantillon alimente l'inspecteur, les sondes et la superposition des courants :
 des points jaunes à halo sombre parcourent chaque net dans le sens des injections
 positives, et les LED rayonnent selon leur tension directe.
@@ -48,7 +50,16 @@ portée est un `BTreeSet`, donc l'ordre des courbes et lignes CSV est stable.
 Les champs de temps acceptent `5m`, `10u`, etc. Seul le **pas de calcul** reste
 configurable dans le mode temps réel ; la session n’a pas de borne d’arrêt. La
 vitesse multiplie le temps simulé par seconde réelle, et la pause fige la
-fenêtre glissante sans perdre les échantillons.
+fenêtre glissante sans perdre les échantillons. Le rapport temps simulé/réel est
+affiché ; sous 65 % de la cible, le badge `trop lent` signale que le moteur ne
+suit pas. La luminosité de puissance et la vitesse d’animation des courants sont
+réglables indépendamment.
+
+Une modification de paramètre est appliquée à la session par
+`TransientSession::update_netlist` : la topologie, les noms de nets et les
+références doivent rester identiques. Le temps, la solution précédente et les
+énergies déjà accumulées sont conservés. Toute autre modification relance la
+session.
 
 L'échelon de source :
 
