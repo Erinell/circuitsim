@@ -164,7 +164,8 @@ Les raccourcis sont ignorés lorsqu’un champ texte a le focus, à l’exceptio
   pause.
 - Une modification de paramètre (valeur, interrupteur) est appliquée à chaud :
   le temps simulé et les états des éléments sont conservés. Une modification de
-  topologie relance la session en conservant la pause et la vitesse.
+  topologie relance la session en conservant la pause et la vitesse. Le recalcul
+  automatique est actif par défaut et peut être suspendu par **Auto**.
 - Le pas de calcul reste réglable. La vitesse multiplie le temps simulé par
   seconde réelle ; un rapport temps simulé/réel et un badge `trop lent` rendent
   le retard visible.
@@ -172,14 +173,15 @@ Les raccourcis sont ignorés lorsqu’un champ texte a le focus, à l’exceptio
   scénarios qui en ont besoin.
 - Les contrôles live règlent la vitesse de simulation (échelle logarithmique),
   la vitesse des points de courant et la luminosité de puissance.
-- **Portées incrustées** : la zone en bas du canevas empile une ou plusieurs
-  portées redimensionnables. Chaque portée accepte plusieurs tensions et
+- **Portées** : le panneau inférieur **Instruments et portées** empile une ou
+  plusieurs portées redimensionnables. Chaque portée accepte plusieurs tensions et
   courants, avec zoom, déplacement, double-clic d’auto-échelle, infobulle,
   échelle automatique ou manuelle, signaux superposés ou séparés, vue temporelle
   ou FFT, curseurs A/B, gel, effacement, réordonnancement, fusion et suppression.
   Un clic droit sur un composant ou un fil ajoute le signal à la dernière
-  portée. Le panneau classique reste accessible par **Vue**.
-- La portée classique affiche une fenêtre glissante des derniers échantillons. Le tampon
+  portée. Les onglets **Spectre** et **Bode** partagent le même panneau, visible
+  par défaut et repliable depuis **Afficher**.
+- La portée réutilise la fenêtre glissante des derniers échantillons. Le tampon
   peut être mis en pause sans perdre les données ; il est plafonné en mémoire.
 - Un circuit invalide affiche l’état `Circuit invalide` et un lien vers le
   diagnostic, sans modale bloquante.
@@ -262,7 +264,8 @@ Les raccourcis sont ignorés lorsqu’un champ texte a le focus, à l’exceptio
   miroir, mesurer), label (renommer, sélectionner le net), fil (couper, jonction,
   label, sélectionner le net) ou jonction, puis copier, dupliquer, supprimer.
   Sur le vide, il propose **Ajouter** par catégorie, coller, tout sélectionner,
-  ajuster, annuler et rétablir.
+  ajuster, annuler et rétablir. Sa cible est figée à l’ouverture : déplacer la
+  souris ne change ni l’objet visé ni les commandes affichées.
 
 ## 12. Résultats et erreurs
 

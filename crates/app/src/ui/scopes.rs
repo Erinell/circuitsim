@@ -6,7 +6,9 @@ use std::sync::Arc;
 use eframe::egui::{self, Color32, RichText, Ui};
 use egui_plot::{Corner, Legend, Line, Plot, VLine};
 
-use crate::analysis::{compute_spectrum, SignalCatalog, SignalId, SignalUnit, Spectrum, Trace};
+use crate::analysis::{
+    compute_spectrum, measurements, SignalCatalog, SignalId, SignalUnit, Spectrum, Trace,
+};
 use crate::document::Document;
 use crate::ui::instruments::{
     common_unit, decimate, format_axis, format_frequency, nearest_sample_time, trace_color,
@@ -84,7 +86,6 @@ enum ScopeAction {
 pub struct InlineScopes {
     scopes: Vec<Scope>,
     next_id: usize,
-    visible: bool,
 }
 
 impl InlineScopes {
@@ -93,20 +94,9 @@ impl InlineScopes {
         let mut scopes = Self {
             scopes: Vec::new(),
             next_id: 1,
-            visible: true,
         };
         scopes.push_signals(signals);
         scopes
-    }
-
-    /// Shows or hides the inline area.
-    pub fn set_visible(&mut self, visible: bool) {
-        self.visible = visible;
-    }
-
-    /// Returns whether the inline area is visible.
-    pub const fn visible(&self) -> bool {
-        self.visible
     }
 
     /// Adds signals to the active scope, creating one when necessary.
@@ -121,6 +111,23 @@ impl InlineScopes {
         }
     }
 
+    /// Returns true when any scope displays the signal.
+    pub fn contains_signal(&self, signal: &SignalId) -> bool {
+        self.scopes
+            .iter()
+            .any(|scope| scope.signals.contains(signal))
+    }
+
+    /// Removes a signal from every scope.
+    pub fn remove_signal(&mut self, signal: &SignalId) {
+        for scope in &mut self.scopes {
+            scope.signals.remove(signal);
+            scope.frozen = false;
+            scope.frozen_traces = None;
+            scope.cache = None;
+        }
+    }
+
     /// Adds several signals, creating a scope when necessary.
     pub fn push_signals(&mut self, signals: BTreeSet<SignalId>) {
         if signals.is_empty() {
@@ -129,6 +136,11 @@ impl InlineScopes {
         let id = self.next_id;
         self.next_id += 1;
         self.scopes.push(Scope::with_signals(id, signals));
+    }
+
+    /// Returns true when no scope exists.
+    pub fn is_empty(&self) -> bool {
+        self.scopes.is_empty()
     }
 
     /// Returns every signal currently plotted or frozen in an inline scope.
@@ -147,9 +159,6 @@ impl InlineScopes {
         document: &Document,
         status: &mut Status,
     ) {
-        if !self.visible {
-            return;
-        }
         let catalog = document
             .extraction()
             .map(SignalCatalog::from_extraction)
@@ -161,17 +170,17 @@ impl InlineScopes {
             }
         }
         ui.horizontal(|ui| {
-            ui.label(RichText::new("Portées").strong());
-            if ui.button("Ajouter une portée").clicked() {
+            if ui
+                .button("Ajouter une portée")
+                .on_hover_text("Ajoute une portée avec le signal par défaut")
+                .clicked()
+            {
                 if let Some(signal) = default_signal(&catalog) {
                     self.push_signals(BTreeSet::from([signal]));
                     status.info("Portée ajoutée.");
                 } else {
                     status.info("Aucun signal disponible.");
                 }
-            }
-            if ui.button("Fermer").clicked() {
-                self.visible = false;
             }
             ui.label(
                 RichText::new(
@@ -388,6 +397,22 @@ impl Scope {
                     RichText::new(format!("{} = {}", trace.label(), format_axis(value, unit)))
                         .small()
                         .color(signal_color(&trace.signal)),
+                );
+            }
+        });
+        ui.horizontal_wrapped(|ui| {
+            for measurement in measurements(traces) {
+                let measurement_unit = measurement.signal.unit().unit();
+                ui.label(
+                    RichText::new(format!(
+                        "{} min {} · max {} · RMS {}",
+                        measurement.signal.label(),
+                        format_si_precision(measurement.minimum, measurement_unit, 3),
+                        format_si_precision(measurement.maximum, measurement_unit, 3),
+                        format_si_precision(measurement.rms, measurement_unit, 3)
+                    ))
+                    .small()
+                    .color(MUTED),
                 );
             }
         });
@@ -686,8 +711,6 @@ mod tests {
         let mut scopes = InlineScopes::default();
         scopes.push_signals(BTreeSet::new());
         assert!(scopes.scopes.is_empty());
-        scopes.set_visible(false);
-        assert!(!scopes.visible());
     }
 
     #[test]
@@ -712,5 +735,21 @@ mod tests {
         scopes.push_signals(BTreeSet::from([SignalId::Voltage("OUT".to_owned())]));
         scopes.push_signals(BTreeSet::from([SignalId::Voltage("OUT".to_owned())]));
         assert_eq!(scopes.active_signals().len(), 1);
+    }
+
+    #[test]
+    fn probe_helpers_add_and_remove_signals_everywhere() {
+        let signal = SignalId::Voltage("OUT".to_owned());
+        let mut scopes = InlineScopes::default();
+        scopes.push_signals(BTreeSet::from([signal.clone()]));
+        scopes.push_signals(BTreeSet::from([signal.clone()]));
+        assert!(scopes.contains_signal(&signal));
+        scopes.remove_signal(&signal);
+        assert!(!scopes.contains_signal(&signal));
+    }
+
+    #[test]
+    fn merged_panel_starts_with_the_instruments_visible() {
+        assert!(crate::preferences::PersistedPreferences::default().show_instruments);
     }
 }

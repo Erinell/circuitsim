@@ -25,9 +25,10 @@ pub struct PersistedPreferences {
     pub show_palette: bool,
     /// Inspector visibility.
     pub show_inspector: bool,
-    /// Classic instrument panel visibility.
+    /// Instruments and scopes panel visibility.
     pub show_instruments: bool,
-    /// Inline scopes visibility.
+    /// Legacy inline-scope visibility, used to migrate version 1 files.
+    #[serde(default)]
     pub show_inline_scopes: bool,
     /// Playback speed.
     pub realtime_speed: f64,
@@ -48,8 +49,8 @@ impl Default for PersistedPreferences {
             canvas: CanvasSettings::default(),
             show_palette: true,
             show_inspector: true,
-            show_instruments: false,
-            show_inline_scopes: true,
+            show_instruments: true,
+            show_inline_scopes: false,
             realtime_speed: 1.0,
             animation_speed: 1.0,
             power_brightness: 0.6,
@@ -59,6 +60,11 @@ impl Default for PersistedPreferences {
 }
 
 impl PersistedPreferences {
+    /// Returns whether the merged instruments and scopes panel is visible.
+    pub const fn instruments_visible(&self) -> bool {
+        self.show_instruments || self.show_inline_scopes
+    }
+
     /// Serializes the preferences.
     pub fn to_json(&self) -> Result<String, String> {
         serde_json::to_string_pretty(self).map_err(|error| error.to_string())
@@ -160,6 +166,17 @@ mod tests {
     }
 
     #[test]
+    fn legacy_inline_scope_preference_keeps_the_panel_visible() {
+        let defaults = PersistedPreferences::default();
+        let mut value: serde_json::Value =
+            serde_json::from_str(&defaults.to_json().unwrap()).unwrap();
+        value["show_instruments"] = false.into();
+        value["show_inline_scopes"] = true.into();
+        let restored = PersistedPreferences::from_json(&value.to_string()).unwrap();
+        assert!(restored.instruments_visible());
+    }
+
+    #[test]
     fn corrupt_or_future_preferences_are_ignored() {
         assert!(PersistedPreferences::from_json("{").is_err());
         let preferences = PersistedPreferences {
@@ -175,7 +192,8 @@ mod tests {
         let preferences = PersistedPreferences::default();
         assert_eq!(preferences.version, PREFERENCES_VERSION);
         assert_eq!(preferences.scale, 1.0);
-        assert!(preferences.show_inline_scopes);
-        assert!(!preferences.show_instruments);
+        assert!(preferences.show_instruments);
+        assert!(!preferences.show_inline_scopes);
+        assert!(preferences.instruments_visible());
     }
 }

@@ -6,11 +6,35 @@ sémantique.
 
 ## [Unreleased]
 
+### Added
+
+- Panneau inférieur unique **Instruments et portées** : les contrôles live, les
+  sondes, l’export et les portées empilées partagent désormais la même zone, avec
+  les onglets **Portées**, **Spectre** et **Bode**.
+
 ### Changed
 
 - Les raccourcis à une lettre pour placer les composants sont retirés ; le
   placement passe uniquement par la palette et le menu **Dessin**. `R` pivote
   de nouveau la sélection et `M` la met en miroir.
+- Le recalcul après modification est actif par défaut ; l’option **Auto** permet
+  encore de le suspendre.
+- Les valeurs et références sont placées au plus près du corps du symbole, avec
+  un décalage adapté à son orientation.
+- La zone de clic, le cadre de sélection et la marquise épousent le corps des
+  composants au lieu d’ajouter une cellule de marge.
+- Le halo de puissance est réservé aux composants non résistifs ; celui des LED
+  est plus petit, plus discret et peint derrière le symbole.
+
+### Fixed
+
+- Le courant animé s’arrête quand l’interrupteur est ouvert, y compris lorsque le
+  solveur renvoie un courant de fuite résiduel.
+- Les sources de tension des exemples diviseur, LED, interrupteur et RLC sont
+  orientées dans le bon sens ; les signes `+` et `-` suivent les bornes.
+- La fenêtre native s’ouvre réellement maximisée sous Windows.
+- Le menu contextuel conserve la cible et le contenu du clic droit même si la
+  souris se déplace ensuite.
 
 ## [0.5.0] - 2026-10-27
 

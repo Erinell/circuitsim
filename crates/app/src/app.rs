@@ -227,10 +227,10 @@ impl CircuitApp {
         let mut canvas = CanvasState::new();
         let mut palette_state = PaletteState::default();
         let mut instruments = InstrumentsState::new();
-        let mut scopes = InlineScopes::with_signals(instruments.selected_signals());
+        let scopes = InlineScopes::with_signals(instruments.selected_signals());
         let mut show_palette = true;
         let mut show_inspector = true;
-        let mut show_instruments = false;
+        let mut show_instruments = true;
         if let Some(stored) = &stored {
             *canvas.settings_mut() = stored.canvas;
             canvas.set_theme(stored.canvas.theme);
@@ -238,10 +238,9 @@ impl CircuitApp {
             instruments.set_realtime_speed(stored.realtime_speed);
             instruments.set_animation_speed(stored.animation_speed);
             instruments.set_power_brightness(stored.power_brightness);
-            scopes.set_visible(stored.show_inline_scopes);
             show_palette = stored.show_palette;
             show_inspector = stored.show_inspector;
-            show_instruments = stored.show_instruments;
+            show_instruments = stored.instruments_visible();
         }
         Self {
             document,
@@ -361,7 +360,7 @@ impl CircuitApp {
             show_palette: self.show_palette,
             show_inspector: self.show_inspector,
             show_instruments: self.show_instruments,
-            show_inline_scopes: self.scopes.visible(),
+            show_inline_scopes: false,
             realtime_speed: self.instruments.realtime_speed(),
             animation_speed: self.instruments.animation_speed(),
             power_brightness: self.instruments.power_brightness(),
@@ -515,11 +514,7 @@ impl CircuitApp {
         ui.menu_button("Afficher", |ui| {
             ui.checkbox(&mut self.show_palette, "Palette");
             ui.checkbox(&mut self.show_inspector, "Inspecteur");
-            ui.checkbox(&mut self.show_instruments, "Panneau d'instruments");
-            let mut scopes = self.scopes.visible();
-            if ui.checkbox(&mut scopes, "Portées incrustées").changed() {
-                self.scopes.set_visible(scopes);
-            }
+            ui.checkbox(&mut self.show_instruments, "Instruments et portées");
             let mut minimap = self.canvas.minimap_visible();
             if ui.checkbox(&mut minimap, "Mini-carte").changed() {
                 self.canvas.set_minimap_visible(minimap);
@@ -747,22 +742,6 @@ impl CircuitApp {
     }
 
     fn central(&mut self, ui: &mut Ui) {
-        if self.scopes.visible() {
-            let CircuitApp {
-                scopes,
-                instruments,
-                document,
-                status,
-                ..
-            } = self;
-            egui::Panel::bottom("inline_scopes_panel")
-                .resizable(true)
-                .default_size(320.0)
-                .size_range(140.0..=640.0)
-                .show(ui, |ui| {
-                    scopes.show(ui, instruments, document, status);
-                });
-        }
         self.canvas(ui);
     }
 
@@ -812,6 +791,8 @@ impl CircuitApp {
         }
         if let Some(signal) = self.canvas.take_scope_request() {
             self.scopes.push_signal(signal);
+            self.instruments.focus_scopes();
+            self.show_instruments = true;
             self.status.success("Signal ajouté à la portée.");
         }
     }
@@ -1590,12 +1571,19 @@ impl eframe::App for CircuitApp {
             .resizable(false)
             .show(ui, |ui| self.status_bar(ui));
         if self.show_instruments {
+            let CircuitApp {
+                instruments,
+                scopes,
+                document,
+                status,
+                ..
+            } = self;
             egui::Panel::bottom("instruments_panel")
                 .resizable(true)
                 .default_size(324.0)
-                .size_range(210.0..=560.0)
+                .size_range(210.0..=620.0)
                 .show(ui, |ui| {
-                    self.instruments.show(ui, &self.document, &mut self.status);
+                    instruments.show(ui, scopes, document, status);
                 });
         }
         if self.show_palette {

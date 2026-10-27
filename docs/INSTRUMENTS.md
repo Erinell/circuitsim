@@ -26,12 +26,14 @@ Le transitoire peut être lancé depuis le panneau, par **Marche/Arrêt** dans l
 barre d’outils, `Espace`, `F5` ou `Ctrl+Entrée`. À l’ouverture d’un schéma
 valide, il démarre automatiquement. La portée utilise une **session temps
 réel** : aucun arrêt n'est demandé, le pas fixe est conservé, la vitesse de
-lecture et la pause sont réglables. Les modifications de paramètres sont
+lecture et la pause sont réglables. Le recalcul après modification est actif par
+défaut et peut être suspendu par **Auto**. Les modifications de paramètres sont
 appliquées à chaud tant que la topologie reste compatible ; une modification de
 topologie relance la session en conservant pause et vitesse. Le dernier
 échantillon alimente l'inspecteur, les sondes et la superposition des courants :
 des points jaunes à halo sombre parcourent chaque net dans le sens des injections
-positives, et les LED rayonnent selon leur tension directe.
+positives, avec un seuil qui coupe l’animation d’un interrupteur ouvert. Les LED
+rayonnent derrière leur symbole selon leur tension directe.
 
 ## 2. Catalogue et sélection
 
@@ -76,20 +78,21 @@ Le dernier échantillon est exposé comme `LiveValues` : tensions par nom de net
 courants de branche par référence, révision du document et instant. L’inspecteur
 en dérive les tensions de broches, le courant et la puissance. Le canevas
 normalise ces tensions sur leur valeur absolue maximale pour colorer les fils,
-puis ajoute les halos de puissance. Les sondes placées sur le schéma alimentent
-la liste **Sondes** et les bulles du canevas : voltmètre sur un fil,
+puis ajoute les halos de puissance des composants non résistifs. Un interrupteur
+ouvert interrompt l’animation de courant. Les sondes placées sur le schéma
+alimentent la liste **Sondes** et les bulles du canevas : voltmètre sur un fil,
 ampèremètre et ohmmètre sur un composant.
 
 ## 4. Portée et mesures
 
-La zone **Portées incrustées** en bas du canevas réutilise les mêmes `Trace` que
-le panneau classique. Chaque portée possède son propre ensemble de signaux, son
-gel, son cache de traces, ses curseurs A/B, son échelle automatique ou manuelle
-et son identifiant de graphe stable pour conserver le zoom entre les frames.
-Elle peut afficher les signaux superposés ou séparés, en temporel ou en FFT. Les
-valeurs courantes sont lues sur le dernier point de chaque trace. Un marqueur de
-couleur rappelle sur le schéma le fil ou le composant tracé. Le panneau classique
-reste la référence pour le Bode, le mode XY et les exports.
+La zone **Instruments et portées** en bas de la fenêtre réutilise les mêmes
+`Trace` que les onglets Spectre et Bode. Chaque portée possède son propre ensemble
+de signaux, son gel, son cache de traces, ses curseurs A/B, son échelle
+automatique ou manuelle et son identifiant de graphe stable pour conserver le zoom
+entre les frames. Elle peut afficher les signaux superposés ou séparés, en
+temporel ou en FFT. Les valeurs courantes sont lues sur le dernier point de chaque
+trace. Un marqueur de couleur rappelle sur le schéma le fil ou le composant tracé.
+Le même panneau reste la référence pour le Bode et les exports.
 
 Chaque signal devient une `Trace` de points `[temps_s, valeur_SI]` en ordre
 croissant. En temps réel, la portée ne conserve que les 500 derniers

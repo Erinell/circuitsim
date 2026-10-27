@@ -297,7 +297,8 @@ impl Document {
     /// Creates a resistive divider example.
     pub fn divider_example() -> Result<Self, ActionError> {
         let mut document = Self::new();
-        document.add_symbol(SymbolKind::VoltageSource, GridPos::new(0, 0))?;
+        let source = document.add_symbol(SymbolKind::VoltageSource, GridPos::new(0, 0))?;
+        set_orientation(&mut document, source, Orientation::R180)?;
         document.add_symbol(SymbolKind::Ground, GridPos::new(2, 4))?;
         document.add_symbol(SymbolKind::Resistor, GridPos::new(6, 0))?;
         let lower = document.add_symbol(SymbolKind::Resistor, GridPos::new(8, 4))?;
@@ -315,7 +316,8 @@ impl Document {
     /// Creates a LED and series resistor example.
     pub fn led_example() -> Result<Self, ActionError> {
         let mut document = Self::new();
-        document.add_symbol(SymbolKind::VoltageSource, GridPos::new(0, 0))?;
+        let source = document.add_symbol(SymbolKind::VoltageSource, GridPos::new(0, 0))?;
+        set_orientation(&mut document, source, Orientation::R180)?;
         document.add_symbol(SymbolKind::Ground, GridPos::new(2, 4))?;
         document.add_symbol(SymbolKind::Resistor, GridPos::new(6, 0))?;
         document.add_symbol(SymbolKind::Led, GridPos::new(12, 0))?;
@@ -332,7 +334,8 @@ impl Document {
     /// Creates a switch and load example.
     pub fn switch_example() -> Result<Self, ActionError> {
         let mut document = Self::new();
-        document.add_symbol(SymbolKind::VoltageSource, GridPos::new(0, 0))?;
+        let source = document.add_symbol(SymbolKind::VoltageSource, GridPos::new(0, 0))?;
+        set_orientation(&mut document, source, Orientation::R180)?;
         document.add_symbol(SymbolKind::Ground, GridPos::new(2, 4))?;
         document.add_symbol(SymbolKind::Resistor, GridPos::new(6, 0))?;
         document.add_symbol(SymbolKind::Switch, GridPos::new(12, 0))?;
@@ -349,7 +352,8 @@ impl Document {
     /// Creates a series RLC example.
     pub fn rlc_example() -> Result<Self, ActionError> {
         let mut document = Self::new();
-        document.add_symbol(SymbolKind::VoltageSource, GridPos::new(0, 0))?;
+        let source = document.add_symbol(SymbolKind::VoltageSource, GridPos::new(0, 0))?;
+        set_orientation(&mut document, source, Orientation::R180)?;
         document.add_symbol(SymbolKind::Ground, GridPos::new(2, 4))?;
         document.add_symbol(SymbolKind::Resistor, GridPos::new(6, 0))?;
         document.add_symbol(SymbolKind::Inductor, GridPos::new(12, 0))?;
@@ -751,15 +755,7 @@ impl Document {
     }
 
     fn object_selection_bounds(&self, object: ObjectRef) -> Option<(GridPos, GridPos)> {
-        let (min, max) = self.object_bounds(object)?;
-        if matches!(object, ObjectRef::Symbol(_)) {
-            Some((
-                GridPos::new(min.x.saturating_sub(1), min.y.saturating_sub(1)),
-                GridPos::new(max.x.saturating_add(1), max.y.saturating_add(1)),
-            ))
-        } else {
-            Some((min, max))
-        }
+        self.object_bounds(object)
     }
 
     /// Removes dangling references after undo, redo, or deletion.
@@ -1284,12 +1280,12 @@ impl Document {
         if symbol.kind.is_ground() {
             return point.x >= symbol.at.x.saturating_sub(1)
                 && point.x <= symbol.at.x.saturating_add(1)
-                && point.y >= symbol.at.y.saturating_sub(1)
-                && point.y <= symbol.at.y.saturating_add(2);
+                && point.y >= symbol.at.y
+                && point.y <= symbol.at.y.saturating_add(1);
         }
 
         let Some(definition) = self.registry.get(&symbol.kind) else {
-            return point.x.abs_diff(symbol.at.x) <= 2 && point.y.abs_diff(symbol.at.y) <= 2;
+            return point.x.abs_diff(symbol.at.x) <= 1 && point.y.abs_diff(symbol.at.y) <= 1;
         };
         let mut min = symbol.at;
         let mut max = symbol.at;
@@ -1301,10 +1297,6 @@ impl Document {
                 max.y = max.y.max(position.y);
             }
         }
-        min.x = min.x.saturating_sub(1);
-        min.y = min.y.saturating_sub(1);
-        max.x = max.x.saturating_add(1);
-        max.y = max.y.saturating_add(1);
         point.x >= min.x && point.x <= max.x && point.y >= min.y && point.y <= max.y
     }
 
@@ -2199,6 +2191,31 @@ mod tests {
     }
 
     #[test]
+    fn example_sources_drive_a_positive_output() {
+        for (name, document) in [
+            ("divider", Document::divider_example().unwrap()),
+            ("led", Document::led_example().unwrap()),
+            ("switch", Document::switch_example().unwrap()),
+            ("rlc", Document::rlc_example().unwrap()),
+        ] {
+            let extraction = document.extraction().expect("example extracts");
+            let result = sim_core::solve_dc(&extraction.netlist, sim_core::DcOptions::default())
+                .expect("example has a DC operating point");
+            let out = extraction
+                .netlist
+                .nodes
+                .iter()
+                .find(|node| node.name.as_str() == "OUT")
+                .expect("example defines OUT");
+            let voltage = result.node_voltage(out.id).expect("OUT is solved");
+            assert!(
+                voltage > 0.0,
+                "{name} must drive OUT positive, got {voltage}"
+            );
+        }
+    }
+
+    #[test]
     fn project_json_round_trips_the_schematic() {
         let document = Document::demo().unwrap();
         let json = document.to_project_json().unwrap();
@@ -2324,6 +2341,24 @@ mod tests {
         assert!(document.schematic().is_empty());
         document.undo().unwrap();
         assert!(document.schematic().content_eq(&before));
+    }
+
+    #[test]
+    fn symbol_hit_area_hugs_the_body() {
+        let document = Document::demo().unwrap();
+        let resistor = document
+            .schematic()
+            .symbols()
+            .find(|symbol| symbol.kind == SymbolKind::Resistor)
+            .unwrap();
+        let center = resistor.at;
+        assert!(matches!(
+            document.object_at(center),
+            Some(ObjectRef::Symbol(_))
+        ));
+        assert!(document
+            .object_at(GridPos::new(center.x, center.y - 1))
+            .is_none());
     }
 
     #[test]
