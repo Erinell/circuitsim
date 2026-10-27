@@ -14,6 +14,11 @@ sémantique.
   la topologie reste compatible.
 - Contrôles live de vitesse, d’animation de courant et de luminosité de
   puissance, avec rapport temps simulé/réel et badge de retard.
+- Fils colorés selon la tension, légende et palettes daltoniennes.
+- Calques indépendants pour tension, courant, puissance, valeurs, références et
+  labels, avec taille des valeurs et placement évitant les fils.
+- Thème clair, petite grille, halos de puissance et styles de résistance
+  européen/américain.
 
 ### Changed
 

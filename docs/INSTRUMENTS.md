@@ -74,9 +74,11 @@ de tension ou de courant ; les autres formes d'onde ne sont pas paramétrées.
 
 Le dernier échantillon est exposé comme `LiveValues` : tensions par nom de net,
 courants de branche par référence, révision du document et instant. L’inspecteur
-en dérive les tensions de broches, le courant et la puissance. Les sondes
-placées sur le schéma alimentent la liste **Sondes** et les bulles du canevas :
-voltmètre sur un fil, ampèremètre et ohmmètre sur un composant.
+en dérive les tensions de broches, le courant et la puissance. Le canevas
+normalise ces tensions sur leur valeur absolue maximale pour colorer les fils,
+puis ajoute les halos de puissance. Les sondes placées sur le schéma alimentent
+la liste **Sondes** et les bulles du canevas : voltmètre sur un fil,
+ampèremètre et ohmmètre sur un composant.
 
 ## 4. Portée et mesures
 

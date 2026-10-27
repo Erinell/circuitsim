@@ -43,14 +43,26 @@ sél.**/`Ctrl+Home` cadre la sélection. La grille est entière avec un pas visu
 adaptatif. La fenêtre native s'ouvre maximisée ; les fenêtres **Démarrage**,
 **Aide** et **Accessibilité** sont centrées.
 
-Les fils sont épaissis et affichent, après simulation, un flux de points jaunes
-à halo sombre qui suit le sens réel du courant du dernier transitoire.
-**Vue → Courant animé** masque ce flux. Un fil signalé par l'ERC (erreur ou
-avertissement) est tracé en rouge. Une LED rayonne lorsque sa tension directe
-dépasse son seuil, et un clic sur un interrupteur l'ouvre ou le ferme. Une
-extrémité libre d'un fil peut être tirée le long de son axe pour l'allonger ou le
-raccourcir ; les extrémités connectées ne sont pas redimensionnables. La mini-carte du coin inférieur droit montre le contenu, la sélection
-et la fenêtre visible ; un clic y recentre la vue.
+Les fils sont épaissis et colorés selon la tension du net après simulation :
+dégradé bleu/gris/orange par défaut, variante cyan/gris/magenta, avec une
+légende `-V / 0 / +V`. Le menu **Afficher** règle indépendamment les calques
+Tension, Courant, Puissance, Valeurs, Références et Labels de nets. Les erreurs
+ERC restent rouges et prioritaires. Le flux de courant utilise des points jaunes
+à halo sombre, avec densité et vitesse proportionnelles au courant et un choix
+entre sens conventionnel et sens des électrons. Un halo de puissance entoure les
+composants dissipatifs, avec une luminosité réglable. **Vue → Courant animé**
+reste un raccourci pour le calque courant. Une LED rayonne lorsque sa tension
+directe dépasse son seuil, et un clic sur un interrupteur l'ouvre ou le ferme.
+Une extrémité libre d'un fil peut être tirée le long de son axe pour l'allonger
+ou le raccourcir ; les extrémités connectées ne sont pas redimensionnables. La
+mini-carte du coin inférieur droit montre le contenu, la sélection et la fenêtre
+visible ; un clic y recentre la vue.
+
+Les valeurs sont affichées en préfixes SI à côté des symboles, avec une taille
+réglable et un placement qui évite les fils. Les références et les labels de
+nets peuvent être masqués séparément. Le thème **Clair**, la **petite grille** et
+le style de résistance **européen** ou **américain** complètent les thèmes
+Sombre et Contraste élevé.
 
 ## 2. Interactions
 
@@ -97,7 +109,7 @@ canevas renvoie aussi vers ce guide.
 
 Le bouton **Accessibilité** ou `Ctrl+Maj+A` ouvre les préférences d’affichage :
 
-- thème **Sombre** ou **Contraste élevé** ;
+- thème **Sombre**, **Contraste élevé** ou **Clair** ;
 - taille de l’interface 85, 100, 115 ou 130 % ;
 - réduction des animations ;
 - rappel de la navigation clavier `Tab`/`Maj+Tab`.
@@ -217,17 +229,17 @@ d'identifiants. Collections et rendu sont ordonnés.
 
 Limites : worker et session temps réel dans le fil de l'interface, tests
 navigateur non automatisés, transitoire à pas fixe, FFT plafonnée, pas de
-PNG/persistance de projet, opamp sans alimentation/pôle, pas de thème clair ni
-de mobile spécifique, fils non extensibles par une extrémité connectée. Les
-panneaux sont masquables et redimensionnables, mais il n'y a pas de dockage
-libre ni de disposition persistée. Les préférences d’affichage sont
-session-locales ; le câblage à double-clic et la persistance des favoris restent
-aux lots suivants.
+PNG/persistance de projet, opamp sans alimentation/pôle, pas de mobile
+spécifique, fils non extensibles par une extrémité connectée. Les panneaux sont
+masquables et redimensionnables, mais il n'y a pas de dockage libre ni de
+disposition persistée. Les calques, palettes et préférences d’affichage sont
+session-locaux ; leur persistance appartient au lot U6.
 
 Tests : `cargo test -p circuitsim-app` couvre document, vue, navigation,
 mini-carte, édition, palette, propriétés, historique, presse-papiers, sélection
 rectangle, séries E, ERC, canevas headless, dispositions, curseurs, marqueur
 Bode, instruments, worker, FFT, Bode, CSV et export, ainsi que le déplacement de
 fil sans embout, les fils en erreur, le basculement d'interrupteur et le
-propriétés par double-clic. Détails dans
+propriétés par double-clic, le mapping tension→couleur, les calques et les
+palettes. Détails dans
 [TESTING.md](TESTING.md) ; recette web dans [DELIVERY.md](DELIVERY.md).

@@ -10,6 +10,8 @@
   quitter le canevas.
 - Le retour visuel est immédiat : survol, cible d’accroche, net complet, guides,
   rectangle de sélection et aperçu de collage.
+- La lisibilité est réglable sans changer le schéma : tension, courant,
+  puissance, valeurs, références et labels sont des calques indépendants.
 
 ## 2. Raccourcis
 
@@ -118,8 +120,15 @@ Les raccourcis sont ignorés lorsqu’un champ texte a le focus, à l’exceptio
 - Une extrémité libre peut être tirée le long de l’axe pour allonger ou
   raccourcir le fil. Une extrémité connectée est refusée avec un message.
 - Les fils sont plus épais ; après simulation, des points jaunes à halo sombre
-  suivent le sens réel du courant estimé. `Vue → Courant animé` masque ce flux.
-- Un fil signalé par l’ERC (erreur ou avertissement) est tracé en rouge.
+  suivent le sens réel du courant estimé, avec une densité et une vitesse
+  proportionnelles au courant. `Vue → Courant animé` masque ce flux.
+- La couleur des fils suit la tension du net : bleu/gris/orange par défaut,
+  variante cyan/gris/magenta, avec une légende. Le menu **Afficher** règle les
+  calques Tension, Courant, Puissance, Valeurs, Références et Labels.
+- La puissance dissipée ajoute un halo dont la luminosité est réglable. Le sens
+  du courant peut être conventionnel ou électronique.
+- Un fil signalé par l’ERC (erreur ou avertissement) est tracé en rouge, prioritaire
+  sur la couleur de tension et la sélection.
 - Une LED montre son allumage par un halo proportionnel à sa tension directe.
   Un clic sur un interrupteur le ferme ou l’ouvre directement sur le canevas ;
   l’action est annulable.
@@ -181,8 +190,9 @@ Les raccourcis sont ignorés lorsqu’un champ texte a le focus, à l’exceptio
   palette de commandes.
 - L’état vide du canevas rappelle les trois actions essentielles et renvoie au
   guide.
-- Les préférences d’affichage proposent un thème sombre ou à contraste élevé,
-  une taille d’interface de 85 à 130 % et la réduction des animations.
+- Les préférences d’affichage proposent les thèmes sombre, contrasté ou clair,
+  une taille d’interface de 85 à 130 %, la réduction des animations, la petite
+  grille et le style de résistance européen ou américain.
 - `Tab` et `Maj+Tab` parcourent les contrôles, `Entrée` active, `Échap` ferme.
   Toutes les actions principales ont un libellé texte et une infobulle.
 - Les préférences sont appliquées immédiatement et restent valables pour la
@@ -193,7 +203,8 @@ Les raccourcis sont ignorés lorsqu’un champ texte a le focus, à l’exceptio
 - L’inspecteur affiche la référence, l’orientation, le miroir et les paramètres.
   Un double-clic sur un symbole ouvre la même édition dans une fenêtre centrée.
 - Les aides de saisie sont dans les infobulles des champs ; le panneau privilégie
-  les valeurs, les sections et les actions.
+  les valeurs, les sections et les actions. Les valeurs et références du schéma
+  peuvent être affichées ou masquées, avec une taille de valeur réglable.
 - Les valeurs s’écrivent directement en notation d’ingénieur : `4k7`, `100n`,
   `2.2u`, `1e-6`, avec unité optionnelle. `Entrée` applique la saisie.
 - La série préférée E12, E24 ou E96 se choisit dans l’inspecteur. La molette,

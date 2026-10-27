@@ -13,27 +13,16 @@ use crate::analysis::{LiveValues, ProbeReading};
 use crate::document::{
     ActionError, ClipboardItem, Document, SelectionChange, SelectionMode, WireEnd,
 };
-use crate::ui::glyph::{paint_symbol, GlyphColors};
-use crate::ui::{
-    symbol_kind_name, Status, ACCENT, CANVAS_BACKGROUND, HOVER, LABEL, MUTED, PIN, SYMBOL, WIRE,
-};
+use crate::ui::glyph::{paint_symbol, GlyphColors, SymbolText};
+use crate::ui::theme::{CanvasSettings, CanvasTheme, CurrentDirection, VoltageScale};
+use crate::ui::{symbol_kind_name, Status, MUTED};
 use crate::view::{MinimapTransform, Viewport, DEFAULT_SCALE};
 
-const MINOR_GRID: Color32 = Color32::from_rgb(24, 32, 46);
-const MAJOR_GRID: Color32 = Color32::from_rgb(34, 45, 64);
-const AXIS: Color32 = Color32::from_rgb(58, 78, 108);
-const PANEL_BADGE: Color32 = Color32::from_rgba_premultiplied(24, 34, 48, 220);
-const SELECTION_FILL: Color32 = Color32::from_rgba_premultiplied(112, 82, 24, 120);
-const WIRE_ERROR: Color32 = Color32::from_rgb(255, 92, 92);
-const MINIMAP_BACKGROUND: Color32 = Color32::from_rgba_premultiplied(12, 18, 28, 230);
 const MINIMAP_WIDTH: f32 = 152.0;
 const MINIMAP_HEIGHT: f32 = 112.0;
 const MINIMAP_MARGIN: f32 = 12.0;
 const ZOOM_STEP: f32 = 1.25;
 const ENDPOINT_RADIUS: f32 = 11.0;
-const FLOW_COLOR: Color32 = Color32::from_rgb(255, 236, 140);
-const FLOW_HALO: Color32 = Color32::from_rgba_premultiplied(20, 24, 12, 210);
-const LIVE_BADGE: Color32 = Color32::from_rgba_premultiplied(20, 30, 44, 228);
 
 /// Canvas interaction state that survives between frames.
 pub struct CanvasState {
@@ -52,9 +41,9 @@ pub struct CanvasState {
     pending_fit: Option<(GridPos, GridPos)>,
     last_rect: Option<Rect>,
     minimap_visible: bool,
-    current_flow: bool,
     animation_speed: f64,
     power_brightness: f32,
+    settings: CanvasSettings,
     property_request: Option<SymbolId>,
     label_dialog: Option<LabelDialog>,
 }
@@ -110,9 +99,9 @@ impl CanvasState {
             pending_fit: None,
             last_rect: None,
             minimap_visible: true,
-            current_flow: true,
             animation_speed: 1.0,
             power_brightness: 0.6,
+            settings: CanvasSettings::default(),
             property_request: None,
             label_dialog: None,
         }
@@ -223,12 +212,12 @@ impl CanvasState {
 
     /// Returns whether current flow is animated on wires.
     pub const fn current_flow_visible(&self) -> bool {
-        self.current_flow
+        self.settings.layers.current
     }
 
     /// Shows or hides the animated current flow.
     pub fn set_current_flow_visible(&mut self, visible: bool) {
-        self.current_flow = visible;
+        self.settings.layers.current = visible;
     }
 
     /// Sets the current-animation speed multiplier.
@@ -243,6 +232,21 @@ impl CanvasState {
         if brightness.is_finite() {
             self.power_brightness = brightness.clamp(0.0, 1.0);
         }
+    }
+
+    /// Returns the canvas display settings.
+    pub const fn settings(&self) -> &CanvasSettings {
+        &self.settings
+    }
+
+    /// Returns mutable canvas display settings.
+    pub fn settings_mut(&mut self) -> &mut CanvasSettings {
+        &mut self.settings
+    }
+
+    /// Applies the canvas color theme.
+    pub fn set_theme(&mut self, theme: CanvasTheme) {
+        self.settings.theme = theme;
     }
 
     /// Takes one pending double-click property request.
@@ -281,7 +285,7 @@ impl CanvasState {
         let (response, painter) = ui.allocate_painter(available, Sense::click_and_drag());
         let rect = response.rect;
         self.last_rect = Some(rect);
-        painter.rect_filled(rect, 0.0, CANVAS_BACKGROUND);
+        painter.rect_filled(rect, 0.0, self.settings.palette().background);
 
         if let Some(bounds) = self.pending_fit.take() {
             self.viewport.fit(rect, bounds);
@@ -333,9 +337,8 @@ impl CanvasState {
 
         self.paint_grid(&painter, rect);
         self.paint_document(&painter, rect, document, live);
-        if self.current_flow {
-            self.paint_current_flow(&painter, rect, document, live, flow_time);
-        }
+        self.paint_current_flow(&painter, rect, document, live, flow_time);
+        self.paint_voltage_legend(&painter, rect, document, live);
         self.paint_wire_handles(&painter, rect, document);
         self.paint_hover(&painter, rect, document);
         let shift = ui.input(|input| input.modifiers.shift);
@@ -954,8 +957,13 @@ impl CanvasState {
     }
 
     fn paint_grid(&self, painter: &Painter, rect: Rect) {
+        let palette = self.settings.palette();
         let (min, max) = self.viewport.visible_bounds(rect);
-        let step = if self.viewport.scale() >= 14.0 { 1 } else { 5 };
+        let step = if self.viewport.scale() >= 14.0 || self.settings.small_grid {
+            1
+        } else {
+            5
+        };
         let mut count = 0_usize;
 
         let mut x = min.x.div_euclid(step) * step;
@@ -970,11 +978,11 @@ impl CanvasState {
                 Stroke::new(
                     if major { 1.0 } else { 0.6 },
                     if x == 0 {
-                        AXIS
+                        palette.axis
                     } else if major {
-                        MAJOR_GRID
+                        palette.major_grid
                     } else {
-                        MINOR_GRID
+                        palette.minor_grid
                     },
                 ),
             );
@@ -998,11 +1006,11 @@ impl CanvasState {
                 Stroke::new(
                     if major { 1.0 } else { 0.6 },
                     if y == 0 {
-                        AXIS
+                        palette.axis
                     } else if major {
-                        MAJOR_GRID
+                        palette.major_grid
                     } else {
-                        MINOR_GRID
+                        palette.minor_grid
                     },
                 ),
             );
@@ -1021,19 +1029,31 @@ impl CanvasState {
         document: &Document,
         live: &LiveValues,
     ) {
+        let palette = self.settings.palette();
         let problem_wires = document.problem_wires();
+        let (wire_voltages, voltage_scale) = voltage_data(document, live);
+        let max_power = max_component_power(document, live);
         for wire in document.schematic().wires() {
             let selected = document.selection().contains(&ObjectRef::Wire(wire.id));
             let hovered = self.hover == Some(ObjectRef::Wire(wire.id));
             let net_hovered = self.hover_net.contains(&ObjectRef::Wire(wire.id));
             let problem = problem_wires.contains(&wire.id);
+            let voltage = self
+                .settings
+                .layers
+                .voltage
+                .then(|| voltage_scale.zip(wire_voltages.get(&wire.id).copied()))
+                .flatten()
+                .map_or(palette.wire, |(scale, value)| {
+                    scale.color(value, self.settings.voltage_palette)
+                });
             if problem {
                 painter.line_segment(
                     [
                         self.viewport.grid_to_screen(rect, wire.a),
                         self.viewport.grid_to_screen(rect, wire.b),
                     ],
-                    Stroke::new(9.0, WIRE_ERROR.gamma_multiply(0.18)),
+                    Stroke::new(9.0, palette.wire_error.gamma_multiply(0.18)),
                 );
             }
             if (hovered || net_hovered) && !selected {
@@ -1042,7 +1062,7 @@ impl CanvasState {
                         self.viewport.grid_to_screen(rect, wire.a),
                         self.viewport.grid_to_screen(rect, wire.b),
                     ],
-                    Stroke::new(7.0, HOVER.gamma_multiply(0.25)),
+                    Stroke::new(7.0, palette.hover.gamma_multiply(0.25)),
                 );
             }
             painter.line_segment(
@@ -1059,13 +1079,13 @@ impl CanvasState {
                         3.2
                     },
                     if problem {
-                        WIRE_ERROR
+                        palette.wire_error
                     } else if selected {
-                        ACCENT
+                        palette.accent
                     } else if hovered || net_hovered {
-                        HOVER
+                        palette.hover
                     } else {
-                        WIRE
+                        voltage
                     },
                 ),
             );
@@ -1076,22 +1096,34 @@ impl CanvasState {
             let hovered = self.hover == Some(ObjectRef::Symbol(symbol.id));
             let net_hovered = self.hover_net.contains(&ObjectRef::Symbol(symbol.id));
             let body = if selected {
-                ACCENT
+                palette.accent
             } else if hovered || net_hovered {
-                HOVER
+                palette.hover
             } else {
-                SYMBOL
+                palette.symbol
             };
             let colors = GlyphColors {
                 body,
                 pin: if selected || hovered || net_hovered {
                     body
                 } else {
-                    PIN
+                    palette.pin
                 },
-                label: if selected { ACCENT } else { LABEL },
-                value: if selected { ACCENT } else { MUTED },
+                label: if selected {
+                    palette.accent
+                } else {
+                    palette.label
+                },
+                value: if selected {
+                    palette.accent
+                } else {
+                    palette.muted
+                },
+                resistor: self.settings.resistor_style,
             };
+            if self.settings.layers.power && symbol.kind != editor_core::SymbolKind::Led {
+                self.paint_power_glow(painter, rect, document, symbol, live, max_power);
+            }
             paint_symbol(
                 painter,
                 symbol,
@@ -1099,15 +1131,36 @@ impl CanvasState {
                 self.viewport.grid_to_screen(rect, symbol.at),
                 self.viewport.scale(),
                 colors,
-                true,
+                SymbolText {
+                    labels: self.settings.layers.references,
+                    values: self.settings.layers.values,
+                    scale: self.settings.value_scale,
+                    value_offset: self.value_offset(document, symbol, rect),
+                },
             );
             if symbol.kind == editor_core::SymbolKind::Led {
                 self.paint_led_glow(painter, rect, document, symbol, live);
             }
             if selected {
-                paint_symbol_outline(painter, document, symbol, &self.viewport, rect, ACCENT, 1.7);
+                paint_symbol_outline(
+                    painter,
+                    document,
+                    symbol,
+                    &self.viewport,
+                    rect,
+                    palette.accent,
+                    1.7,
+                );
             } else if hovered || net_hovered {
-                paint_symbol_outline(painter, document, symbol, &self.viewport, rect, HOVER, 1.2);
+                paint_symbol_outline(
+                    painter,
+                    document,
+                    symbol,
+                    &self.viewport,
+                    rect,
+                    palette.hover,
+                    1.2,
+                );
             }
         }
 
@@ -1125,38 +1178,41 @@ impl CanvasState {
                 };
             let position = self.viewport.grid_to_screen(rect, junction.at);
             let color = if selected {
-                ACCENT
+                palette.accent
             } else if hovered || net_hovered {
-                HOVER
+                palette.hover
             } else {
-                WIRE
+                palette.wire
             };
             painter.circle_filled(position, radius, color);
-            painter.circle_stroke(position, radius, Stroke::new(1.0, CANVAS_BACKGROUND));
+            painter.circle_stroke(position, radius, Stroke::new(1.0, palette.background));
         }
 
+        if !self.settings.layers.net_labels {
+            return;
+        }
         for label in document.schematic().labels() {
             let selected = document.selection().contains(&ObjectRef::Label(label.id));
             let hovered = self.hover == Some(ObjectRef::Label(label.id));
             let net_hovered = self.hover_net.contains(&ObjectRef::Label(label.id));
             let position = self.viewport.grid_to_screen(rect, label.at);
             let color = if selected {
-                ACCENT
+                palette.accent
             } else if hovered || net_hovered {
-                HOVER
+                palette.hover
             } else {
-                LABEL
+                palette.label
             };
             let font = FontId::proportional(13.0);
             let galley = painter.layout_no_wrap(label.text.clone(), font, color);
             let text_pos = position + Vec2::new(7.0, -6.0);
             let text_rect = Align2::LEFT_BOTTOM.anchor_size(text_pos, galley.size());
             if selected {
-                painter.rect_filled(text_rect.expand(3.0), 3.0, SELECTION_FILL);
+                painter.rect_filled(text_rect.expand(3.0), 3.0, palette.selection_fill);
                 painter.rect_stroke(
                     text_rect.expand(3.0),
                     3.0,
-                    Stroke::new(1.0, ACCENT),
+                    Stroke::new(1.0, palette.accent),
                     StrokeKind::Outside,
                 );
             }
@@ -1184,13 +1240,14 @@ impl CanvasState {
             "t = {time} · {}",
             if stale { "antérieur" } else { "à jour" }
         );
-        let color = if stale { ACCENT } else { HOVER };
+        let palette = self.settings.palette();
+        let color = if stale { palette.accent } else { palette.hover };
         let galley = painter.layout_no_wrap(text, FontId::proportional(11.0), color);
         let anchor = rect.right_top() + Vec2::new(-12.0, 12.0);
         let badge = Align2::RIGHT_TOP
             .anchor_size(anchor, galley.size())
             .expand2(Vec2::new(8.0, 4.0));
-        painter.rect_filled(badge, 5.0, LIVE_BADGE);
+        painter.rect_filled(badge, 5.0, palette.live_badge);
         painter.rect_stroke(
             badge,
             5.0,
@@ -1198,6 +1255,140 @@ impl CanvasState {
             StrokeKind::Inside,
         );
         painter.galley(badge.min + Vec2::new(8.0, 4.0), galley, color);
+    }
+
+    fn paint_power_glow(
+        &self,
+        painter: &Painter,
+        rect: Rect,
+        document: &Document,
+        symbol: &Symbol,
+        live: &LiveValues,
+        max_power: f64,
+    ) {
+        let observed = live.symbol(document, symbol);
+        let Some(power) = observed.power.filter(|power| *power > 0.0) else {
+            return;
+        };
+        if max_power <= f64::MIN_POSITIVE || self.power_brightness <= 0.0 {
+            return;
+        }
+        let intensity = (power / max_power).sqrt().clamp(0.0, 1.0) as f32;
+        let center = self.viewport.grid_to_screen(rect, symbol.at);
+        let radius = (self.viewport.scale() * 1.9).clamp(10.0, 36.0);
+        painter.circle_filled(
+            center,
+            radius,
+            Color32::from_rgba_premultiplied(
+                255,
+                120,
+                48,
+                (70.0 * intensity * self.power_brightness) as u8,
+            ),
+        );
+        painter.circle_filled(
+            center,
+            radius * 0.62,
+            Color32::from_rgba_premultiplied(
+                255,
+                190,
+                90,
+                (95.0 * intensity * self.power_brightness) as u8,
+            ),
+        );
+    }
+
+    fn value_offset(&self, document: &Document, symbol: &Symbol, rect: Rect) -> Vec2 {
+        let scale = self.viewport.scale();
+        let center = self.viewport.grid_to_screen(rect, symbol.at);
+        let base = Vec2::new(0.0, scale * 2.35);
+        let candidates = [
+            base,
+            base + Vec2::new(0.0, -scale * 4.7),
+            base + Vec2::new(scale * 2.9, -scale * 2.15),
+            base + Vec2::new(-scale * 2.9, -scale * 2.15),
+        ];
+        for offset in candidates {
+            let point = center + offset;
+            let blocked = document.schematic().wires().any(|wire| {
+                let a = self.viewport.grid_to_screen(rect, wire.a);
+                let b = self.viewport.grid_to_screen(rect, wire.b);
+                segment_distance(point, a, b) < 14.0
+            });
+            if !blocked {
+                return offset - base;
+            }
+        }
+        Vec2::ZERO
+    }
+
+    fn paint_voltage_legend(
+        &self,
+        painter: &Painter,
+        rect: Rect,
+        document: &Document,
+        live: &LiveValues,
+    ) {
+        if !self.settings.layers.voltage || live.is_empty() || rect.width() < 520.0 {
+            return;
+        }
+        let (_, scale) = voltage_data(document, live);
+        let Some(scale) = scale.filter(VoltageScale::is_visible) else {
+            return;
+        };
+        let palette = self.settings.palette();
+        let origin = rect.left_top() + Vec2::new(12.0, 66.0);
+        let bar = Rect::from_min_size(origin + Vec2::new(8.0, 18.0), Vec2::new(180.0, 10.0));
+        let panel = Rect::from_min_size(origin, Vec2::new(196.0, 46.0));
+        painter.rect_filled(panel, 5.0, palette.panel_badge);
+        painter.rect_stroke(
+            panel,
+            5.0,
+            Stroke::new(1.0, palette.major_grid),
+            StrokeKind::Inside,
+        );
+        let steps = 60;
+        for index in 0..steps {
+            let t = index as f64 / (steps - 1) as f64 * 2.0 - 1.0;
+            let color = crate::ui::theme::voltage_color(t, self.settings.voltage_palette);
+            let x = bar.left() + bar.width() * index as f32 / steps as f32;
+            painter.rect_filled(
+                Rect::from_min_size(
+                    Pos2::new(x, bar.top()),
+                    Vec2::new(bar.width() / steps as f32 + 0.5, bar.height()),
+                ),
+                0.0,
+                color,
+            );
+        }
+        painter.text(
+            panel.left_top() + Vec2::new(8.0, 4.0),
+            Align2::LEFT_TOP,
+            "Tension",
+            FontId::proportional(10.5),
+            palette.muted,
+        );
+        painter.text(
+            bar.left_bottom() + Vec2::new(0.0, 2.0),
+            Align2::LEFT_TOP,
+            format_si_precision(-scale.max_abs(), Unit::Volt, 2),
+            FontId::proportional(9.5),
+            palette.muted,
+        );
+        painter.text(
+            bar.center_bottom() + Vec2::new(0.0, 2.0),
+            Align2::CENTER_TOP,
+            "0 V",
+            FontId::proportional(9.5),
+            palette.muted,
+        );
+        painter.text(
+            bar.right_bottom() + Vec2::new(0.0, 2.0),
+            Align2::RIGHT_TOP,
+            format_si_precision(scale.max_abs(), Unit::Volt, 2),
+            FontId::proportional(9.5),
+            palette.muted,
+        );
     }
 
     fn paint_led_glow(
@@ -1252,7 +1443,7 @@ impl CanvasState {
         live: &LiveValues,
         now: f64,
     ) {
-        if live.is_empty() || self.viewport.scale() < 8.0 {
+        if live.is_empty() || !self.settings.layers.current || self.viewport.scale() < 8.0 {
             return;
         }
         let Some(extraction) = document.extraction() else {
@@ -1262,20 +1453,22 @@ impl CanvasState {
         if flows.is_empty() {
             return;
         }
-        let spacing = 1.15_f32;
+        let palette = self.settings.palette();
         for net in &extraction.nets {
             let Some(flow) = flows.get(net.name.as_str()) else {
                 continue;
             };
-            let speed = (2.0 + (flow.strength * 1_000.0).ln_1p().clamp(0.0, 6.0) * 0.6)
-                * self.animation_speed;
+            let strength = (flow.strength * 1_000.0).ln_1p().clamp(0.0, 6.0);
+            let spacing = ((1.8 - strength * 0.18).clamp(0.55, 1.8)) as f32;
+            let speed = (2.0 + strength * 0.6) * self.animation_speed;
             let phase = (now * speed).rem_euclid(f64::from(spacing)) as f32;
             let directions = wire_directions(document, net, flow.source);
+            let reverse = self.settings.current_direction == CurrentDirection::Electrons;
             for id in &net.wires {
                 let Some(wire) = document.wire(*id) else {
                     continue;
                 };
-                let forward = directions.get(id).copied().unwrap_or(true) == flow.away;
+                let forward = (directions.get(id).copied().unwrap_or(true) == flow.away) != reverse;
                 let (start, end) = if forward {
                     (wire.a, wire.b)
                 } else {
@@ -1291,8 +1484,8 @@ impl CanvasState {
                 while traveled < length {
                     let ratio = traveled / length;
                     let position = start_screen + (end_screen - start_screen) * ratio;
-                    painter.circle_filled(position, 3.8, FLOW_HALO);
-                    painter.circle_filled(position, 2.4, FLOW_COLOR);
+                    painter.circle_filled(position, 3.8, palette.flow_halo);
+                    painter.circle_filled(position, 2.4, palette.flow_color);
                     traveled += spacing;
                 }
             }
@@ -1300,6 +1493,7 @@ impl CanvasState {
     }
 
     fn paint_wire_handles(&self, painter: &Painter, rect: Rect, document: &Document) {
+        let palette = self.settings.palette();
         for (wire, _, point) in document.free_wire_endpoints() {
             let relevant = document.selection().contains(&ObjectRef::Wire(wire))
                 || self.hover == Some(ObjectRef::Wire(wire));
@@ -1307,8 +1501,8 @@ impl CanvasState {
                 continue;
             }
             let screen = self.viewport.grid_to_screen(rect, point);
-            painter.circle_filled(screen, 4.5, CANVAS_BACKGROUND);
-            painter.circle_stroke(screen, 4.5, Stroke::new(1.8, HOVER));
+            painter.circle_filled(screen, 4.5, palette.background);
+            painter.circle_stroke(screen, 4.5, Stroke::new(1.8, palette.hover));
         }
     }
 
@@ -1319,13 +1513,14 @@ impl CanvasState {
         if document.selection().contains(&object) {
             return;
         }
+        let palette = self.settings.palette();
         match object {
             ObjectRef::Label(id) => {
                 if let Some(label) = document.label(id) {
                     painter.circle_stroke(
                         self.viewport.grid_to_screen(rect, label.at),
                         8.0,
-                        Stroke::new(1.2, HOVER),
+                        Stroke::new(1.2, palette.hover),
                     );
                 }
             }
@@ -1334,7 +1529,7 @@ impl CanvasState {
                     painter.circle_stroke(
                         self.viewport.grid_to_screen(rect, junction.at),
                         9.0,
-                        Stroke::new(1.2, HOVER),
+                        Stroke::new(1.2, palette.hover),
                     );
                 }
             }
@@ -1351,6 +1546,7 @@ impl CanvasState {
         hovered_point: Option<GridPos>,
         shift: bool,
     ) {
+        let palette = self.settings.palette();
         match &self.drag {
             Some(DragState::Objects { start, current }) => {
                 let delta = GridPos::new(
@@ -1386,7 +1582,7 @@ impl CanvasState {
                                     self.viewport.grid_to_screen(rect, a),
                                     self.viewport.grid_to_screen(rect, b),
                                 ],
-                                Stroke::new(3.0, ACCENT.gamma_multiply(0.6)),
+                                Stroke::new(3.0, palette.accent.gamma_multiply(0.6)),
                             );
                         }
                     }
@@ -1410,12 +1606,12 @@ impl CanvasState {
                             self.viewport.grid_to_screen(rect, fixed),
                             self.viewport.grid_to_screen(rect, target),
                         ],
-                        Stroke::new(3.2, ACCENT.gamma_multiply(0.55)),
+                        Stroke::new(3.2, palette.accent.gamma_multiply(0.55)),
                     );
                     painter.circle_stroke(
                         self.viewport.grid_to_screen(rect, target),
                         6.0,
-                        Stroke::new(1.6, ACCENT),
+                        Stroke::new(1.6, palette.accent),
                     );
                 }
             }
@@ -1426,7 +1622,11 @@ impl CanvasState {
                     self.viewport.grid_to_screen(rect, min),
                     self.viewport.grid_to_screen(rect, max),
                 );
-                let color = if start.x <= current.x { ACCENT } else { HOVER };
+                let color = if start.x <= current.x {
+                    palette.accent
+                } else {
+                    palette.hover
+                };
                 painter.rect_filled(rectangle, 0.0, color.gamma_multiply(0.08));
                 painter.rect_stroke(rectangle, 0.0, Stroke::new(1.2, color), StrokeKind::Inside);
             }
@@ -1441,7 +1641,7 @@ impl CanvasState {
                     self.wire_prefer_horizontal
                 };
                 let path = document.route_path(start, end, prefer_horizontal);
-                let color = ACCENT.gamma_multiply(0.9);
+                let color = palette.accent.gamma_multiply(0.9);
                 for pair in path.windows(2) {
                     painter.line_segment(
                         [
@@ -1480,19 +1680,20 @@ impl CanvasState {
                         self.viewport.grid_to_screen(rect, point),
                         self.viewport.scale(),
                         GlyphColors {
-                            body: SYMBOL,
-                            pin: PIN,
-                            label: LABEL,
-                            value: MUTED,
+                            body: palette.symbol,
+                            pin: palette.pin,
+                            label: palette.label,
+                            value: palette.muted,
+                            resistor: self.settings.resistor_style,
                         },
-                        false,
+                        SymbolText::NONE,
                     );
                     for pin in &definition.pins {
                         if let Some(position) = preview.pin_position_of(pin) {
                             painter.circle_stroke(
                                 self.viewport.grid_to_screen(rect, position),
                                 (self.viewport.scale() * 0.4).clamp(4.0, 8.0),
-                                Stroke::new(1.0, ACCENT.gamma_multiply(0.7)),
+                                Stroke::new(1.0, palette.accent.gamma_multiply(0.7)),
                             );
                         }
                     }
@@ -1503,7 +1704,11 @@ impl CanvasState {
                         .get(kind)
                         .is_some_and(|definition| definition.pins.len() == 2)
                 {
-                    painter.circle_filled(self.viewport.grid_to_screen(rect, point), 4.0, ACCENT);
+                    painter.circle_filled(
+                        self.viewport.grid_to_screen(rect, point),
+                        4.0,
+                        palette.accent,
+                    );
                 }
             }
         } else if let crate::ui::Tool::Junction = tool {
@@ -1511,19 +1716,19 @@ impl CanvasState {
                 painter.circle_stroke(
                     self.viewport.grid_to_screen(rect, point),
                     7.0,
-                    Stroke::new(1.3, ACCENT),
+                    Stroke::new(1.3, palette.accent),
                 );
             }
         } else if let crate::ui::Tool::Label = tool {
             if let Some(point) = hovered_point {
                 let screen = self.viewport.grid_to_screen(rect, point);
-                painter.circle_stroke(screen, 7.0, Stroke::new(1.3, ACCENT));
+                painter.circle_stroke(screen, 7.0, Stroke::new(1.3, palette.accent));
                 painter.text(
                     screen + Vec2::new(8.0, -6.0),
                     Align2::LEFT_BOTTOM,
                     "NET",
                     FontId::proportional(12.0),
-                    ACCENT.gamma_multiply(0.8),
+                    palette.accent.gamma_multiply(0.8),
                 );
             }
         }
@@ -1537,6 +1742,7 @@ impl CanvasState {
         object: ObjectRef,
         delta: GridPos,
     ) {
+        let palette = self.settings.palette();
         match object {
             ObjectRef::Symbol(id) => {
                 if let Some(symbol) = document.symbol(id) {
@@ -1548,12 +1754,13 @@ impl CanvasState {
                             self.viewport.grid_to_screen(rect, at),
                             self.viewport.scale(),
                             GlyphColors {
-                                body: ACCENT,
-                                pin: ACCENT,
-                                label: ACCENT,
-                                value: ACCENT,
+                                body: palette.accent,
+                                pin: palette.accent,
+                                label: palette.accent,
+                                value: palette.accent,
+                                resistor: self.settings.resistor_style,
                             },
-                            false,
+                            SymbolText::NONE,
                         );
                     }
                 }
@@ -1568,7 +1775,7 @@ impl CanvasState {
                                 self.viewport.grid_to_screen(rect, a),
                                 self.viewport.grid_to_screen(rect, b),
                             ],
-                            Stroke::new(3.0, ACCENT.gamma_multiply(0.45)),
+                            Stroke::new(3.0, palette.accent.gamma_multiply(0.45)),
                         );
                     }
                 }
@@ -1579,7 +1786,7 @@ impl CanvasState {
                         painter.circle_filled(
                             self.viewport.grid_to_screen(rect, at),
                             4.5,
-                            ACCENT.gamma_multiply(0.5),
+                            palette.accent.gamma_multiply(0.5),
                         );
                     }
                 }
@@ -1592,7 +1799,7 @@ impl CanvasState {
                             Align2::LEFT_BOTTOM,
                             &label.text,
                             FontId::proportional(13.0),
-                            ACCENT.gamma_multiply(0.6),
+                            palette.accent.gamma_multiply(0.6),
                         );
                     }
                 }
@@ -1607,6 +1814,7 @@ impl CanvasState {
         document: &Document,
         at: GridPos,
     ) {
+        let palette = self.settings.palette();
         let Some(clipboard) = document.clipboard() else {
             return;
         };
@@ -1628,12 +1836,13 @@ impl CanvasState {
                             self.viewport.grid_to_screen(rect, position),
                             self.viewport.scale(),
                             GlyphColors {
-                                body: ACCENT,
-                                pin: ACCENT,
-                                label: ACCENT,
-                                value: ACCENT,
+                                body: palette.accent,
+                                pin: palette.accent,
+                                label: palette.accent,
+                                value: palette.accent,
+                                resistor: self.settings.resistor_style,
                             },
-                            false,
+                            SymbolText::NONE,
                         );
                     }
                 }
@@ -1646,7 +1855,7 @@ impl CanvasState {
                                 self.viewport.grid_to_screen(rect, a),
                                 self.viewport.grid_to_screen(rect, b),
                             ],
-                            Stroke::new(2.5, ACCENT.gamma_multiply(0.7)),
+                            Stroke::new(2.5, palette.accent.gamma_multiply(0.7)),
                         );
                     }
                 }
@@ -1655,7 +1864,7 @@ impl CanvasState {
                         ghost.circle_filled(
                             self.viewport.grid_to_screen(rect, position),
                             4.0,
-                            ACCENT.gamma_multiply(0.7),
+                            palette.accent.gamma_multiply(0.7),
                         );
                     }
                 }
@@ -1666,7 +1875,7 @@ impl CanvasState {
                             Align2::LEFT_BOTTOM,
                             &label.text,
                             FontId::proportional(13.0),
-                            ACCENT,
+                            palette.accent,
                         );
                     }
                 }
@@ -1708,7 +1917,7 @@ impl CanvasState {
                 }
             }
         }
-        let color = ACCENT.gamma_multiply(0.22);
+        let color = self.settings.palette().accent.gamma_multiply(0.22);
         for x in vertical.into_iter().take(8) {
             let screen = self.viewport.grid_to_screen(rect, GridPos::new(x, 0));
             painter.line_segment(
@@ -1739,7 +1948,7 @@ impl CanvasState {
         painter.circle_stroke(
             position,
             (self.viewport.scale() * 0.45).clamp(5.0, 9.0),
-            Stroke::new(1.4, HOVER),
+            Stroke::new(1.4, self.settings.palette().hover),
         );
     }
 
@@ -1778,24 +1987,21 @@ impl CanvasState {
             let Some(symbol) = document.symbol(probe.id) else {
                 continue;
             };
+            let palette = self.settings.palette();
             let text = probe.value.map_or_else(
                 || "—".to_owned(),
                 |value| format_si_precision(value, probe.unit.unwrap_or(Unit::Volt), 3),
             );
             let color = match probe.kind {
-                editor_core::SymbolKind::Voltmeter => ACCENT,
-                editor_core::SymbolKind::Ammeter => HOVER,
+                editor_core::SymbolKind::Voltmeter => palette.accent,
+                editor_core::SymbolKind::Ammeter => palette.hover,
                 editor_core::SymbolKind::Ohmmeter => Color32::from_rgb(112, 210, 155),
-                _ => MUTED,
+                _ => palette.muted,
             };
             let galley = painter.layout_no_wrap(text, FontId::monospace(10.5), color);
             let anchor = self.viewport.grid_to_screen(rect, symbol.at) + Vec2::new(0.0, 16.0);
             let text_rect = Align2::CENTER_TOP.anchor_size(anchor, galley.size());
-            painter.rect_filled(
-                text_rect.expand(3.0),
-                3.0,
-                Color32::from_rgba_premultiplied(12, 18, 28, 185),
-            );
+            painter.rect_filled(text_rect.expand(3.0), 3.0, palette.live_badge);
             painter.galley(text_rect.min, galley, color);
         }
     }
@@ -1804,8 +2010,14 @@ impl CanvasState {
         let Some((area, transform)) = self.minimap_geometry(rect, document) else {
             return;
         };
-        painter.rect_filled(area, 4.0, MINIMAP_BACKGROUND);
-        painter.rect_stroke(area, 4.0, Stroke::new(1.0, MAJOR_GRID), StrokeKind::Inside);
+        let palette = self.settings.palette();
+        painter.rect_filled(area, 4.0, palette.minimap_background);
+        painter.rect_stroke(
+            area,
+            4.0,
+            Stroke::new(1.0, palette.major_grid),
+            StrokeKind::Inside,
+        );
         let painter = painter.with_clip_rect(area.shrink(2.0));
         for wire in document.schematic().wires() {
             let selected = document.selection().contains(&ObjectRef::Wire(wire.id));
@@ -1814,9 +2026,9 @@ impl CanvasState {
                 Stroke::new(
                     if selected { 1.6 } else { 1.0 },
                     if selected {
-                        ACCENT
+                        palette.accent
                     } else {
-                        WIRE.gamma_multiply(0.8)
+                        palette.wire.gamma_multiply(0.8)
                     },
                 ),
             );
@@ -1826,7 +2038,11 @@ impl CanvasState {
             painter.circle_filled(
                 transform.point(symbol.at),
                 if selected { 2.6 } else { 1.9 },
-                if selected { ACCENT } else { SYMBOL },
+                if selected {
+                    palette.accent
+                } else {
+                    palette.symbol
+                },
             );
         }
         for junction in document.schematic().junctions() {
@@ -1836,7 +2052,11 @@ impl CanvasState {
             painter.circle_filled(
                 transform.point(junction.at),
                 if selected { 2.2 } else { 1.5 },
-                if selected { ACCENT } else { WIRE },
+                if selected {
+                    palette.accent
+                } else {
+                    palette.wire
+                },
             );
         }
         for label in document.schematic().labels() {
@@ -1844,14 +2064,18 @@ impl CanvasState {
             painter.circle_filled(
                 transform.point(label.at),
                 if selected { 2.0 } else { 1.3 },
-                if selected { ACCENT } else { LABEL },
+                if selected {
+                    palette.accent
+                } else {
+                    palette.label
+                },
             );
         }
         let visible = self.viewport.visible_bounds(rect);
         painter.rect_stroke(
             transform.rect(visible.0, visible.1),
             0.0,
-            Stroke::new(1.2, HOVER),
+            Stroke::new(1.2, palette.hover),
             StrokeKind::Inside,
         );
     }
@@ -1860,30 +2084,32 @@ impl CanvasState {
         if !document.schematic().is_empty() {
             return;
         }
+        let palette = self.settings.palette();
         painter.text(
             rect.center() - Vec2::new(0.0, 12.0),
             Align2::CENTER_CENTER,
             "Choisissez un symbole dans la palette",
             FontId::proportional(20.0),
-            MUTED,
+            palette.muted,
         );
         painter.text(
             rect.center() + Vec2::new(0.0, 18.0),
             Align2::CENTER_CENTER,
-            "Câblez avec W, puis simulez avec Ctrl+Entrée.",
+            "Câblez avec W, puis lancez avec Espace.",
             FontId::proportional(13.0),
-            MUTED.gamma_multiply(0.8),
+            palette.muted.gamma_multiply(0.8),
         );
         painter.text(
             rect.center() + Vec2::new(0.0, 40.0),
             Align2::CENTER_CENTER,
             "Le bouton Démarrage propose un guide en quatre étapes.",
             FontId::proportional(12.0),
-            MUTED.gamma_multiply(0.65),
+            palette.muted.gamma_multiply(0.65),
         );
     }
 
     fn paint_tool_badge(&self, painter: &Painter, rect: Rect, tool: &crate::ui::Tool) {
+        let palette = self.settings.palette();
         let text = match tool {
             crate::ui::Tool::Select => "Sélection",
             crate::ui::Tool::Place(kind) => symbol_kind_name(kind),
@@ -1910,27 +2136,27 @@ impl CanvasState {
             rect.left_top() + Vec2::new(12.0, 12.0),
             Vec2::new(300.0, 44.0),
         );
-        painter.rect_filled(badge, 6.0, PANEL_BADGE);
+        painter.rect_filled(badge, 6.0, palette.panel_badge);
         painter.text(
             badge.left_top() + Vec2::new(10.0, 8.0),
             Align2::LEFT_TOP,
             text,
             FontId::proportional(13.0),
-            ACCENT,
+            palette.accent,
         );
         painter.text(
             badge.left_top() + Vec2::new(10.0, 25.0),
             Align2::LEFT_TOP,
             hint,
             FontId::proportional(10.5),
-            MUTED,
+            palette.muted,
         );
         painter.text(
             rect.left_bottom() + Vec2::new(10.0, -10.0),
             Align2::LEFT_BOTTOM,
             "Molette : zoom · bouton milieu : déplacer · mini-carte : cliquer",
             FontId::proportional(10.0),
-            MUTED.gamma_multiply(0.7),
+            palette.muted.gamma_multiply(0.7),
         );
     }
 
@@ -2072,6 +2298,47 @@ fn wire_directions(
         }
     }
     directions
+}
+
+fn voltage_data(
+    document: &Document,
+    live: &LiveValues,
+) -> (BTreeMap<WireId, f64>, Option<VoltageScale>) {
+    let mut wires = BTreeMap::new();
+    let mut values = Vec::new();
+    if live.is_empty() {
+        return (wires, None);
+    }
+    for net in document.nets() {
+        let Some(voltage) = live.voltage(net.name.as_str()) else {
+            continue;
+        };
+        values.push(voltage);
+        for id in &net.wires {
+            wires.insert(*id, voltage);
+        }
+    }
+    (wires, VoltageScale::from_values(values))
+}
+
+fn max_component_power(document: &Document, live: &LiveValues) -> f64 {
+    document
+        .schematic()
+        .symbols()
+        .filter(|symbol| !symbol.kind.is_measurement())
+        .filter_map(|symbol| live.symbol(document, symbol).power)
+        .filter(|power| power.is_finite() && *power > 0.0)
+        .fold(0.0, f64::max)
+}
+
+fn segment_distance(point: Pos2, a: Pos2, b: Pos2) -> f32 {
+    let ab = b - a;
+    let length_squared = ab.length_sq();
+    if length_squared <= f32::EPSILON {
+        return (point - a).length();
+    }
+    let t = ((point - a).dot(ab) / length_squared).clamp(0.0, 1.0);
+    (point - (a + ab * t)).length()
 }
 
 fn report(status: &mut Status, result: Result<(), ActionError>, success: &str) {

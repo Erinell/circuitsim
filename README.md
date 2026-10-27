@@ -8,7 +8,7 @@ sont séparés, testables sans navigateur et compilables pour
 ## État
 
 Version **0.4.0**. Les dix étapes du projet et les lots G1 à G8 sont livrés :
-244 tests natifs, clippy strict, cible WASM, benchmarks, exemples, CI et
+248 tests natifs, clippy strict, cible WASM, benchmarks, exemples, CI et
 distribution web.
 
 - **Cœur** : unités SI, netlist validée, MNA dense, DC, transitoire à pas fixe,
@@ -18,12 +18,13 @@ distribution web.
   déterministe, séries E, JSON versionné.
 - **Interface** : egui native et WASM, fenêtre maximisée, palette, canevas,
   simulation continue au démarrage avec Marche/Arrêt, Reset et Pas, inspecteur
-  avec valeurs simulées, courant animé orienté, erreurs ERC en rouge, LED
-  lumineuses, interrupteurs cliquables, édition par double-clic, sondes V/A/Ω,
-  transitoire temps réel avec pause et vitesse, curseurs A/B, marqueur Bode,
-  menus contextuels, mini-carte, dispositions fiables, guide de démarrage,
-  contraste élevé et taille réglable, portée, mesures, FFT de Hann, Bode, export
-  CSV, échelon de source.
+  avec valeurs simulées, fils colorés par tension avec palettes daltoniennes,
+  calques indépendants, courant animé orienté, erreurs ERC en rouge, halos de
+  puissance, LED lumineuses, interrupteurs cliquables, édition par double-clic,
+  thème clair, sondes V/A/Ω, transitoire temps réel avec pause et vitesse,
+  curseurs A/B, marqueur Bode, menus contextuels, mini-carte, dispositions
+  fiables, guide de démarrage, contraste élevé et taille réglable, portée,
+  mesures, FFT de Hann, Bode, export CSV, échelon de source.
 - **Transport** : protocole binaire `CSIM`, worker borné à un job, coalescence
   à 60 Hz, révisions croissantes, pont WASM.
 

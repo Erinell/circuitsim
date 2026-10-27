@@ -8,6 +8,7 @@ pub mod history;
 pub mod instruments;
 pub mod palette;
 pub mod properties;
+pub mod theme;
 
 use editor_core::SymbolKind;
 use eframe::egui::{self, Color32};
