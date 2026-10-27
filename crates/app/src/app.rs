@@ -16,6 +16,7 @@ use crate::ui::command_palette::{CommandAction, CommandPalette};
 use crate::ui::history;
 use crate::ui::instruments::InstrumentsState;
 use crate::ui::palette::PaletteState;
+use crate::ui::project::ProjectDialog;
 use crate::ui::properties::{InspectorState, SymbolDialog};
 use crate::ui::scopes::InlineScopes;
 use crate::ui::shortcuts::Keymap;
@@ -35,6 +36,7 @@ pub struct CircuitApp {
     scopes: InlineScopes,
     palette: CommandPalette,
     symbol_dialog: Option<SymbolDialog>,
+    project_dialog: ProjectDialog,
     status: Status,
     auto: AutoRefresh,
     preferences: DisplayPreferences,
@@ -254,6 +256,7 @@ impl CircuitApp {
             scopes,
             palette: CommandPalette::default(),
             symbol_dialog: None,
+            project_dialog: ProjectDialog::default(),
             status,
             auto: AutoRefresh::default(),
             preferences,
@@ -447,6 +450,14 @@ impl CircuitApp {
                     }
                     Err(error) => self.status.error(error.user_message()),
                 }
+            }
+
+            if ui
+                .button("Projet")
+                .on_hover_text("Enregistrer, charger ou partager le schéma en JSON")
+                .clicked()
+            {
+                self.project_dialog.open_with(&self.document);
             }
 
             ui.add_enabled_ui(self.document.can_undo(), |ui| {
@@ -1510,6 +1521,20 @@ impl CircuitApp {
         self.show_onboarding = open;
     }
 
+    fn project_window(&mut self, context: &Context) {
+        self.project_dialog
+            .show(context, &self.document, &mut self.status);
+        if let Some(document) = self.project_dialog.take_loaded() {
+            self.document = document;
+            self.instruments.clear_results();
+            self.scopes = InlineScopes::with_signals(BTreeSet::new());
+            self.canvas.cancel_interaction();
+            self.canvas.request_fit();
+            self.live_autostart = true;
+            self.status.success("Projet chargé.");
+        }
+    }
+
     fn about_window(&mut self, context: &Context) {
         if !self.show_about {
             return;
@@ -1831,6 +1856,7 @@ impl eframe::App for CircuitApp {
         self.onboarding_window(ui.ctx());
         self.preferences_window(ui.ctx());
         self.about_window(ui.ctx());
+        self.project_window(ui.ctx());
         self.symbol_dialog_window(ui.ctx());
         self.persist_if_due(now);
     }

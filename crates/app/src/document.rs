@@ -72,6 +72,9 @@ pub enum ActionError {
     /// The cut point is not strictly inside the wire.
     #[error("le point de coupe doit être à l'intérieur du fil")]
     CannotSplitWire,
+    /// The project JSON is invalid.
+    #[error("le projet est invalide : {0}")]
+    Project(#[from] editor_core::DocumentError),
 }
 
 impl ActionError {
@@ -136,6 +139,7 @@ impl ActionError {
             Self::CannotSplitWire => {
                 "Le point de coupe doit être strictement à l'intérieur du fil.".to_owned()
             }
+            Self::Project(error) => format!("Le projet est invalide : {error}"),
         }
     }
 }
@@ -365,6 +369,24 @@ impl Document {
     /// Returns the current schematic.
     pub const fn schematic(&self) -> &Schematic {
         &self.schematic
+    }
+
+    /// Serializes the project to versioned JSON.
+    pub fn to_project_json(&self) -> Result<String, ActionError> {
+        Ok(editor_core::to_json(&self.schematic)?)
+    }
+
+    /// Loads a project from versioned JSON and revalidates it.
+    pub fn from_project_json(json: &str) -> Result<Self, ActionError> {
+        let schematic = editor_core::from_json(json)?;
+        let mut document = Self::new();
+        document.schematic = schematic;
+        document.refresh_extraction();
+        document.history.clear();
+        document.selected.clear();
+        document.dirty = false;
+        document.revision = 0;
+        Ok(document)
     }
 
     /// Returns the symbol registry used for extraction.
@@ -2174,6 +2196,17 @@ mod tests {
             );
             assert!(!document.nets().is_empty(), "{name} must have nets");
         }
+    }
+
+    #[test]
+    fn project_json_round_trips_the_schematic() {
+        let document = Document::demo().unwrap();
+        let json = document.to_project_json().unwrap();
+        let restored = Document::from_project_json(&json).unwrap();
+        assert_eq!(restored.schematic(), document.schematic());
+        assert_eq!(restored.revision(), 0);
+        assert!(restored.extraction().is_some());
+        assert!(Document::from_project_json("{").is_err());
     }
 
     #[test]

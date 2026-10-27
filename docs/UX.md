@@ -220,6 +220,9 @@ Les raccourcis sont ignorés lorsqu’un champ texte a le focus, à l’exceptio
   enregistrés automatiquement puis restaurés au lancement. Un stockage
   indisponible ou invalide revient aux valeurs par défaut sans bloquer l’usage.
 - **À propos** présente la version, la licence et les licences tierces.
+- **Projet** sérialise le schéma en JSON versionné, permet de le copier, de le
+  charger après collage et, selon la plateforme, de lire/enregistrer un fichier
+  ou de le télécharger. Un JSON invalide est refusé sans toucher au schéma.
 - `Tab` et `Maj+Tab` parcourent les contrôles, `Entrée` active, `Échap` ferme.
   Toutes les actions principales ont un libellé texte et une infobulle.
 - Les préférences sont appliquées immédiatement et enregistrées
@@ -286,6 +289,6 @@ miroir de groupe, l’édition directe E12/E24/E96, l’inspecteur avec valeurs
 simulées, les menus contextuels, l’historique nommé, les dispositions fiables,
 la mini-carte, le calcul rapide, le rafraîchissement automatique, les curseurs de
 portée, le marqueur Bode, le guide de démarrage, les préférences
-d’accessibilité et leur persistance sont livrés. Le dockage libre reste hors
-périmètre et la persistance des projets appartient à la finalisation. Voir
-[UI.md](UI.md), [INSTRUMENTS.md](INSTRUMENTS.md) et [EDITOR.md](EDITOR.md).
+d’accessibilité, leur persistance et les projets JSON sont livrés. Le dockage
+libre reste hors périmètre. Voir [UI.md](UI.md), [INSTRUMENTS.md](INSTRUMENTS.md)
+et [EDITOR.md](EDITOR.md).
