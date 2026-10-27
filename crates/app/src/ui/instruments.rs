@@ -2020,6 +2020,7 @@ mod tests {
         let catalog = SignalCatalog {
             voltages: vec!["OUT".to_owned()],
             currents: Vec::new(),
+            components: Vec::new(),
             sources: Vec::new(),
         };
         state.ensure_catalog(&catalog);

@@ -15,10 +15,10 @@ sémantique.
   sondes, l’export et les portées empilées partagent désormais la même zone, avec
   les onglets **Portées**, **Spectre** et **Bode**. Les sondes sont regroupées
   avec les signaux directement dans les portées.
-- Les portées peuvent afficher les courants de **nets** (`I(nom)`) et les courants
-  de **composants** (`I(R1)`, `I(V1)`, etc.). Les courants de composants sont
-  dérivés comme les courants de nets : branches, résistances, interrupteurs,
-  condensateurs, diodes et sources.
+- Les portées peuvent afficher les tensions de **condensateurs** (`U(C1)`), les
+  courants de **nets** (`I(nom)`) et les courants de **composants** (`I(R1)`,
+  `I(V1)`, etc.). La tension d’un condensateur représente sa charge ; elle est
+  aussi visible au survol et dans l’inspecteur.
 - Un composant déposé au bout d’un fil ou sur une broche aligne maintenant une de
   ses broches sur la cible, au lieu de centrer le symbole sur le point d’accroche.
 - Nouvel exemple **RLC parallèle commuté** dans **Fichier → Exemples**, avec
