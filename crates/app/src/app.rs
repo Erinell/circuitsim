@@ -847,8 +847,8 @@ impl CircuitApp {
             } = self;
             egui::Panel::bottom("inline_scopes_panel")
                 .resizable(true)
-                .default_size(220.0)
-                .size_range(120.0..=560.0)
+                .default_size(320.0)
+                .size_range(140.0..=640.0)
                 .show(ui, |ui| {
                     scopes.show(ui, instruments, document, status);
                 });
