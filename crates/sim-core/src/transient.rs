@@ -155,6 +155,8 @@ pub enum TransientError {
     },
     #[error("transient analysis exceeds the maximum of {limit} integration steps")]
     TooManySteps { limit: usize },
+    #[error("live update requires the same netlist topology")]
+    TopologyChanged,
 }
 
 /// Solves a transient analysis with backward Euler and discrete events.
@@ -299,6 +301,18 @@ impl TransientSession {
         self.time
     }
 
+    /// Applies parameter changes while preserving time and dynamic state.
+    pub fn update_netlist(&mut self, netlist: &Netlist) -> Result<(), TransientError> {
+        if !same_topology(&self.working, netlist) {
+            return Err(TransientError::TopologyChanged);
+        }
+        let circuit = MnaCircuit::from_netlist(netlist)?;
+        self.working = netlist.clone();
+        self.circuit = circuit;
+        self.junction_voltages = self.circuit.junction_voltages(&self.previous);
+        Ok(())
+    }
+
     /// Advances exactly one fixed step.
     pub fn step(&mut self) -> Result<TransientSample, TransientError> {
         let time = self.time;
@@ -369,6 +383,21 @@ impl TransientSession {
             iterations: self.iterations,
         }
     }
+}
+
+fn same_topology(current: &Netlist, next: &Netlist) -> bool {
+    current.nodes == next.nodes
+        && current.components.len() == next.components.len()
+        && current
+            .components
+            .iter()
+            .zip(&next.components)
+            .all(|(left, right)| {
+                left.id == right.id
+                    && left.kind == right.kind
+                    && left.label == right.label
+                    && left.pins == right.pins
+            })
 }
 
 fn validate_options(options: &TransientOptions) -> Result<(), TransientError> {
