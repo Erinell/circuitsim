@@ -37,7 +37,8 @@ Le menu **Vue** masque chaque panneau, active la mini-carte et applique une
 disposition fiable : **Tout**, **Édition** (palette et inspecteur),
 **Simulation** (instruments et inspecteur) ou **Canevas** seul. Ces dispositions
 sont aussi accessibles par `Ctrl+1` à `Ctrl+4`. Les panneaux restent des zones
-fixes redimensionnables ; aucun dockage libre n'est proposé.
+fixes redimensionnables ; aucun dockage libre n'est proposé. Les boutons **«**
+et **»** replient directement la palette et l’inspecteur.
 
 Le canevas s'ajuste au contenu au démarrage et via **Ajuster**/`Home`. **Cadrer
 sél.**/`Ctrl+Home` cadre la sélection. La grille est entière avec un pas visuel
@@ -253,7 +254,8 @@ les formats de fichiers sont dans [INSTRUMENTS.md](INSTRUMENTS.md).
 
 Les raccourcis sont ignorés si un champ texte a le focus, à l’exception de
 `Ctrl+K` pour la palette de commandes. `Espace` et `F5` pilotent la session
-continue sans ouvrir de fenêtre.
+continue sans ouvrir de fenêtre. La fenêtre **Aide** est générée depuis la même
+table que les infobulles, afin d’éviter les divergences.
 
 ## 7. Atomicité, limites et tests
 

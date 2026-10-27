@@ -19,7 +19,7 @@ use crate::ui::palette::PaletteState;
 use crate::ui::project::ProjectDialog;
 use crate::ui::properties::{InspectorState, SymbolDialog};
 use crate::ui::scopes::InlineScopes;
-use crate::ui::shortcuts::Keymap;
+use crate::ui::shortcuts::{Keymap, SHORTCUTS};
 use crate::ui::theme::CanvasTheme;
 use crate::ui::{self, Status, Tool};
 
@@ -1707,33 +1707,9 @@ impl CircuitApp {
                     .num_columns(2)
                     .spacing([18.0, 3.0])
                     .show(ui, |ui| {
-                        shortcut(ui, "W / J / N", "outils Fil / Jonction / Label");
-                        shortcut(
-                            ui,
-                            "R C L D V G S",
-                            "placer résistance, condensateur, bobine, diode, source, masse, interrupteur",
-                        );
-                        shortcut(ui, "Maj+R / M", "pivoter / miroir");
-                        shortcut(ui, "R / F en pose", "tourner / miroir de l’aperçu");
-                        shortcut(ui, "Ctrl+K", "palette de commandes");
-                        shortcut(ui, "Alt+clic", "sélectionner tout le net");
-                        shortcut(ui, "Ctrl+C / Ctrl+V", "copier / coller avec aperçu");
-                        shortcut(ui, "Ctrl+D", "dupliquer la sélection");
-                        shortcut(ui, "Espace", "marche/arrêt de la simulation");
-                        shortcut(ui, "F5 / Ctrl+Entrée", "reset de la session");
-                        shortcut(ui, "Suppr", "supprimer la sélection");
-                        shortcut(ui, "Ctrl+Z", "annuler");
-                        shortcut(ui, "Ctrl+Y", "rétablir");
-                        shortcut(ui, "Ctrl+A", "tout sélectionner");
-                        shortcut(ui, "Échap", "annuler l'outil, le collage ou la sélection");
-                        shortcut(ui, "? / F1", "ouvrir ou fermer cette aide");
-                        shortcut(ui, "Ctrl+Maj+A", "préférences d’affichage et accessibilité");
-                        shortcut(ui, "Home", "ajuster la vue au schéma");
-                        shortcut(ui, "Ctrl+Home", "cadrer la sélection");
-                        shortcut(ui, "+ / -", "zoom avant / arrière");
-                        shortcut(ui, "0", "zoom 100 %");
-                        shortcut(ui, "Flèches", "déplacer la vue (Maj : pas rapide)");
-                        shortcut(ui, "Ctrl+1…4", "Tout, Édition, Simulation, Canevas");
+                        for entry in SHORTCUTS {
+                            shortcut(ui, entry.keys, entry.action);
+                        }
                     });
                 ui.add_space(6.0);
                 ui.label(RichText::new("Simulation").strong());
@@ -1836,14 +1812,32 @@ impl eframe::App for CircuitApp {
                 .resizable(true)
                 .default_size(248.0)
                 .size_range(220.0..=330.0)
-                .show(ui, |ui| self.palette(ui));
+                .show(ui, |ui| {
+                    if ui
+                        .small_button("«")
+                        .on_hover_text("Replier la palette")
+                        .clicked()
+                    {
+                        self.show_palette = false;
+                    }
+                    self.palette(ui);
+                });
         }
         if self.show_inspector {
             egui::Panel::right("inspector_panel")
                 .resizable(true)
                 .default_size(335.0)
                 .size_range(280.0..=470.0)
-                .show(ui, |ui| self.inspector(ui));
+                .show(ui, |ui| {
+                    if ui
+                        .small_button("»")
+                        .on_hover_text("Replier l'inspecteur")
+                        .clicked()
+                    {
+                        self.show_inspector = false;
+                    }
+                    self.inspector(ui);
+                });
         }
         egui::CentralPanel::no_frame().show(ui, |ui| self.central(ui));
 
@@ -1872,7 +1866,7 @@ fn apply_style(context: &Context, preferences: DisplayPreferences) {
     context.all_styles_mut(|style| {
         style.spacing.item_spacing = egui::vec2(7.0, 5.0);
         style.spacing.button_padding = egui::vec2(8.0, 4.0);
-        style.animation_time = if preferences.reduce_motion { 0.0 } else { 0.2 };
+        style.animation_time = if preferences.reduce_motion { 0.0 } else { 0.15 };
         style
             .text_styles
             .insert(egui::TextStyle::Heading, FontId::proportional(19.0));

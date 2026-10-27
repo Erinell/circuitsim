@@ -35,6 +35,8 @@ sémantique.
 - Écran **À propos** avec version, licence et licences tierces.
 - Projets JSON versionnés : copie, chargement, lecture/enregistrement natif,
   téléchargement web et revalidation avant remplacement du document.
+- Aide générée depuis la table unique des raccourcis, panneaux repliables et
+  animations limitées à 150 ms.
 
 ### Changed
 
