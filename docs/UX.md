@@ -223,6 +223,9 @@ Les raccourcis sont ignorés lorsqu’un champ texte a le focus, à l’exceptio
 - **Projet** sérialise le schéma en JSON versionné, permet de le copier, de le
   charger après collage et, selon la plateforme, de lire/enregistrer un fichier
   ou de le télécharger. Un JSON invalide est refusé sans toucher au schéma.
+- Les animations d’interface sont limitées à 150 ms et désactivables. Les
+  actions principales ont un libellé, une infobulle et un raccourci issu de la
+  même table que l’aide.
 - `Tab` et `Maj+Tab` parcourent les contrôles, `Entrée` active, `Échap` ferme.
   Toutes les actions principales ont un libellé texte et une infobulle.
 - Les préférences sont appliquées immédiatement et enregistrées
