@@ -606,9 +606,57 @@ fn derive_current(symbol: &Symbol, voltage: f64) -> Option<f64> {
             .get("resistance")
             .and_then(ParamValue::as_number),
         SymbolKind::Switch => symbol.params.get("ron").and_then(ParamValue::as_number),
+        SymbolKind::CurrentSource => {
+            return symbol.params.get("dc").and_then(ParamValue::as_number);
+        }
+        SymbolKind::Diode | SymbolKind::Led | SymbolKind::Zener => {
+            return diode_params_current(&symbol.params, symbol.kind == SymbolKind::Zener, voltage);
+        }
         _ => None,
     }?;
     (resistance.abs() > f64::MIN_POSITIVE).then_some(voltage / resistance)
+}
+
+fn diode_params_current(
+    params: &sim_core::netlist::ParamMap,
+    zener: bool,
+    voltage: f64,
+) -> Option<f64> {
+    const THERMAL_VOLTAGE: f64 = 0.025_864_925_786_329;
+    let number = |key: &str| {
+        params
+            .get(key)
+            .and_then(ParamValue::as_number)
+            .filter(|value| value.is_finite())
+    };
+    let emission = number("n").unwrap_or(2.0);
+    if emission <= 0.0 {
+        return None;
+    }
+    let saturation = number("is").or_else(|| {
+        let forward_voltage = number("vf")?;
+        let forward_current = number("if")?;
+        let denominator = (forward_voltage / (emission * THERMAL_VOLTAGE))
+            .min(80.0)
+            .exp()
+            - 1.0;
+        (denominator > 0.0).then_some(forward_current / denominator)
+    })?;
+    let forward = (voltage / (emission * THERMAL_VOLTAGE)).min(80.0).exp();
+    let mut current = saturation * (forward - 1.0);
+    if zener {
+        let breakdown = number("bv")?;
+        let breakdown_saturation = number("ibv")?;
+        let breakdown_emission = number("nbv")?;
+        if breakdown_emission <= 0.0 {
+            return None;
+        }
+        let reverse = (-(voltage + breakdown) / (breakdown_emission * THERMAL_VOLTAGE))
+            .min(80.0)
+            .exp();
+        current -= breakdown_saturation * (reverse - 1.0);
+    }
+    Some(current)
 }
 
 /// Simulation error rendered in French by the interface.
@@ -1417,35 +1465,7 @@ fn derived_component_current(
 }
 
 fn diode_current(spec: &ComponentSpec, voltage: f64) -> Option<f64> {
-    const THERMAL_VOLTAGE: f64 = 0.025_864_925_786_329;
-    let emission = component_number(spec, "n").unwrap_or(2.0);
-    if emission <= 0.0 {
-        return None;
-    }
-    let saturation = component_number(spec, "is").or_else(|| {
-        let forward_voltage = component_number(spec, "vf")?;
-        let forward_current = component_number(spec, "if")?;
-        let denominator = (forward_voltage / (emission * THERMAL_VOLTAGE))
-            .min(80.0)
-            .exp()
-            - 1.0;
-        (denominator > 0.0).then_some(forward_current / denominator)
-    })?;
-    let forward = (voltage / (emission * THERMAL_VOLTAGE)).min(80.0).exp();
-    let mut current = saturation * (forward - 1.0);
-    if spec.kind == ComponentKind::Zener {
-        let breakdown = component_number(spec, "bv")?;
-        let breakdown_saturation = component_number(spec, "ibv")?;
-        let breakdown_emission = component_number(spec, "nbv")?;
-        if breakdown_emission <= 0.0 {
-            return None;
-        }
-        let reverse = (-(voltage + breakdown) / (breakdown_emission * THERMAL_VOLTAGE))
-            .min(80.0)
-            .exp();
-        current -= breakdown_saturation * (reverse - 1.0);
-    }
-    Some(current)
+    diode_params_current(&spec.params, spec.kind == ComponentKind::Zener, voltage)
 }
 
 fn component_number(spec: &ComponentSpec, key: &str) -> Option<f64> {

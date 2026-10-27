@@ -3,6 +3,7 @@
 pub mod canvas;
 pub mod command_palette;
 pub mod controls;
+pub mod diagnostics;
 pub mod erc;
 pub mod glyph;
 pub mod history;
@@ -167,6 +168,10 @@ pub fn symbol_kind_name(kind: &SymbolKind) -> &'static str {
 pub const ACCENT: Color32 = Color32::from_rgb(255, 190, 92);
 /// Color for hovered objects.
 pub const HOVER: Color32 = Color32::from_rgb(120, 210, 220);
+/// Amber overcurrent warning shared by panels and scopes.
+pub const WARNING: Color32 = Color32::from_rgb(240, 176, 64);
+/// Red critical overcurrent shared by panels and scopes.
+pub const CRITICAL: Color32 = Color32::from_rgb(235, 82, 82);
 /// Background behind the schematic.
 pub const CANVAS_BACKGROUND: Color32 = Color32::from_rgb(15, 21, 31);
 /// Wire color.

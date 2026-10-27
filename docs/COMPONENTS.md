@@ -27,17 +27,19 @@ négatif. En AC, `AcExcitation.magnitude` est une amplitude crête et
 
 | Composant | Paramètre (défaut) | DC | Transitoire | AC |
 | --- | --- | --- | --- | --- |
-| `Resistor` | `resistance = 1000` Ω | `i = v/R` | `i = v/R` | conductance `1/R` |
-| `Capacitor` | `capacitance = 1e-6` F | ouvert | `i = C dv/dt`, Euler arrière | `jωC` |
-| `Inductor` | `inductance = 1e-3` H, `resistance = 0.01` Ω | `v = R i` (court-circuit si `R = 0`) | `v = R i + L di/dt` | `R + jωL` |
-| `VoltageSource` | `dc = 5` V | `v(a)-v(b)=dc` | valeur après événements | phasor |
-| `CurrentSource` | `dc = 1e-3` A | `dc` de `a` vers `b` | valeur après événements | phasor |
+| `Resistor` | `resistance = 1000` Ω, `imax = 0.25` A | `i = v/R` | `i = v/R` | conductance `1/R` |
+| `Capacitor` | `capacitance = 1e-6` F, `imax = 1` A | ouvert | `i = C dv/dt`, Euler arrière | `jωC` |
+| `Inductor` | `inductance = 1e-3` H, `resistance = 0.01` Ω, `imax = 0.5` A | `v = R i` (court-circuit si `R = 0`) | `v = R i + L di/dt` | `R + jωL` |
+| `VoltageSource` | `dc = 5` V, `imax = 1` A | `v(a)-v(b)=dc` | valeur après événements | phasor |
+| `CurrentSource` | `dc = 1e-3` A, `imax = 1` A | `dc` de `a` vers `b` | valeur après événements | phasor |
 | `Ground` | aucun | `0 V` | `0 V` | `0 V` |
 
 `resistance`, `capacitance` et `inductance` doivent être strictement positives ;
 la résistance série d’une inductance peut être nulle. Une source peut être nulle
 ou négative, mais finie. Une source de tension ou une inductance avec deux
-broches identiques est refusée (`DegenerateBranch`).
+broches identiques est refusée (`DegenerateBranch`). `imax` est une limite
+d’affichage et de diagnostic, jamais utilisée par le solveur ; une valeur nulle
+ou absente désactive l’alerte.
 
 En DC, `C` est ouvert et `L` se réduit à sa résistance série. En transitoire, `C`
 devient une conductance `C/h` avec source équivalente et `L` conserve son courant
@@ -49,6 +51,7 @@ avec sa résistance. En AC, `C` devient `jωC` et `L` vaut `R + jωL`.
 | --- | --- | --- | --- |
 | `ron` | nombre | `1e-3` Ω | résistance fermée |
 | `roff` | nombre | `1e18` Ω | résistance ouverte |
+| `imax` | nombre | `1` A | courant maximal d'affichage |
 | `closed` | booléen | `false` | état logique |
 
 Le solveur choisit `ron` si `closed`, sinon `roff` ; pas d'hystérésis ni de
@@ -94,10 +97,10 @@ I(v) = I_direct(v) + I_bd(v)
 ```
 
 Le Zener réutilise `is = 1e-14` A et `n = 1` pour le terme direct. `bv` (défaut
-`5.1` V), `ibv` (`1e-3` A) et `nbv` (`1`) sont strictement positifs. Le terme est
-nul au seuil et devient négatif au-delà. La pente AC inclut le claquage ;
-résistance dynamique indépendante, bruit, capacité et température ne sont pas
-modélisés.
+`5.1` V), `ibv` (`1e-3` A), `nbv` (`1`) et `imax` (`0.2` A) sont strictement
+positifs. Le terme est nul au seuil et devient négatif au-delà. La pente AC
+inclut le claquage ; résistance dynamique indépendante, bruit, capacité et
+température ne sont pas modélisés.
 
 ## 5. Amplificateur opérationnel
 

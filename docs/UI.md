@@ -49,15 +49,25 @@ adaptatif. La fenêtre native s'ouvre maximisée ; les fenêtres **Démarrage**,
 Les fils sont épaissis et colorés selon la tension du net après simulation :
 dégradé bleu/gris/orange par défaut, variante cyan/gris/magenta, avec une
 légende `-V / 0 / +V`. Le menu **Afficher** règle indépendamment les calques
-Tension, Courant, Puissance, Valeurs, Références et Labels de nets. Les erreurs
-ERC restent rouges et prioritaires. Le flux de courant utilise des points jaunes
-à halo sombre, avec densité et vitesse proportionnelles au courant et un choix
-entre sens conventionnel et sens des électrons ; un interrupteur ouvert coupe
-l’animation. Un halo de puissance discret entoure les composants non résistifs,
-avec une luminosité réglable. **Vue → Courant animé** reste un raccourci pour le
-calque courant. Une LED rayonne derrière son symbole lorsque sa tension directe
-dépasse son seuil, avec un halo réduit au dézoom, et un clic sur un interrupteur
-l'ouvre ou le ferme.
+Tension, Courant, Surintensités, Puissance, Valeurs, Références et Labels de nets.
+Les erreurs ERC restent rouges et prioritaires. Le flux de courant utilise des
+points jaunes à halo sombre, avec densité et vitesse proportionnelles au courant
+et un choix entre sens conventionnel et sens des électrons ; un interrupteur
+ouvert coupe l’animation. Un halo de puissance discret entoure les composants non
+résistifs, avec une luminosité réglable. **Vue → Courant animé** reste un
+raccourci pour le calque courant. Une LED rayonne derrière son symbole lorsque sa
+tension directe dépasse son seuil, avec un halo réduit au dézoom, et un clic sur
+un interrupteur l'ouvre ou le ferme.
+La **surintensité** est une surcouche de sécurité indépendante de la couleur de
+tension : liseré ambre entre 80 et 100 % de la limite, rouge au-delà, badge
+`I / Imax` sur le fil et triangle `!` sur le composant. Aucun halo de puissance
+n'est réutilisé et le fil garde sa couleur de tension. Le dézoom conserve le
+liseré et, pour le critique, le badge. La surcouche est statique : elle ne
+clignote pas et respecte donc la réduction des animations. La limite des
+fils/nets se règle dans **Afficher → Limite des fils** (1 A par défaut) ; les
+composants utilisent leur paramètre `imax`. Le survol affiche le courant exact,
+la limite, le pourcentage et la sévérité. Sans transitoire à jour, aucune alerte
+n'est dessinée.
 Une extrémité libre d'un fil peut être tirée le long de son axe pour l'allonger
 ou le raccourcir ; les extrémités connectées ne sont pas redimensionnables. La
 mini-carte du coin inférieur droit montre le contenu, la sélection et la fenêtre
@@ -183,7 +193,10 @@ ou un avertissement ERC est dessiné en rouge.
 L'extraction est recalculée après chaque commande acceptée. Le panneau ERC
 affiche les compteurs et les diagnostics triés ; un clic sélectionne l'objet
 correspondant s'il existe. L'ERC est un rapport : seule une erreur structurelle
-d'extraction bloque les nets et les analyses.
+d'extraction bloque les nets et les analyses. La section **Surintensités** de
+l'inspecteur liste les composants et nets au-dessus de 80 %, avec courant,
+limite, pourcentage et sévérité ; un clic sélectionne et cadre l'objet. La liste
+est vide sans simulation valide et les résultats antérieurs sont masqués.
 
 ## 5. Instruments
 
@@ -209,6 +222,9 @@ live.
   placé dans les contrôles, avec l’aide des gestes. Le menu **Affichage** règle la
   superposition ou la séparation des
   signaux, l’échelle Y automatique ou manuelle et la vue temporelle ou FFT. Les
+  courants de composants et de nets affichent une **ligne de limite** en ambre,
+  les segments au-delà en rouge, et une annotation de pic, de pourcentage et de
+  durée de dépassement dans la colonne des valeurs. Les
   curseurs A/B se posent au clic et affichent tA, tB, Δt et les valeurs par
   signal. **Figer** conserve le tracé, **Effacer** le vide, les flèches
   réordonnent, **Fusionner** joint la portée suivante et **Supprimer** la retire.

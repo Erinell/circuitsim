@@ -8,6 +8,18 @@ sémantique.
 
 ### Added
 
+- **Surintensités** sur le canevas : liseré ambre de 80 à 100 % et rouge au-delà
+  de 100 %, badge `I / Imax` sur les fils, contour et triangle `!` sur les
+  composants. La couleur de tension est conservée et aucun halo de puissance
+  n’est réutilisé. Le survol donne courant, limite, pourcentage et sévérité.
+- Paramètre `imax` étendu aux résistances, condensateurs, bobines, sources,
+  interrupteurs et Zeners, avec une **limite de fil/net** réglable dans
+  **Afficher** (1 A par défaut).
+- Portées : ligne de limite ambre, segments rouges au-delà et annotation de pic,
+  de pourcentage et de durée.
+- Liste **Surintensités** cliquable dans l’inspecteur pour sélectionner et cadrer
+  le composant ou le fil concerné. Aucune alerte n’est produite sans simulation à
+  jour.
 - Choix **Diode / Diode Schottky** dans l’inspecteur, avec préréglages `vf`,
   `if`, `n`, `imax` et dérivation de `is`. Le symbole Schottky est dessiné avec
   ses crochets de cathode.

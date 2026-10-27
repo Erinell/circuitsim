@@ -36,6 +36,8 @@ impl CanvasTheme {
                 minimap_background: Color32::from_rgba_premultiplied(12, 18, 28, 230),
                 live_badge: Color32::from_rgba_premultiplied(20, 30, 44, 228),
                 wire_error: Color32::from_rgb(255, 92, 92),
+                warning: Color32::from_rgb(255, 176, 48),
+                critical: Color32::from_rgb(255, 92, 92),
                 flow_color: Color32::from_rgb(255, 236, 140),
                 flow_halo: Color32::from_rgba_premultiplied(20, 24, 12, 210),
             },
@@ -56,6 +58,8 @@ impl CanvasTheme {
                 minimap_background: Color32::from_rgba_premultiplied(0, 0, 0, 240),
                 live_badge: Color32::from_rgba_premultiplied(0, 0, 0, 235),
                 wire_error: Color32::from_rgb(255, 80, 80),
+                warning: Color32::from_rgb(255, 215, 0),
+                critical: Color32::from_rgb(255, 80, 80),
                 flow_color: Color32::from_rgb(255, 255, 0),
                 flow_halo: Color32::from_rgba_premultiplied(0, 0, 0, 230),
             },
@@ -76,6 +80,8 @@ impl CanvasTheme {
                 minimap_background: Color32::from_rgba_premultiplied(238, 241, 246, 240),
                 live_badge: Color32::from_rgba_premultiplied(250, 250, 252, 235),
                 wire_error: Color32::from_rgb(196, 40, 40),
+                warning: Color32::from_rgb(166, 96, 0),
+                critical: Color32::from_rgb(190, 30, 30),
                 flow_color: Color32::from_rgb(180, 96, 0),
                 flow_halo: Color32::from_rgba_premultiplied(255, 250, 235, 220),
             },
@@ -118,6 +124,10 @@ pub struct CanvasPalette {
     pub live_badge: Color32,
     /// ERC-problem wire color.
     pub wire_error: Color32,
+    /// Amber overcurrent warning.
+    pub warning: Color32,
+    /// Red critical overcurrent.
+    pub critical: Color32,
     /// Current-flow dot color.
     pub flow_color: Color32,
     /// Current-flow dot halo.
@@ -191,6 +201,9 @@ pub struct LayerSettings {
     pub voltage: bool,
     /// Animated current dots.
     pub current: bool,
+    /// Overcurrent outlines and badges.
+    #[serde(default = "default_true")]
+    pub overcurrent: bool,
     /// Power glow around components.
     pub power: bool,
     /// Component values.
@@ -206,6 +219,7 @@ impl Default for LayerSettings {
         Self {
             voltage: true,
             current: true,
+            overcurrent: true,
             power: true,
             values: true,
             references: true,
@@ -231,6 +245,9 @@ pub struct CanvasSettings {
     pub small_grid: bool,
     /// Multiplier applied to value text.
     pub value_scale: f32,
+    /// Current allowed in a wire or net, in amperes.
+    #[serde(default = "default_wire_current_limit")]
+    pub wire_current_limit: f64,
 }
 
 impl Default for CanvasSettings {
@@ -243,6 +260,7 @@ impl Default for CanvasSettings {
             resistor_style: ResistorStyle::default(),
             small_grid: false,
             value_scale: 1.0,
+            wire_current_limit: crate::overcurrent::DEFAULT_WIRE_CURRENT_LIMIT,
         }
     }
 }
@@ -252,6 +270,14 @@ impl CanvasSettings {
     pub const fn palette(self) -> CanvasPalette {
         self.theme.palette()
     }
+}
+
+const fn default_true() -> bool {
+    true
+}
+
+fn default_wire_current_limit() -> f64 {
+    crate::overcurrent::DEFAULT_WIRE_CURRENT_LIMIT
 }
 
 /// Symmetric voltage range used to normalize wire colors.
@@ -389,9 +415,14 @@ mod tests {
     fn display_layers_and_palettes_are_independent() {
         let mut settings = CanvasSettings::default();
         assert!(settings.layers.voltage);
+        assert!(settings.layers.overcurrent);
         settings.layers.voltage = false;
         assert!(!settings.layers.voltage);
         assert!(settings.layers.current);
+        assert_eq!(
+            settings.wire_current_limit,
+            crate::overcurrent::DEFAULT_WIRE_CURRENT_LIMIT
+        );
         settings.voltage_palette = VoltagePalette::HighVisibility;
         assert_eq!(settings.voltage_palette, VoltagePalette::HighVisibility);
         assert_ne!(
@@ -401,6 +432,32 @@ mod tests {
         assert_ne!(
             CanvasTheme::Dark.palette().background,
             CanvasTheme::Light.palette().background
+        );
+    }
+
+    #[test]
+    fn older_canvas_settings_keep_the_overcurrent_layer_enabled() {
+        let json = r#"{
+            "theme": "Dark",
+            "layers": {
+                "voltage": true,
+                "current": true,
+                "power": true,
+                "values": true,
+                "references": true,
+                "net_labels": true
+            },
+            "voltage_palette": "Colorblind",
+            "current_direction": "Conventional",
+            "resistor_style": "European",
+            "small_grid": false,
+            "value_scale": 1.0
+        }"#;
+        let settings: CanvasSettings = serde_json::from_str(json).unwrap();
+        assert!(settings.layers.overcurrent);
+        assert_eq!(
+            settings.wire_current_limit,
+            crate::overcurrent::DEFAULT_WIRE_CURRENT_LIMIT
         );
     }
 
@@ -418,6 +475,8 @@ mod tests {
                 ("wire", palette.wire, 3.0),
                 ("symbol", palette.symbol, 3.0),
                 ("accent", palette.accent, 3.0),
+                ("warning", palette.warning, 3.0),
+                ("critical", palette.critical, 3.0),
             ] {
                 let ratio = contrast_ratio(color, palette.background);
                 assert!(ratio >= minimum, "{theme:?} {name}: {ratio:.2} < {minimum}");

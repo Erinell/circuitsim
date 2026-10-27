@@ -528,11 +528,24 @@ impl CircuitApp {
             let settings = self.canvas.settings_mut();
             ui.checkbox(&mut settings.layers.voltage, "Tension des fils");
             ui.checkbox(&mut settings.layers.current, "Courant");
+            ui.checkbox(&mut settings.layers.overcurrent, "Surintensités");
             ui.checkbox(&mut settings.layers.power, "Puissance");
             ui.checkbox(&mut settings.layers.values, "Valeurs");
             ui.checkbox(&mut settings.layers.references, "Références");
             ui.checkbox(&mut settings.layers.net_labels, "Labels de nets");
             ui.checkbox(&mut settings.small_grid, "Petite grille");
+            ui.horizontal(|ui| {
+                ui.label("Limite des fils");
+                ui.add(
+                    egui::DragValue::new(&mut settings.wire_current_limit)
+                        .speed(0.01)
+                        .range(1e-6..=1_000.0)
+                        .suffix(" A"),
+                )
+                .on_hover_text(
+                    "Courant maximal d'un fil ou d'un net ; 80 % déclenche l'ambre, 100 % le rouge",
+                );
+            });
             ui.separator();
             for layout in LayoutPreset::ALL {
                 if ui.button(layout.label()).clicked() {
@@ -739,6 +752,16 @@ impl CircuitApp {
                 );
                 history::show(ui, &mut self.document, &mut self.status);
                 ui::erc::show(ui, &mut self.document, &mut self.status);
+                let settings = *self.canvas.settings();
+                ui::diagnostics::show(
+                    ui,
+                    &mut self.document,
+                    &live,
+                    settings.wire_current_limit,
+                    settings.layers.overcurrent,
+                    &mut self.canvas,
+                    &mut self.status,
+                );
             });
     }
 
@@ -1572,6 +1595,7 @@ impl eframe::App for CircuitApp {
             .resizable(false)
             .show(ui, |ui| self.status_bar(ui));
         if self.show_instruments {
+            let wire_limit = self.canvas.settings().wire_current_limit;
             let CircuitApp {
                 instruments,
                 scopes,
@@ -1584,7 +1608,7 @@ impl eframe::App for CircuitApp {
                 .default_size(324.0)
                 .size_range(210.0..=620.0)
                 .show(ui, |ui| {
-                    instruments.show(ui, scopes, document, status);
+                    instruments.show(ui, scopes, document, status, wire_limit);
                 });
         }
         if self.show_palette {

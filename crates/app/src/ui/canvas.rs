@@ -12,13 +12,17 @@ use eframe::egui::{
 use sim_core::units::{format_si_precision, Unit};
 
 use crate::analysis::{LiveValues, ProbeReading, SignalId};
+use crate::currents::{net_current, net_flows, wire_current, wire_currents};
 use crate::document::{
     format_parameter, parameter_unit, ActionError, ClipboardItem, Document, SelectionChange,
     SelectionMode, WireEnd,
 };
+use crate::overcurrent::{self, Severity};
 use crate::ui::controls::{control_fraction, control_value, ParameterControls};
 use crate::ui::glyph::{paint_symbol, GlyphColors, SymbolText};
-use crate::ui::theme::{CanvasSettings, CanvasTheme, CurrentDirection, VoltageScale};
+use crate::ui::theme::{
+    CanvasPalette, CanvasSettings, CanvasTheme, CurrentDirection, VoltageScale,
+};
 use crate::ui::{symbol_kind_name, Status, MUTED};
 use crate::view::{MinimapTransform, Viewport, DEFAULT_SCALE};
 
@@ -27,8 +31,6 @@ const MINIMAP_HEIGHT: f32 = 112.0;
 const MINIMAP_MARGIN: f32 = 12.0;
 const ZOOM_STEP: f32 = 1.25;
 const ENDPOINT_RADIUS: f32 = 11.0;
-/// Leakage below this value must not animate a wire.
-const MIN_FLOW_CURRENT: f64 = 1e-7;
 
 /// Canvas interaction state that survives between frames.
 pub struct CanvasState {
@@ -1357,6 +1359,49 @@ impl CanvasState {
         let problem_wires = document.problem_wires();
         let (wire_voltages, voltage_scale) = voltage_data(document, live);
         let max_power = max_component_power(document, live);
+        let overcurrent_enabled = self.settings.layers.overcurrent
+            && !live.is_empty()
+            && live.document_revision == document.revision();
+        let wire_limit = self.settings.wire_current_limit;
+        let wire_current_map = if overcurrent_enabled {
+            wire_currents(document, live)
+        } else {
+            BTreeMap::new()
+        };
+        let net_flow_map = if overcurrent_enabled {
+            net_flows(document, live)
+        } else {
+            BTreeMap::new()
+        };
+        let mut net_badges: BTreeMap<WireId, (f64, f64, Severity)> = BTreeMap::new();
+        if overcurrent_enabled {
+            for net in document.nets() {
+                let mut best: Option<(WireId, f64)> = None;
+                for id in &net.wires {
+                    let current = wire_current_map.get(id).copied().unwrap_or(0.0).abs();
+                    let replace = match best {
+                        None => true,
+                        Some((best_id, best_current)) => {
+                            current > best_current || (current == best_current && id.0 < best_id.0)
+                        }
+                    };
+                    if replace {
+                        best = Some((*id, current));
+                    }
+                }
+                let current = best.map(|(_, current)| current).unwrap_or(0.0).max(
+                    net_flow_map
+                        .get(net.name.as_str())
+                        .map_or(0.0, |flow| flow.strength),
+                );
+                let severity = overcurrent::severity(current, Some(wire_limit));
+                if severity.is_alert() {
+                    if let Some((id, _)) = best {
+                        net_badges.insert(id, (current, wire_limit, severity));
+                    }
+                }
+            }
+        }
         for wire in document.schematic().wires() {
             let selected = document.selection().contains(&ObjectRef::Wire(wire.id));
             let hovered = self.hover == Some(ObjectRef::Wire(wire.id));
@@ -1371,6 +1416,21 @@ impl CanvasState {
                 .map_or(palette.wire, |(scale, value)| {
                     scale.color(value, self.settings.voltage_palette)
                 });
+            let severity = if overcurrent_enabled {
+                overcurrent::severity(
+                    wire_current_map.get(&wire.id).copied().unwrap_or(0.0),
+                    Some(wire_limit),
+                )
+            } else {
+                Severity::None
+            };
+            let width = if selected {
+                5.2
+            } else if hovered || net_hovered {
+                4.2
+            } else {
+                3.2
+            };
             if problem {
                 painter.line_segment(
                     [
@@ -1389,19 +1449,25 @@ impl CanvasState {
                     Stroke::new(7.0, palette.hover.gamma_multiply(0.25)),
                 );
             }
+            if severity.is_alert() {
+                painter.line_segment(
+                    [
+                        self.viewport.grid_to_screen(rect, wire.a),
+                        self.viewport.grid_to_screen(rect, wire.b),
+                    ],
+                    Stroke::new(
+                        width + 4.2,
+                        overcurrent_color(palette, severity).gamma_multiply(0.34),
+                    ),
+                );
+            }
             painter.line_segment(
                 [
                     self.viewport.grid_to_screen(rect, wire.a),
                     self.viewport.grid_to_screen(rect, wire.b),
                 ],
                 Stroke::new(
-                    if selected {
-                        5.2
-                    } else if hovered || net_hovered {
-                        4.2
-                    } else {
-                        3.2
-                    },
+                    width,
                     if problem {
                         palette.wire_error
                     } else if selected {
@@ -1413,6 +1479,20 @@ impl CanvasState {
                     },
                 ),
             );
+            if severity.is_alert() {
+                if let Some((current, limit, badge_severity)) = net_badges.get(&wire.id) {
+                    if *badge_severity == Severity::Critical || self.viewport.scale() >= 6.0 {
+                        self.paint_wire_badge(
+                            painter,
+                            rect,
+                            wire,
+                            *current,
+                            *limit,
+                            *badge_severity,
+                        );
+                    }
+                }
+            }
         }
 
         for symbol in document.schematic().symbols() {
@@ -1488,6 +1568,38 @@ impl CanvasState {
                     1.2,
                 );
             }
+            if overcurrent_enabled {
+                if let Some(limit) = overcurrent::component_limit(symbol) {
+                    if let Some(current) = live.symbol(document, symbol).current {
+                        let severity = overcurrent::severity(current, Some(limit));
+                        if severity.is_alert() {
+                            let color = overcurrent_color(palette, severity);
+                            paint_symbol_outline(
+                                painter,
+                                document,
+                                symbol,
+                                &self.viewport,
+                                rect,
+                                color,
+                                2.4,
+                            );
+                            let center = self.viewport.grid_to_screen(rect, symbol.at)
+                                + Vec2::new(
+                                    self.viewport.scale() * 1.35,
+                                    -self.viewport.scale() * 1.35,
+                                );
+                            let radius = (self.viewport.scale() * 0.3).clamp(5.0, 8.5);
+                            paint_alert_triangle(
+                                painter,
+                                center,
+                                radius,
+                                color,
+                                palette.background,
+                            );
+                        }
+                    }
+                }
+            }
         }
 
         for junction in document.schematic().junctions() {
@@ -1545,6 +1657,49 @@ impl CanvasState {
             painter.circle_filled(position, 2.8, color);
             painter.galley(text_rect.min, galley, color);
         }
+    }
+
+    fn paint_wire_badge(
+        &self,
+        painter: &Painter,
+        rect: Rect,
+        wire: &editor_core::Wire,
+        current: f64,
+        limit: f64,
+        severity: Severity,
+    ) {
+        let palette = self.settings.palette();
+        let color = overcurrent_color(palette, severity);
+        let start = self.viewport.grid_to_screen(rect, wire.a);
+        let end = self.viewport.grid_to_screen(rect, wire.b);
+        let anchor = start + (end - start) * 0.5 + Vec2::new(0.0, -8.0);
+        let text = format!(
+            "{} / {}",
+            format_si_precision(current, Unit::Ampere, 3),
+            format_si_precision(limit, Unit::Ampere, 3)
+        );
+        let galley = painter.layout_no_wrap(text, FontId::proportional(10.0), color);
+        let size = Vec2::new(galley.size().x + 22.0, galley.size().y + 6.0);
+        let badge = Align2::CENTER_BOTTOM.anchor_size(anchor, size);
+        painter.rect_filled(badge, 4.0, palette.panel_badge);
+        painter.rect_stroke(
+            badge,
+            4.0,
+            Stroke::new(1.0, color.gamma_multiply(0.85)),
+            StrokeKind::Inside,
+        );
+        paint_alert_triangle(
+            painter,
+            Pos2::new(badge.left() + 9.0, badge.center().y),
+            4.5,
+            color,
+            palette.background,
+        );
+        painter.galley(
+            Pos2::new(badge.left() + 17.0, badge.top() + 3.0),
+            galley,
+            color,
+        );
     }
 
     fn paint_simulation_badge(
@@ -1775,9 +1930,9 @@ impl CanvasState {
                         }
                         if let Some(net) = &pin.net {
                             if let Some(current) = net_current(document, live, net) {
-                                lines.push(format!(
-                                    "I : {}",
-                                    format_si_precision(current, Unit::Ampere, 3)
+                                lines.push(current_line(
+                                    current,
+                                    Some(self.settings.wire_current_limit),
                                 ));
                             }
                         }
@@ -1823,9 +1978,9 @@ impl CanvasState {
                                 }
                             }
                             if let Some(current) = observed.current {
-                                lines.push(format!(
-                                    "I : {}",
-                                    format_si_precision(current, Unit::Ampere, 3)
+                                lines.push(current_line(
+                                    current,
+                                    overcurrent::component_limit(symbol),
                                 ));
                             }
                             if let Some(power) = observed.power {
@@ -1851,9 +2006,9 @@ impl CanvasState {
                             if let Some(current) = wire_current(document, live, id)
                                 .or_else(|| net_current(document, live, &net))
                             {
-                                lines.push(format!(
-                                    "I : {}",
-                                    format_si_precision(current.abs(), Unit::Ampere, 3)
+                                lines.push(current_line(
+                                    current,
+                                    Some(self.settings.wire_current_limit),
                                 ));
                             }
                             if live.document_revision != document.revision() {
@@ -1871,9 +2026,9 @@ impl CanvasState {
                                 ));
                             }
                             if let Some(current) = net_current(document, live, &net) {
-                                lines.push(format!(
-                                    "I : {}",
-                                    format_si_precision(current, Unit::Ampere, 3)
+                                lines.push(current_line(
+                                    current,
+                                    Some(self.settings.wire_current_limit),
                                 ));
                             }
                             if live.document_revision != document.revision() {
@@ -2915,248 +3070,6 @@ impl Default for CanvasState {
     }
 }
 
-struct NetFlow {
-    source: GridPos,
-    away: bool,
-    strength: f64,
-}
-
-fn net_flows(document: &Document, live: &LiveValues) -> BTreeMap<String, NetFlow> {
-    let mut flows: BTreeMap<String, NetFlow> = BTreeMap::new();
-    for symbol in document.schematic().symbols() {
-        if symbol.kind.is_measurement() {
-            continue;
-        }
-        let Some(definition) = document.registry().get(&symbol.kind) else {
-            continue;
-        };
-        if definition.pins.len() != 2 {
-            continue;
-        }
-        if symbol.kind == editor_core::SymbolKind::Switch
-            && !symbol
-                .params
-                .get("closed")
-                .and_then(sim_core::netlist::ParamValue::as_bool)
-                .unwrap_or(false)
-        {
-            continue;
-        }
-        let observed = live.symbol(document, symbol);
-        let current = observed.current.or_else(|| {
-            (symbol.kind == editor_core::SymbolKind::CurrentSource)
-                .then(|| {
-                    symbol
-                        .params
-                        .get("dc")
-                        .and_then(sim_core::netlist::ParamValue::as_number)
-                })
-                .flatten()
-        });
-        let Some(current) = current else {
-            continue;
-        };
-        for (index, injection) in [-current, current].into_iter().enumerate() {
-            if !injection.is_finite() {
-                continue;
-            }
-            let strength = injection.abs();
-            if strength <= f64::MIN_POSITIVE {
-                continue;
-            }
-            let Some(pin) = observed.pins.get(index) else {
-                continue;
-            };
-            let Some(net) = pin.net.as_deref() else {
-                continue;
-            };
-            let Some(position) = symbol.pin_position_of(&definition.pins[index]) else {
-                continue;
-            };
-            let candidate = NetFlow {
-                source: position,
-                away: injection > 0.0,
-                strength,
-            };
-            let replace = match flows.get(net) {
-                None => true,
-                Some(existing) => {
-                    strength > existing.strength
-                        || (strength == existing.strength && candidate.away && !existing.away)
-                }
-            };
-            if replace {
-                flows.insert(net.to_owned(), candidate);
-            }
-        }
-    }
-    let strongest = flows
-        .values()
-        .map(|flow| flow.strength)
-        .fold(0.0_f64, f64::max);
-    if strongest < MIN_FLOW_CURRENT {
-        flows.clear();
-        return flows;
-    }
-    let threshold = (strongest * 1e-4).max(MIN_FLOW_CURRENT * 0.5);
-    flows.retain(|_, flow| flow.strength >= threshold);
-    flows
-}
-
-fn net_current(document: &Document, live: &LiveValues, net: &str) -> Option<f64> {
-    if live.is_empty() {
-        return None;
-    }
-    Some(
-        net_flows(document, live)
-            .get(net)
-            .map_or(0.0, |flow| flow.strength),
-    )
-}
-
-fn wire_current(document: &Document, live: &LiveValues, wire_id: WireId) -> Option<f64> {
-    let net = document
-        .nets()
-        .iter()
-        .find(|net| net.wires.contains(&wire_id))?;
-    let mut node_index = BTreeMap::new();
-    let mut node_points = Vec::new();
-    for id in &net.wires {
-        let wire = document.wire(*id)?;
-        for point in [wire.a, wire.b] {
-            let next = node_points.len();
-            node_index.entry(point).or_insert_with(|| {
-                node_points.push(point);
-                next
-            });
-        }
-    }
-    if node_points.is_empty() {
-        return None;
-    }
-    let node_count = node_points.len();
-    let mut adjacency: Vec<Vec<(usize, WireId, bool)>> = vec![Vec::new(); node_count];
-    for id in &net.wires {
-        let wire = document.wire(*id)?;
-        let a = *node_index.get(&wire.a)?;
-        let b = *node_index.get(&wire.b)?;
-        adjacency[a].push((b, *id, true));
-        adjacency[b].push((a, *id, false));
-    }
-    for neighbours in &mut adjacency {
-        neighbours.sort_by_key(|(_, id, _)| u8::from(*id != wire_id));
-    }
-
-    let mut injections = vec![0.0_f64; node_count];
-    let mut unknown = vec![0_usize; node_count];
-    for symbol in document.schematic().symbols() {
-        if symbol.kind.is_measurement() {
-            continue;
-        }
-        let Some(definition) = document.registry().get(&symbol.kind) else {
-            continue;
-        };
-        if definition.pins.len() != 2 {
-            continue;
-        }
-        let observed = live.symbol(document, symbol);
-        let current = observed.current.or_else(|| current_source_dc(symbol));
-        for (index, pin) in definition.pins.iter().enumerate() {
-            let Some(position) = symbol.pin_position_of(pin) else {
-                continue;
-            };
-            let Some(&node) = node_index.get(&position) else {
-                continue;
-            };
-            let Some(pin_net) = observed.pins.get(index).and_then(|pin| pin.net.as_deref()) else {
-                continue;
-            };
-            if pin_net != net.name.as_str() {
-                continue;
-            }
-            match current {
-                Some(current) if current.is_finite() => {
-                    injections[node] += if index == 0 { -current } else { current };
-                }
-                _ => unknown[node] += 1,
-            }
-        }
-    }
-    let residual: f64 = injections.iter().sum();
-    let unknowns: usize = unknown.iter().sum();
-    if unknowns > 0 && residual.is_finite() && residual.abs() > f64::MIN_POSITIVE {
-        let correction = residual / unknowns as f64;
-        for (node, count) in unknown.iter().enumerate() {
-            if *count > 0 {
-                injections[node] -= correction * *count as f64;
-            }
-        }
-    }
-
-    let root = injections
-        .iter()
-        .enumerate()
-        .max_by(|(_, left), (_, right)| {
-            left.abs()
-                .partial_cmp(&right.abs())
-                .unwrap_or(std::cmp::Ordering::Equal)
-        })
-        .map_or(0, |(index, _)| index);
-    let mut parent = vec![usize::MAX; node_count];
-    let mut parent_edge: Vec<Option<(WireId, bool)>> = vec![None; node_count];
-    let mut order = Vec::with_capacity(node_count);
-    let mut stack = vec![root];
-    parent[root] = root;
-    while let Some(node) = stack.pop() {
-        order.push(node);
-        for (next, id, forward) in &adjacency[node] {
-            if parent[*next] == usize::MAX {
-                parent[*next] = node;
-                parent_edge[*next] = Some((*id, *forward));
-                stack.push(*next);
-            }
-        }
-    }
-
-    let wire = document.wire(wire_id)?;
-    let a = *node_index.get(&wire.a)?;
-    let b = *node_index.get(&wire.b)?;
-    let (child, child_is_b) = if parent[b] == a {
-        (b, true)
-    } else if parent[a] == b {
-        (a, false)
-    } else {
-        return None;
-    };
-    let mut subtree = injections;
-    let mut hovered = None;
-    for node in order.into_iter().rev() {
-        if node == root {
-            continue;
-        }
-        let Some((edge, _)) = parent_edge[node] else {
-            continue;
-        };
-        let flow = subtree[node];
-        if node == child && edge == wire_id {
-            hovered = Some(if child_is_b { -flow } else { flow });
-        }
-        subtree[parent[node]] += flow;
-    }
-    hovered
-}
-
-fn current_source_dc(symbol: &Symbol) -> Option<f64> {
-    (symbol.kind == editor_core::SymbolKind::CurrentSource)
-        .then(|| {
-            symbol
-                .params
-                .get("dc")
-                .and_then(sim_core::netlist::ParamValue::as_number)
-        })
-        .flatten()
-}
-
 fn wire_directions(
     document: &Document,
     net: &editor_core::ExtractedNet,
@@ -3279,6 +3192,57 @@ fn report(status: &mut Status, result: Result<(), ActionError>, success: &str) {
         Ok(()) => status.success(success),
         Err(error) => status.error(error.user_message()),
     }
+}
+
+fn overcurrent_color(palette: CanvasPalette, severity: Severity) -> Color32 {
+    match severity {
+        Severity::Critical => palette.critical,
+        Severity::Warning => palette.warning,
+        Severity::None => palette.wire,
+    }
+}
+
+fn current_line(current: f64, limit: Option<f64>) -> String {
+    match limit.and_then(overcurrent::valid_limit) {
+        Some(limit) => format!(
+            "I : {}",
+            overcurrent::format_limit_line(
+                current,
+                limit,
+                overcurrent::severity(current, Some(limit))
+            )
+        ),
+        None => format!(
+            "I : {}",
+            format_si_precision(current.abs(), Unit::Ampere, 3)
+        ),
+    }
+}
+
+fn paint_alert_triangle(
+    painter: &Painter,
+    center: Pos2,
+    radius: f32,
+    color: Color32,
+    text_color: Color32,
+) {
+    let points = vec![
+        Pos2::new(center.x, center.y - radius),
+        Pos2::new(center.x + radius * 0.95, center.y + radius * 0.8),
+        Pos2::new(center.x - radius * 0.95, center.y + radius * 0.8),
+    ];
+    painter.add(egui::Shape::convex_polygon(
+        points,
+        color,
+        Stroke::new(1.0, text_color.gamma_multiply(0.7)),
+    ));
+    painter.text(
+        center + Vec2::new(0.0, radius * 0.18),
+        Align2::CENTER_CENTER,
+        "!",
+        FontId::proportional((radius * 1.4).max(7.0)),
+        text_color,
+    );
 }
 
 fn paint_symbol_outline(

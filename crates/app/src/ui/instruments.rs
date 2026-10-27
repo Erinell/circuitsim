@@ -455,6 +455,7 @@ impl InstrumentsState {
         scopes: &mut InlineScopes,
         document: &Document,
         status: &mut Status,
+        wire_limit: f64,
     ) {
         let now = ui.input(|input| input.time);
         self.poll(now, status);
@@ -481,7 +482,7 @@ impl InstrumentsState {
         let height = ui.available_height().max(120.0);
         match self.tab {
             InstrumentTab::Scope => {
-                self.scope_tab(ui, scopes, document, &catalog, status, height);
+                self.scope_tab(ui, scopes, document, &catalog, status, height, wire_limit);
             }
             InstrumentTab::Spectrum | InstrumentTab::Bode => {
                 ui.horizontal_top(|ui| {
@@ -530,6 +531,7 @@ impl InstrumentsState {
         }
     }
 
+    #[allow(clippy::too_many_arguments)]
     fn scope_tab(
         &mut self,
         ui: &mut Ui,
@@ -538,6 +540,7 @@ impl InstrumentsState {
         catalog: &SignalCatalog,
         status: &mut Status,
         height: f32,
+        wire_limit: f64,
     ) {
         let now = ui.input(|input| input.time);
         self.scope_signals = scopes.active_signals();
@@ -619,7 +622,7 @@ impl InstrumentsState {
                 Vec2::new(plot_width, height),
                 Layout::top_down(Align::Min),
                 |ui| {
-                    scopes.show(ui, self, document, status);
+                    scopes.show(ui, self, document, status, wire_limit);
                 },
             );
         });
@@ -1970,7 +1973,13 @@ mod tests {
                 .frame(Frame::NONE)
                 .show(ui, |ui| {
                     let mut scopes = InlineScopes::with_signals(state.selected_signals());
-                    state.show(ui, &mut scopes, document, &mut status);
+                    state.show(
+                        ui,
+                        &mut scopes,
+                        document,
+                        &mut status,
+                        crate::overcurrent::DEFAULT_WIRE_CURRENT_LIMIT,
+                    );
                 });
         })
     }

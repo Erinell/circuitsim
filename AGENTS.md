@@ -140,7 +140,7 @@ Le MOSFET reste un exemple d'extension (`examples/custom_mosfet.rs`) ; les types
 | G6 ergonomie du scope | terminé |
 | G7 onboarding et accessibilité | terminé |
 | G8 finalisation `v0.2.0` | terminé |
-| Refonte ergonomique v0.5 et correctifs runtime, lots U1–U7 | terminé |
+| Refonte ergonomique v0.5 (U1–U7), surintensités et diagnostics | terminé |
 
 ## Limites finales
 
