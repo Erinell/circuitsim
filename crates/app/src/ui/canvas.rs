@@ -25,6 +25,8 @@ const MINIMAP_HEIGHT: f32 = 112.0;
 const MINIMAP_MARGIN: f32 = 12.0;
 const ZOOM_STEP: f32 = 1.25;
 const ENDPOINT_RADIUS: f32 = 11.0;
+/// Leakage below this value must not animate a wire.
+const MIN_FLOW_CURRENT: f64 = 1e-7;
 
 /// Canvas interaction state that survives between frames.
 pub struct CanvasState {
@@ -38,6 +40,7 @@ pub struct CanvasState {
     hover_net: BTreeSet<ObjectRef>,
     snap_target: Option<SnapTarget>,
     last_pointer_grid: Option<GridPos>,
+    context_menu_point: Option<GridPos>,
     paste_preview: bool,
     fit_requested: bool,
     pending_fit: Option<(GridPos, GridPos)>,
@@ -104,6 +107,7 @@ impl CanvasState {
             hover_net: BTreeSet::new(),
             snap_target: None,
             last_pointer_grid: None,
+            context_menu_point: None,
             paste_preview: false,
             fit_requested: true,
             pending_fit: None,
@@ -155,6 +159,12 @@ impl CanvasState {
     /// Returns the last snapped pointer position, if any.
     pub const fn last_pointer_grid(&self) -> Option<GridPos> {
         self.last_pointer_grid
+    }
+
+    fn remember_context_point(&mut self, opened: bool, current: Option<GridPos>) {
+        if opened {
+            self.context_menu_point = current;
+        }
     }
 
     /// Rotates the placement ghost.
@@ -782,7 +792,8 @@ impl CanvasState {
         document: &mut Document,
         status: &mut Status,
     ) {
-        let point = self.last_pointer_grid;
+        self.remember_context_point(response.secondary_clicked(), self.last_pointer_grid);
+        let point = self.context_menu_point;
         response.context_menu(|ui| {
             let Some(point) = point else {
                 ui.label("Aucun emplacement sous le curseur.");
@@ -1377,8 +1388,14 @@ impl CanvasState {
                 },
                 resistor: self.settings.resistor_style,
             };
-            if self.settings.layers.power && symbol.kind != editor_core::SymbolKind::Led {
+            if self.settings.layers.power
+                && symbol.kind != editor_core::SymbolKind::Led
+                && supports_power_glow(&symbol.kind)
+            {
                 self.paint_power_glow(painter, rect, document, symbol, live, max_power);
+            }
+            if symbol.kind == editor_core::SymbolKind::Led {
+                self.paint_led_glow(painter, rect, document, symbol, live);
             }
             paint_symbol(
                 painter,
@@ -1391,12 +1408,8 @@ impl CanvasState {
                     labels: self.settings.layers.references,
                     values: self.settings.layers.values,
                     scale: self.settings.value_scale,
-                    value_offset: self.value_offset(document, symbol, rect),
                 },
             );
-            if symbol.kind == editor_core::SymbolKind::Led {
-                self.paint_led_glow(painter, rect, document, symbol, live);
-            }
             if selected {
                 paint_symbol_outline(
                     painter,
@@ -1531,7 +1544,7 @@ impl CanvasState {
         }
         let intensity = (power / max_power).sqrt().clamp(0.0, 1.0) as f32;
         let center = self.viewport.grid_to_screen(rect, symbol.at);
-        let radius = (self.viewport.scale() * 1.9).clamp(10.0, 36.0);
+        let radius = (self.viewport.scale() * 1.2).clamp(4.0, 22.0);
         painter.circle_filled(
             center,
             radius,
@@ -1539,43 +1552,19 @@ impl CanvasState {
                 255,
                 120,
                 48,
-                (70.0 * intensity * self.power_brightness) as u8,
+                (45.0 * intensity * self.power_brightness) as u8,
             ),
         );
         painter.circle_filled(
             center,
-            radius * 0.62,
+            radius * 0.55,
             Color32::from_rgba_premultiplied(
                 255,
                 190,
                 90,
-                (95.0 * intensity * self.power_brightness) as u8,
+                (65.0 * intensity * self.power_brightness) as u8,
             ),
         );
-    }
-
-    fn value_offset(&self, document: &Document, symbol: &Symbol, rect: Rect) -> Vec2 {
-        let scale = self.viewport.scale();
-        let center = self.viewport.grid_to_screen(rect, symbol.at);
-        let base = Vec2::new(0.0, scale * 2.35);
-        let candidates = [
-            base,
-            base + Vec2::new(0.0, -scale * 4.7),
-            base + Vec2::new(scale * 2.9, -scale * 2.15),
-            base + Vec2::new(-scale * 2.9, -scale * 2.15),
-        ];
-        for offset in candidates {
-            let point = center + offset;
-            let blocked = document.schematic().wires().any(|wire| {
-                let a = self.viewport.grid_to_screen(rect, wire.a);
-                let b = self.viewport.grid_to_screen(rect, wire.b);
-                segment_distance(point, a, b) < 14.0
-            });
-            if !blocked {
-                return offset - base;
-            }
-        }
-        Vec2::ZERO
     }
 
     fn paint_scope_markers(&self, painter: &Painter, rect: Rect, document: &Document) {
@@ -1997,24 +1986,25 @@ impl CanvasState {
             return;
         }
         let center = self.viewport.grid_to_screen(rect, symbol.at);
+        let zoom_fade = (self.viewport.scale() / 20.0).clamp(0.3, 1.0);
         painter.circle_filled(
             center,
-            (self.viewport.scale() * 2.2).clamp(10.0, 42.0),
+            (self.viewport.scale() * 1.5).clamp(3.0, 26.0),
             Color32::from_rgba_premultiplied(
                 255,
                 220,
                 60,
-                (90.0 * brightness * self.power_brightness) as u8,
+                (70.0 * brightness * self.power_brightness * zoom_fade) as u8,
             ),
         );
         painter.circle_filled(
             center,
-            (self.viewport.scale() * 1.3).clamp(6.0, 26.0),
+            (self.viewport.scale() * 0.85).clamp(2.0, 15.0),
             Color32::from_rgba_premultiplied(
                 255,
                 245,
                 170,
-                (150.0 * brightness * self.power_brightness) as u8,
+                (120.0 * brightness * self.power_brightness * zoom_fade) as u8,
             ),
         );
     }
@@ -2829,6 +2819,15 @@ fn net_flows(document: &Document, live: &LiveValues) -> BTreeMap<String, NetFlow
         if definition.pins.len() != 2 {
             continue;
         }
+        if symbol.kind == editor_core::SymbolKind::Switch
+            && !symbol
+                .params
+                .get("closed")
+                .and_then(sim_core::netlist::ParamValue::as_bool)
+                .unwrap_or(false)
+        {
+            continue;
+        }
         let observed = live.symbol(document, symbol);
         let current = observed.current.or_else(|| {
             (symbol.kind == editor_core::SymbolKind::CurrentSource)
@@ -2877,6 +2876,16 @@ fn net_flows(document: &Document, live: &LiveValues) -> BTreeMap<String, NetFlow
             }
         }
     }
+    let strongest = flows
+        .values()
+        .map(|flow| flow.strength)
+        .fold(0.0_f64, f64::max);
+    if strongest < MIN_FLOW_CURRENT {
+        flows.clear();
+        return flows;
+    }
+    let threshold = (strongest * 1e-4).max(MIN_FLOW_CURRENT * 0.5);
+    flows.retain(|_, flow| flow.strength >= threshold);
     flows
 }
 
@@ -2966,14 +2975,17 @@ fn format_hover_parameter(
     }
 }
 
-fn segment_distance(point: Pos2, a: Pos2, b: Pos2) -> f32 {
-    let ab = b - a;
-    let length_squared = ab.length_sq();
-    if length_squared <= f32::EPSILON {
-        return (point - a).length();
-    }
-    let t = ((point - a).dot(ab) / length_squared).clamp(0.0, 1.0);
-    (point - (a + ab * t)).length()
+fn supports_power_glow(kind: &editor_core::SymbolKind) -> bool {
+    !matches!(
+        kind,
+        editor_core::SymbolKind::Resistor
+            | editor_core::SymbolKind::Switch
+            | editor_core::SymbolKind::Led
+            | editor_core::SymbolKind::Ground
+            | editor_core::SymbolKind::Voltmeter
+            | editor_core::SymbolKind::Ammeter
+            | editor_core::SymbolKind::Ohmmeter
+    )
 }
 
 fn report(status: &mut Status, result: Result<(), ActionError>, success: &str) {
@@ -3006,13 +3018,24 @@ fn paint_symbol_outline(
             }
         }
     }
-    let margin = viewport.scale() * 1.05;
+    let margin = viewport.scale() * 0.25;
     if symbol.kind.is_ground() {
         min.x -= viewport.scale() * 1.2;
         max.x += viewport.scale() * 1.2;
         min.y -= viewport.scale() * 0.5;
         max.y += viewport.scale() * 1.8;
     } else {
+        let half = crate::ui::glyph::body_half_extent(&symbol.kind) * viewport.scale();
+        match symbol.orientation {
+            editor_core::Orientation::R0 | editor_core::Orientation::R180 => {
+                min.y = min.y.min(center.y - half);
+                max.y = max.y.max(center.y + half);
+            }
+            editor_core::Orientation::R90 | editor_core::Orientation::R270 => {
+                min.x = min.x.min(center.x - half);
+                max.x = max.x.max(center.x + half);
+            }
+        }
         min -= Vec2::splat(margin);
         max += Vec2::splat(margin);
     }
@@ -3367,6 +3390,14 @@ mod tests {
     }
 
     #[test]
+    fn context_menu_target_freezes_when_the_pointer_moves() {
+        let mut canvas = CanvasState::new();
+        canvas.remember_context_point(true, Some(GridPos::new(1, 2)));
+        canvas.remember_context_point(false, Some(GridPos::new(9, 9)));
+        assert_eq!(canvas.context_menu_point, Some(GridPos::new(1, 2)));
+    }
+
+    #[test]
     fn current_flow_uses_simulated_currents() {
         let document = Document::demo().unwrap();
         let resistor = document
@@ -3393,6 +3424,50 @@ mod tests {
         assert!(document
             .symbol(resistor.id)
             .is_some_and(|symbol| symbol.kind == editor_core::SymbolKind::Resistor));
+    }
+
+    #[test]
+    fn an_open_switch_stops_the_animated_flow() {
+        let mut document = Document::switch_example().unwrap();
+        let leakage = document
+            .schematic()
+            .symbols()
+            .filter(|symbol| !symbol.kind.is_measurement())
+            .map(|symbol| (symbol.label.clone(), 5e-9))
+            .collect::<BTreeMap<_, _>>();
+        let live = LiveValues {
+            document_revision: document.revision(),
+            time: Some(1e-3),
+            node_voltages: BTreeMap::new(),
+            branch_currents: leakage,
+        };
+        assert!(net_flows(&document, &live).is_empty());
+
+        let switch = document
+            .schematic()
+            .symbols()
+            .find(|symbol| symbol.kind == editor_core::SymbolKind::Switch)
+            .unwrap()
+            .clone();
+        let mut closed = switch.clone();
+        closed.params.insert(
+            "closed".to_owned(),
+            sim_core::netlist::ParamValue::Bool(true),
+        );
+        document.update_symbol(closed).unwrap();
+        let flowing = document
+            .schematic()
+            .symbols()
+            .filter(|symbol| !symbol.kind.is_measurement())
+            .map(|symbol| (symbol.label.clone(), 5e-3))
+            .collect::<BTreeMap<_, _>>();
+        let live = LiveValues {
+            document_revision: document.revision(),
+            time: Some(1e-3),
+            node_voltages: BTreeMap::new(),
+            branch_currents: flowing,
+        };
+        assert!(!net_flows(&document, &live).is_empty());
     }
 
     #[test]

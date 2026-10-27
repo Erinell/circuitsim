@@ -33,8 +33,6 @@ pub struct SymbolText {
     pub values: bool,
     /// Multiplier applied to the value font.
     pub scale: f32,
-    /// Extra offset added to the value position.
-    pub value_offset: Vec2,
 }
 
 impl SymbolText {
@@ -43,7 +41,6 @@ impl SymbolText {
         labels: false,
         values: false,
         scale: 1.0,
-        value_offset: Vec2::ZERO,
     };
 }
 
@@ -93,7 +90,7 @@ pub fn paint_symbol(
             )
         } else {
             (
-                center + Vec2::new(0.0, -scale * 2.25),
+                center + Vec2::new(0.0, -scale * (text_half_height(symbol) + 0.25)),
                 Align2::CENTER_BOTTOM,
             )
         };
@@ -105,17 +102,37 @@ pub fn paint_symbol(
             let font = FontId::proportional((scale * 0.56 * text.scale).clamp(8.0, 18.0));
             let (position, anchor) = if symbol.kind.is_ground() {
                 (
-                    center + Vec2::new(scale * 1.35, scale * 1.0) + text.value_offset,
+                    center + Vec2::new(scale * 1.35, scale * 1.0),
                     Align2::LEFT_CENTER,
                 )
             } else {
                 (
-                    center + Vec2::new(0.0, scale * 2.35) + text.value_offset,
+                    center + Vec2::new(0.0, scale * (text_half_height(symbol) + 0.15)),
                     Align2::CENTER_TOP,
                 )
             };
             painter.text(position, anchor, value, font, colors.value);
         }
+    }
+}
+
+/// Perpendicular half-extent of a glyph body in grid units.
+pub(crate) fn body_half_extent(kind: &SymbolKind) -> f32 {
+    match kind {
+        SymbolKind::Resistor | SymbolKind::Inductor => 0.65,
+        SymbolKind::Capacitor => 0.9,
+        SymbolKind::Diode | SymbolKind::Led | SymbolKind::Zener | SymbolKind::Switch => 0.8,
+        SymbolKind::OpAmp => 1.5,
+        SymbolKind::Ground => 1.4,
+        _ => 1.0,
+    }
+}
+
+/// Half-height of a glyph in grid units, used to keep text close to its body.
+fn text_half_height(symbol: &Symbol) -> f32 {
+    match symbol.orientation {
+        editor_core::Orientation::R90 | editor_core::Orientation::R270 => 2.0,
+        _ => body_half_extent(&symbol.kind).max(0.95),
     }
 }
 
@@ -269,7 +286,7 @@ fn paint_body(
                 symbol,
                 center,
                 scale,
-                &[(-0.32, -0.32), (0.32, -0.32)],
+                &[(-0.68, 0.0), (-0.22, 0.0)],
                 stroke,
             );
             line_local(
@@ -277,7 +294,7 @@ fn paint_body(
                 symbol,
                 center,
                 scale,
-                &[(0.0, -0.64), (0.0, 0.0)],
+                &[(-0.45, -0.23), (-0.45, 0.23)],
                 stroke,
             );
             line_local(
@@ -285,7 +302,7 @@ fn paint_body(
                 symbol,
                 center,
                 scale,
-                &[(-0.32, 0.48), (0.32, 0.48)],
+                &[(0.22, 0.0), (0.68, 0.0)],
                 stroke,
             );
         }
@@ -705,6 +722,30 @@ mod tests {
             false,
         );
         assert_eq!(symbol_value(&symbol).as_deref(), Some("1 kΩ"));
+    }
+
+    #[test]
+    fn text_stays_close_to_the_symbol_body() {
+        let registry = SymbolRegistry::builtin();
+        let definition = registry.get(&SymbolKind::Resistor).unwrap();
+        let horizontal = Symbol::from_def(
+            SymbolId(1),
+            definition,
+            GridPos::new(0, 0),
+            "R1",
+            Orientation::R0,
+            false,
+        );
+        assert!((text_half_height(&horizontal) - 0.95).abs() < f32::EPSILON);
+        let vertical = Symbol::from_def(
+            SymbolId(2),
+            definition,
+            GridPos::new(0, 0),
+            "R2",
+            Orientation::R90,
+            false,
+        );
+        assert_eq!(text_half_height(&vertical), 2.0);
     }
 
     #[test]

@@ -5,21 +5,22 @@ use std::time::Duration;
 
 use editor_core::{SymbolId, SymbolKind};
 use eframe::egui::{self, Align, Align2, Color32, FontId, Layout, RichText, Ui, Vec2};
-use egui_plot::{Corner, HoverPosition, Legend, Line, Plot};
+use egui_plot::{HoverPosition, Line, Plot};
 use sim_core::units::{format_si_precision, Unit};
 use worker::protocol::{AnalysisKind, AnalysisResult};
 
 #[cfg(test)]
 use crate::analysis::prepare_transient;
 use crate::analysis::{
-    analysis_name, bode_csv, bode_trace, compute_spectrum, measurements, prepare_ac,
-    probe_readings, spectrum_csv, transient_csv, transient_traces, transient_traces_from_samples,
-    AcSettings, BodePoint, BodeTrace, CompletedRun, SignalCatalog, SignalId, SignalUnit,
-    SimulationClient, SimulationError, Spectrum, Trace, TransientSettings, MAX_AC_POINTS,
+    analysis_name, bode_csv, bode_trace, compute_spectrum, prepare_ac, probe_readings,
+    spectrum_csv, transient_csv, transient_traces, transient_traces_from_samples, AcSettings,
+    BodePoint, BodeTrace, CompletedRun, SignalCatalog, SignalId, SignalUnit, SimulationClient,
+    SimulationError, Spectrum, Trace, TransientSettings, MAX_AC_POINTS,
 };
 use crate::document::Document;
 use crate::export;
 use crate::simulation::{LiveSimulation, TickOutcome, LIVE_SPEEDS};
+use crate::ui::scopes::InlineScopes;
 use crate::ui::{Status, ACCENT, HOVER, MUTED, SYMBOL};
 
 const ERROR: Color32 = Color32::from_rgb(240, 128, 128);
@@ -50,7 +51,7 @@ impl InstrumentTab {
 
     const fn label(self) -> &'static str {
         match self {
-            Self::Scope => "Portée",
+            Self::Scope => "Portées",
             Self::Spectrum => "Spectre",
             Self::Bode => "Bode",
         }
@@ -80,47 +81,16 @@ pub struct InstrumentsState {
     error: Option<String>,
     selection_initialized: bool,
     auto_refresh: bool,
+    scope_signals: BTreeSet<SignalId>,
     realtime: Option<LiveSimulation>,
     realtime_speed: f64,
     animation_speed: f64,
     power_brightness: f32,
     live_error: Option<String>,
     diagnostic_request: bool,
-    scope_cursor_a: Option<f64>,
-    scope_cursor_b: Option<f64>,
-    scope_active_cursor: CursorSlot,
     bode_cursor: Option<f64>,
     hidden_probes: BTreeSet<SymbolId>,
     export_path: String,
-}
-
-/// Active scope cursor selected by the controls.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-enum CursorSlot {
-    #[default]
-    A,
-    B,
-}
-
-impl CursorSlot {
-    const fn label(self) -> &'static str {
-        match self {
-            Self::A => "A",
-            Self::B => "B",
-        }
-    }
-}
-
-/// Values read at the two time cursors for one trace.
-#[derive(Clone, Debug, PartialEq)]
-struct CursorMeasurement {
-    signal: SignalId,
-    value_a: Option<f64>,
-    value_b: Option<f64>,
-    delta: Option<f64>,
-    interval_min: Option<f64>,
-    interval_max: Option<f64>,
-    interval_rms: Option<f64>,
 }
 
 impl InstrumentsState {
@@ -143,16 +113,14 @@ impl InstrumentsState {
             pending: None,
             error: None,
             selection_initialized: false,
-            auto_refresh: false,
+            auto_refresh: true,
+            scope_signals: BTreeSet::new(),
             realtime: None,
             realtime_speed: 1.0,
             animation_speed: 1.0,
             power_brightness: 0.6,
             live_error: None,
             diagnostic_request: false,
-            scope_cursor_a: None,
-            scope_cursor_b: None,
-            scope_active_cursor: CursorSlot::A,
             bode_cursor: None,
             hidden_probes: BTreeSet::new(),
             export_path: default_export_path(),
@@ -168,9 +136,6 @@ impl InstrumentsState {
         self.realtime = None;
         self.live_error = None;
         self.selection_initialized = false;
-        self.scope_cursor_a = None;
-        self.scope_cursor_b = None;
-        self.scope_active_cursor = CursorSlot::A;
         self.bode_cursor = None;
     }
 
@@ -261,6 +226,11 @@ impl InstrumentsState {
     /// Returns whether edits trigger an automatic transient refresh.
     pub const fn auto_refresh(&self) -> bool {
         self.auto_refresh
+    }
+
+    /// Brings the merged scope tab to the front.
+    pub fn focus_scopes(&mut self) {
+        self.tab = InstrumentTab::Scope;
     }
 
     /// Enables or disables automatic transient refresh.
@@ -452,8 +422,14 @@ impl InstrumentsState {
         std::mem::take(&mut self.diagnostic_request)
     }
 
-    /// Draws the bottom instrument panel.
-    pub fn show(&mut self, ui: &mut Ui, document: &Document, status: &mut Status) {
+    /// Draws the merged instruments and scopes panel.
+    pub fn show(
+        &mut self,
+        ui: &mut Ui,
+        scopes: &mut InlineScopes,
+        document: &Document,
+        status: &mut Status,
+    ) {
         let now = ui.input(|input| input.time);
         self.poll(now, status);
 
@@ -477,9 +453,77 @@ impl InstrumentsState {
         }
 
         let height = ui.available_height().max(120.0);
+        match self.tab {
+            InstrumentTab::Scope => {
+                self.scope_tab(ui, scopes, document, &catalog, status, height);
+            }
+            InstrumentTab::Spectrum | InstrumentTab::Bode => {
+                ui.horizontal_top(|ui| {
+                    ui.allocate_ui_with_layout(
+                        Vec2::new(CONTROL_WIDTH, height),
+                        Layout::top_down(Align::Min),
+                        |ui| {
+                            egui::ScrollArea::vertical()
+                                .id_salt("instrument_controls")
+                                .max_height(height)
+                                .auto_shrink([false, false])
+                                .show(ui, |ui| {
+                                    self.controls(ui, document, &catalog, now, status);
+                                });
+                        },
+                    );
+                    ui.separator();
+                    let remaining = ui.available_width();
+                    let side_width = if remaining > 460.0 { 178.0 } else { 0.0 };
+                    let plot_width = (remaining - side_width - 8.0).max(120.0);
+                    ui.allocate_ui_with_layout(
+                        Vec2::new(plot_width, height),
+                        Layout::top_down(Align::Min),
+                        |ui| {
+                            self.plots(ui);
+                        },
+                    );
+                    if side_width > 0.0 {
+                        ui.separator();
+                        ui.allocate_ui_with_layout(
+                            Vec2::new(side_width, height),
+                            Layout::top_down(Align::Min),
+                            |ui| {
+                                egui::ScrollArea::vertical()
+                                    .id_salt("live_controls")
+                                    .max_height(height)
+                                    .auto_shrink([false, false])
+                                    .show(ui, |ui| {
+                                        self.live_controls(ui, document, now, status);
+                                    });
+                            },
+                        );
+                    }
+                });
+            }
+        }
+    }
+
+    fn scope_tab(
+        &mut self,
+        ui: &mut Ui,
+        scopes: &mut InlineScopes,
+        document: &Document,
+        catalog: &SignalCatalog,
+        status: &mut Status,
+        height: f32,
+    ) {
+        let now = ui.input(|input| input.time);
+        self.scope_signals = scopes.active_signals();
+        if scopes.is_empty() && !self.selected.is_empty() {
+            scopes.push_signals(self.selected.clone());
+        }
+        let available = ui.available_width();
+        let control_width =
+            ((available * 0.4).clamp(220.0, CONTROL_WIDTH)).min((available - 180.0).max(150.0));
         ui.horizontal_top(|ui| {
             ui.allocate_ui_with_layout(
-                Vec2::new(CONTROL_WIDTH, height),
+                Vec2::new(control_width, height),
                 Layout::top_down(Align::Min),
                 |ui| {
                     egui::ScrollArea::vertical()
@@ -487,38 +531,26 @@ impl InstrumentsState {
                         .max_height(height)
                         .auto_shrink([false, false])
                         .show(ui, |ui| {
-                            self.controls(ui, document, &catalog, now, status);
+                            self.live_controls(ui, document, now, status);
+                            ui.separator();
+                            self.probe_controls(ui, document, catalog, scopes);
+                            ui.separator();
+                            self.export_controls(ui, status);
                         });
                 },
             );
             ui.separator();
-            let remaining = ui.available_width();
-            let side_width = if remaining > 460.0 { 178.0 } else { 0.0 };
-            let plot_width = (remaining - side_width - 8.0).max(120.0);
+            let plot_width = ui.available_width().max(160.0);
             ui.allocate_ui_with_layout(
                 Vec2::new(plot_width, height),
                 Layout::top_down(Align::Min),
                 |ui| {
-                    self.plots(ui);
+                    let instruments: &InstrumentsState = self;
+                    scopes.show(ui, instruments, document, status);
                 },
             );
-            if side_width > 0.0 {
-                ui.separator();
-                ui.allocate_ui_with_layout(
-                    Vec2::new(side_width, height),
-                    Layout::top_down(Align::Min),
-                    |ui| {
-                        egui::ScrollArea::vertical()
-                            .id_salt("live_controls")
-                            .max_height(height)
-                            .auto_shrink([false, false])
-                            .show(ui, |ui| {
-                                self.live_controls(ui, document, now, status);
-                            });
-                    },
-                );
-            }
         });
+        self.scope_signals = scopes.active_signals();
     }
 
     fn live_controls(&mut self, ui: &mut Ui, document: &Document, now: f64, status: &mut Status) {
@@ -696,9 +728,7 @@ impl InstrumentsState {
             ui.colored_label(ERROR, error);
         }
         match self.tab {
-            InstrumentTab::Scope => {
-                self.scope_controls(ui, document, catalog, now, status);
-            }
+            InstrumentTab::Scope => {}
             InstrumentTab::Spectrum => {
                 self.spectrum_controls(ui, document, catalog, now, status);
             }
@@ -710,69 +740,13 @@ impl InstrumentsState {
         self.export_controls(ui, status);
     }
 
-    fn scope_controls(
+    fn probe_controls(
         &mut self,
         ui: &mut Ui,
         document: &Document,
         catalog: &SignalCatalog,
-        now: f64,
-        status: &mut Status,
+        scopes: &mut InlineScopes,
     ) {
-        let traces = self.current_traces();
-        if let Ok(Some(available)) = &traces {
-            if !available.is_empty() {
-                self.scope_cursor_controls(ui, available);
-                ui.separator();
-            }
-        }
-        let can_run = self.can_run(document);
-        let mut speed = self.realtime_speed;
-        let paused = self.realtime_paused();
-        let running = self.realtime_active();
-        let ratio = self.live_ratio();
-        let lagging = self.live_lagging();
-        let action = realtime_controls(
-            ui,
-            &mut self.transient,
-            catalog,
-            can_run,
-            &mut speed,
-            paused,
-            running,
-            ratio,
-            lagging,
-        );
-        if speed != self.realtime_speed {
-            self.set_realtime_speed(speed);
-        }
-        if matches!(action, RealtimeAction::Start) {
-            self.start_realtime(document, now, status);
-        } else if matches!(action, RealtimeAction::TogglePause) {
-            let paused = self.realtime_paused();
-            self.set_realtime_paused(!paused);
-        }
-        ui.separator();
-        signal_controls(ui, &mut self.selected, catalog);
-        ui.separator();
-        self.probe_controls(ui, document, catalog);
-        ui.separator();
-        ui.heading("Mesures");
-        match traces {
-            Ok(Some(traces)) if !traces.is_empty() => {
-                measurement_table(ui, &traces);
-            }
-            Ok(_) => {
-                ui.label(
-                    RichText::new("Lancez le transitoire pour mesurer les signaux.").color(MUTED),
-                );
-            }
-            Err(error) => {
-                ui.colored_label(ERROR, error.user_message());
-            }
-        }
-    }
-
-    fn probe_controls(&mut self, ui: &mut Ui, document: &Document, catalog: &SignalCatalog) {
         let readings = probe_readings(document, &self.live_values());
         if readings.is_empty() {
             ui.label(
@@ -818,15 +792,17 @@ impl InstrumentsState {
             );
             if let Some(signal) = reading.signal() {
                 if catalog.contains(&signal) {
-                    let mut plotted = self.selected.contains(&signal);
+                    let mut plotted = scopes.contains_signal(&signal);
                     if ui
                         .checkbox(&mut plotted, "Graphique")
                         .on_hover_text("Ajouter ou retirer ce signal de la portée")
                         .changed()
                     {
                         if plotted {
+                            scopes.push_signal(signal.clone());
                             self.selected.insert(signal);
                         } else {
+                            scopes.remove_signal(&signal);
                             self.selected.remove(&signal);
                         }
                     }
@@ -841,81 +817,6 @@ impl InstrumentsState {
             .small()
             .color(MUTED),
         );
-    }
-
-    fn scope_cursor_controls(&mut self, ui: &mut Ui, traces: &[Trace]) {
-        ui.heading("Curseurs");
-        ui.horizontal(|ui| {
-            for slot in [CursorSlot::A, CursorSlot::B] {
-                ui.selectable_value(&mut self.scope_active_cursor, slot, slot.label());
-            }
-            if ui
-                .small_button("Effacer")
-                .on_hover_text("Retire les deux curseurs")
-                .clicked()
-            {
-                self.scope_cursor_a = None;
-                self.scope_cursor_b = None;
-            }
-        });
-        ui.label(
-            RichText::new("Clic : premier A, deuxième B, puis curseur actif · droit/Maj : B")
-                .small()
-                .color(MUTED),
-        );
-        for (slot, value) in [
-            (CursorSlot::A, self.scope_cursor_a),
-            (CursorSlot::B, self.scope_cursor_b),
-        ] {
-            if let Some(time) = value {
-                ui.label(format!(
-                    "{} : t = {}",
-                    slot.label(),
-                    format_si_precision(time, Unit::Second, 4)
-                ));
-            }
-        }
-        if let (Some(a), Some(b)) = (self.scope_cursor_a, self.scope_cursor_b) {
-            let delta = (b - a).abs();
-            let frequency = if delta > 0.0 { 1.0 / delta } else { 0.0 };
-            ui.label(format!(
-                "Δt = {} · 1/Δt = {}",
-                format_si_precision(delta, Unit::Second, 4),
-                format_si_precision(frequency, Unit::Hertz, 4)
-            ));
-        }
-        for measurement in cursor_measurements(traces, self.scope_cursor_a, self.scope_cursor_b) {
-            let unit = measurement.signal.unit().unit();
-            let value = |value: Option<f64>| {
-                value.map_or_else(
-                    || "—".to_owned(),
-                    |value| format_si_precision(value, unit, 4),
-                )
-            };
-            ui.label(RichText::new(measurement.signal.label()).strong());
-            ui.label(
-                RichText::new(format!(
-                    "A {} · B {} · Δ {}",
-                    value(measurement.value_a),
-                    value(measurement.value_b),
-                    value(measurement.delta)
-                ))
-                .small()
-                .color(MUTED),
-            );
-            if measurement.interval_min.is_some() {
-                ui.label(
-                    RichText::new(format!(
-                        "intervalle min {} · max {} · RMS {}",
-                        value(measurement.interval_min),
-                        value(measurement.interval_max),
-                        value(measurement.interval_rms)
-                    ))
-                    .small()
-                    .color(MUTED),
-                );
-            }
-        }
     }
 
     fn spectrum_controls(
@@ -1038,150 +939,9 @@ impl InstrumentsState {
 
     fn plots(&mut self, ui: &mut Ui) {
         match self.tab {
-            InstrumentTab::Scope => self.scope_plot(ui),
             InstrumentTab::Spectrum => self.spectrum_plot(ui),
             InstrumentTab::Bode => self.bode_plot(ui),
-        }
-    }
-
-    fn scope_plot(&mut self, ui: &mut Ui) {
-        let traces = match self.current_traces() {
-            Ok(Some(traces)) => traces,
-            Ok(None) => {
-                empty_plot_message(ui, "Aucun résultat transitoire.");
-                return;
-            }
-            Err(error) => {
-                ui.colored_label(ERROR, error.user_message());
-                return;
-            }
-        };
-        if traces.is_empty() {
-            empty_plot_message(ui, "Sélectionnez au moins un signal.");
-            return;
-        }
-        let unit = common_unit(&traces);
-        let revision = self.transient_run.as_ref().map_or(0, |run| run.revision);
-        let height = ui.available_height().max(100.0);
-        let sample_times = traces
-            .first()
-            .map(|trace| {
-                trace
-                    .points
-                    .iter()
-                    .map(|point| point[0])
-                    .collect::<Vec<_>>()
-            })
-            .unwrap_or_default();
-        let mut clicked_time = None;
-        let mut second_cursor = false;
-        let y_formatter = move |mark: egui_plot::GridMark, _: &std::ops::RangeInclusive<f64>| {
-            format_axis(mark.value, unit)
-        };
-        let x_formatter = |mark: egui_plot::GridMark, _: &std::ops::RangeInclusive<f64>| {
-            format_si_precision(mark.value, Unit::Second, 3)
-        };
-        let response = Plot::new(format!("scope_plot_{revision}"))
-            .height(height)
-            .x_axis_label("Temps")
-            .y_axis_label(match unit {
-                Some(SignalUnit::Volt) => "Tension",
-                Some(SignalUnit::Ampere) => "Courant",
-                None => "Valeur",
-            })
-            .legend(
-                Legend::default()
-                    .position(Corner::LeftTop)
-                    .follow_insertion_order(true),
-            )
-            .x_axis_formatter(x_formatter)
-            .y_axis_formatter(y_formatter)
-            .label_formatter(move |position| {
-                let position = position_position(position);
-                Some(format!(
-                    "t = {}\n{}",
-                    format_si_precision(position.x, Unit::Second, 4),
-                    format_axis(position.y, unit)
-                ))
-            })
-            .show(ui, |plot_ui| {
-                for (index, trace) in traces.iter().enumerate() {
-                    plot_ui.line(
-                        Line::new(trace.label(), decimate(&trace.points, MAX_PLOT_POINTS))
-                            .color(trace_color(index))
-                            .width(1.8),
-                    );
-                }
-                if plot_ui.response().clicked() || plot_ui.response().secondary_clicked() {
-                    if let Some(point) = plot_ui.pointer_coordinate() {
-                        clicked_time = nearest_sample_time(&sample_times, point.x);
-                        second_cursor = plot_ui.response().secondary_clicked()
-                            || plot_ui.ctx().input(|input| input.modifiers.shift);
-                    }
-                }
-            });
-        if let Some(time) = clicked_time {
-            if second_cursor {
-                self.scope_cursor_b = Some(time);
-                self.scope_active_cursor = CursorSlot::B;
-            } else if self.scope_cursor_a.is_none() {
-                self.scope_cursor_a = Some(time);
-                self.scope_active_cursor = CursorSlot::A;
-            } else if self.scope_cursor_b.is_none() {
-                self.scope_cursor_b = Some(time);
-                self.scope_active_cursor = CursorSlot::B;
-            } else {
-                match self.scope_active_cursor {
-                    CursorSlot::A => self.scope_cursor_a = Some(time),
-                    CursorSlot::B => self.scope_cursor_b = Some(time),
-                }
-            }
-        }
-        self.paint_scope_cursors(ui, &response);
-    }
-
-    fn paint_scope_cursors(&self, ui: &Ui, response: &egui_plot::PlotResponse<()>) {
-        let frame = *response.transform.frame();
-        if !frame.is_positive() {
-            return;
-        }
-        let painter = ui.painter().with_clip_rect(frame);
-        let cursor_a = self.scope_cursor_a.map(|time| {
-            (
-                CursorSlot::A.label(),
-                response.transform.position_from_point_x(time),
-                HOVER,
-            )
-        });
-        let cursor_b = self.scope_cursor_b.map(|time| {
-            (
-                CursorSlot::B.label(),
-                response.transform.position_from_point_x(time),
-                ACCENT,
-            )
-        });
-        if let (Some((_, xa, _)), Some((_, xb, _))) = (cursor_a, cursor_b) {
-            painter.rect_filled(
-                egui::Rect::from_x_y_ranges(xa.min(xb)..=xa.max(xb), frame.y_range()),
-                0.0,
-                HOVER.gamma_multiply(0.07),
-            );
-        }
-        for (label, x, color) in [cursor_a, cursor_b].into_iter().flatten() {
-            if x < frame.left() || x > frame.right() {
-                continue;
-            }
-            painter.line_segment(
-                [egui::pos2(x, frame.top()), egui::pos2(x, frame.bottom())],
-                egui::Stroke::new(1.3, color),
-            );
-            painter.text(
-                egui::pos2((x + 4.0).min(frame.right() - 10.0), frame.top() + 4.0),
-                Align2::LEFT_TOP,
-                label,
-                FontId::monospace(11.0),
-                color,
-            );
+            InstrumentTab::Scope => {}
         }
     }
 
@@ -1450,10 +1210,10 @@ impl InstrumentsState {
     fn export_payload(&self) -> Result<Option<(String, String)>, SimulationError> {
         match self.tab {
             InstrumentTab::Scope => {
-                if self.selected.is_empty() {
+                if self.scope_signals.is_empty() {
                     return Ok(None);
                 }
-                let Some(traces) = self.current_traces()? else {
+                let Some(traces) = self.traces_for(&self.scope_signals)? else {
                     return Ok(None);
                 };
                 if traces.is_empty() {
@@ -1521,10 +1281,6 @@ impl InstrumentsState {
         }
         let signals = signals.iter().cloned().collect::<Vec<_>>();
         transient_traces(result, &run.context, &signals).map(Some)
-    }
-
-    fn current_traces(&self) -> Result<Option<Vec<Trace>>, SimulationError> {
-        self.traces_for(&self.selected)
     }
 
     fn spectrum_data(&self) -> Result<Option<(Trace, Spectrum)>, SimulationError> {
@@ -1967,53 +1723,6 @@ fn ac_controls(
         .clicked()
 }
 
-fn signal_controls(ui: &mut Ui, selected: &mut BTreeSet<SignalId>, catalog: &SignalCatalog) {
-    egui::CollapsingHeader::new("Signaux affichés")
-        .default_open(true)
-        .show(ui, |ui| {
-            ui.horizontal(|ui| {
-                if ui.small_button("Toutes tensions").clicked() {
-                    for name in &catalog.voltages {
-                        selected.insert(SignalId::Voltage(name.clone()));
-                    }
-                }
-                if ui.small_button("Aucun").clicked() {
-                    selected.clear();
-                }
-            });
-            if catalog.voltages.is_empty() && catalog.currents.is_empty() {
-                ui.label(RichText::new("Aucun signal disponible.").color(MUTED));
-                return;
-            }
-            if !catalog.voltages.is_empty() {
-                ui.label(RichText::new("Tensions").small().color(MUTED));
-                for name in &catalog.voltages {
-                    let signal = SignalId::Voltage(name.clone());
-                    checkbox_signal(ui, selected, signal);
-                }
-            }
-            if !catalog.currents.is_empty() {
-                ui.label(RichText::new("Courants de branche").small().color(MUTED));
-                for name in &catalog.currents {
-                    let signal = SignalId::Current(name.clone());
-                    checkbox_signal(ui, selected, signal);
-                }
-            }
-        });
-}
-
-fn checkbox_signal(ui: &mut Ui, selected: &mut BTreeSet<SignalId>, signal: SignalId) {
-    let mut checked = selected.contains(&signal);
-    let label = format!("{} ({})", signal.label(), signal.unit().symbol());
-    if ui.checkbox(&mut checked, label).changed() {
-        if checked {
-            selected.insert(signal);
-        } else {
-            selected.remove(&signal);
-        }
-    }
-}
-
 fn spectrum_signal_control(ui: &mut Ui, signal: &mut Option<SignalId>, catalog: &SignalCatalog) {
     ui.label("Signal analysé");
     let available = catalog.signals();
@@ -2095,54 +1804,6 @@ pub(crate) fn value_at(points: &[[f64; 2]], time: f64) -> Option<f64> {
     }
 }
 
-fn cursor_measurements(
-    traces: &[Trace],
-    cursor_a: Option<f64>,
-    cursor_b: Option<f64>,
-) -> Vec<CursorMeasurement> {
-    traces
-        .iter()
-        .map(|trace| {
-            let value_a = cursor_a.and_then(|time| value_at(&trace.points, time));
-            let value_b = cursor_b.and_then(|time| value_at(&trace.points, time));
-            let delta = value_a.zip(value_b).map(|(a, b)| b - a);
-            let interval = match (cursor_a, cursor_b) {
-                (Some(a), Some(b)) if a <= b => {
-                    let window = trace
-                        .points
-                        .iter()
-                        .filter(|point| point[0] >= a && point[0] <= b)
-                        .collect::<Vec<_>>();
-                    if window.is_empty() {
-                        None
-                    } else {
-                        let mut minimum = window[0][1];
-                        let mut maximum = window[0][1];
-                        let mut square_sum = 0.0;
-                        for point in &window {
-                            minimum = minimum.min(point[1]);
-                            maximum = maximum.max(point[1]);
-                            square_sum += point[1] * point[1];
-                        }
-                        let count = window.len() as f64;
-                        Some((minimum, maximum, (square_sum / count).sqrt()))
-                    }
-                }
-                _ => None,
-            };
-            CursorMeasurement {
-                signal: trace.signal.clone(),
-                value_a,
-                value_b,
-                delta,
-                interval_min: interval.map(|(minimum, _, _)| minimum),
-                interval_max: interval.map(|(_, maximum, _)| maximum),
-                interval_rms: interval.map(|(_, _, rms)| rms),
-            }
-        })
-        .collect()
-}
-
 fn nearest_bode_point(points: &[BodePoint], frequency: f64) -> Option<&BodePoint> {
     let index = points.partition_point(|point| point.frequency < frequency);
     let left = index.checked_sub(1).and_then(|index| points.get(index));
@@ -2194,26 +1855,6 @@ fn paint_vertical_marker(
         FontId::monospace(11.0),
         color,
     );
-}
-
-fn measurement_table(ui: &mut Ui, traces: &[Trace]) {
-    for measurement in measurements(traces) {
-        let unit = measurement.signal.unit().unit();
-        ui.label(RichText::new(measurement.signal.label()).strong());
-        ui.label(
-            RichText::new(format!(
-                "min {} · max {} · crête-à-crête {} · moy {} · RMS {} · {} pts",
-                format_si_precision(measurement.minimum, unit, 4),
-                format_si_precision(measurement.maximum, unit, 4),
-                format_si_precision(measurement.peak_to_peak, unit, 4),
-                format_si_precision(measurement.mean, unit, 4),
-                format_si_precision(measurement.rms, unit, 4),
-                measurement.samples
-            ))
-            .small()
-            .color(MUTED),
-        );
-    }
 }
 
 fn completion_message(run: &CompletedRun) -> String {
@@ -2328,9 +1969,15 @@ mod tests {
             egui::CentralPanel::default()
                 .frame(Frame::NONE)
                 .show(ui, |ui| {
-                    state.show(ui, document, &mut status);
+                    let mut scopes = InlineScopes::with_signals(state.selected_signals());
+                    state.show(ui, &mut scopes, document, &mut status);
                 });
         })
+    }
+
+    #[test]
+    fn automatic_refresh_is_enabled_by_default() {
+        assert!(InstrumentsState::new().auto_refresh());
     }
 
     #[test]
@@ -2369,27 +2016,6 @@ mod tests {
         assert!(state.selected.is_empty());
         state.ensure_catalog(&SignalCatalog::default());
         assert!(!state.selection_initialized);
-    }
-
-    #[test]
-    fn scope_cursors_snap_and_measure_an_interval() {
-        let trace = Trace {
-            signal: SignalId::Voltage("OUT".to_owned()),
-            points: vec![[0.0, 1.0], [1.0, 3.0], [2.0, 5.0]],
-        };
-        assert_eq!(nearest_sample_time(&[0.0, 1.0, 2.0], 0.6), Some(1.0));
-        assert_eq!(nearest_sample_time(&[0.0, 1.0, 2.0], 9.0), Some(2.0));
-        let measurements = cursor_measurements(&[trace], Some(0.0), Some(2.0));
-        assert_eq!(measurements.len(), 1);
-        let measurement = &measurements[0];
-        assert_eq!(measurement.value_a, Some(1.0));
-        assert_eq!(measurement.value_b, Some(5.0));
-        assert_eq!(measurement.delta, Some(4.0));
-        assert_eq!(measurement.interval_min, Some(1.0));
-        assert_eq!(measurement.interval_max, Some(5.0));
-        let expected_rms = (35.0_f64 / 3.0).sqrt();
-        assert!((measurement.interval_rms.unwrap() - expected_rms).abs() < 1e-12);
-        assert_eq!(value_at(&[[0.0, 1.0], [2.0, 5.0]], 0.9), Some(1.0));
     }
 
     #[test]
@@ -2436,7 +2062,7 @@ mod tests {
         assert_eq!(state.transient_time(), Some(advanced));
         state.step_realtime(&document, &mut status);
         assert!(state.transient_time().unwrap() > advanced);
-        let traces = state.current_traces().unwrap().unwrap();
+        let traces = state.traces_for(&state.selected).unwrap().unwrap();
         assert!(!traces.is_empty());
         assert!(state.live_values().time.is_some());
     }
@@ -2473,6 +2099,7 @@ mod tests {
         assert!(state.transient_time().is_some_and(|time| time > 0.0));
         assert!(!state.is_busy());
         assert!(state.can_simulate(&document));
+        state.scope_signals = state.selected.clone();
         let (filename, csv) = state.export_payload().unwrap().unwrap();
         assert_eq!(filename, "circuitsim-portee.csv");
         assert!(csv.starts_with("signal,unit,time_s,value\n"));
