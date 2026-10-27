@@ -181,6 +181,8 @@ Les raccourcis sont ignorés lorsqu’un champ texte a le focus, à l’exceptio
   courants, avec zoom, déplacement, double-clic d’auto-échelle, infobulle,
   échelle automatique ou manuelle, signaux superposés ou séparés, vue temporelle
   ou FFT, curseurs A/B, gel, effacement, réordonnancement, fusion et suppression.
+  Les valeurs et mesures sont placées à droite du tracé pour maximiser la hauteur
+  du graphique ; **Ajouter une portée** se trouve dans les contrôles.
   Un clic droit sur un composant ou un fil ajoute le signal à la dernière
   portée. Les onglets **Spectre** et **Bode** partagent le même panneau, visible
   par défaut et repliable depuis **Afficher**.

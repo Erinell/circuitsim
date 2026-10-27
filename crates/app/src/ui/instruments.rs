@@ -481,7 +481,7 @@ impl InstrumentsState {
         let height = ui.available_height().max(120.0);
         match self.tab {
             InstrumentTab::Scope => {
-                self.scope_tab(ui, scopes, document, status, height);
+                self.scope_tab(ui, scopes, document, &catalog, status, height);
             }
             InstrumentTab::Spectrum | InstrumentTab::Bode => {
                 ui.horizontal_top(|ui| {
@@ -535,6 +535,7 @@ impl InstrumentsState {
         ui: &mut Ui,
         scopes: &mut InlineScopes,
         document: &Document,
+        catalog: &SignalCatalog,
         status: &mut Status,
         height: f32,
     ) {
@@ -557,6 +558,28 @@ impl InstrumentsState {
                         .auto_shrink([false, false])
                         .show(ui, |ui| {
                             self.live_controls(ui, document, now, status);
+                            ui.separator();
+                            if ui
+                                .button("Ajouter une portée")
+                                .on_hover_text(
+                                    "Ajoute une portée avec le signal par défaut",
+                                )
+                                .clicked()
+                            {
+                                if scopes.add_default_scope(catalog) {
+                                    status.info("Portée ajoutée.");
+                                } else {
+                                    status.info("Aucun signal disponible.");
+                                }
+                            }
+                            ui.label(
+                                RichText::new(
+                                    "Molette : zoom · glisser : déplacer · clic : curseurs A/B \
+                                     · double-clic : auto-échelle",
+                                )
+                                .small()
+                                .color(MUTED),
+                            );
                             ui.separator();
                             let mut window = self.scope_window;
                             ui.label(RichText::new("Fenêtre temporelle").strong());

@@ -3,7 +3,7 @@
 use std::collections::BTreeSet;
 use std::sync::Arc;
 
-use eframe::egui::{self, Color32, RichText, Ui};
+use eframe::egui::{self, Color32, RichText, Ui, Vec2};
 use egui_plot::{Corner, Legend, Line, Plot, VLine};
 
 use crate::analysis::{
@@ -133,6 +133,15 @@ impl InlineScopes {
         self.scopes.push(Scope::with_signals(id, signals));
     }
 
+    /// Adds a scope with the catalog's default signal.
+    pub fn add_default_scope(&mut self, catalog: &SignalCatalog) -> bool {
+        let Some(signal) = default_signal(catalog) else {
+            return false;
+        };
+        self.push_signals(BTreeSet::from([signal]));
+        true
+    }
+
     /// Returns true when no scope exists.
     pub fn is_empty(&self) -> bool {
         self.scopes.is_empty()
@@ -164,32 +173,11 @@ impl InlineScopes {
                 self.push_signal(signal);
             }
         }
-        ui.horizontal(|ui| {
-            if ui
-                .button("Ajouter une portée")
-                .on_hover_text("Ajoute une portée avec le signal par défaut")
-                .clicked()
-            {
-                if let Some(signal) = default_signal(&catalog) {
-                    self.push_signals(BTreeSet::from([signal]));
-                    status.info("Portée ajoutée.");
-                } else {
-                    status.info("Aucun signal disponible.");
-                }
-            }
-            ui.label(
-                RichText::new(
-                    "Molette : zoom · glisser : déplacer · clic : curseurs A/B · double-clic : auto-échelle",
-                )
-                .small()
-                .color(MUTED),
-            );
-        });
         self.probe_strip(ui, instruments, document, &catalog);
         ui.separator();
         let available = ui.available_height();
         let count = self.scopes.len().max(1) as f32;
-        let plot_height = ((available - 24.0) / count - 78.0).clamp(96.0, 640.0);
+        let plot_height = ((available - 24.0) / count - 56.0).clamp(96.0, 640.0);
         let scope_count = self.scopes.len();
         egui::ScrollArea::vertical()
             .id_salt("inline_scopes")
@@ -229,7 +217,7 @@ impl InlineScopes {
             return;
         }
         egui::CollapsingHeader::new(format!("Sondes ({})", readings.len()))
-            .default_open(true)
+            .default_open(false)
             .show(ui, |ui| {
                 for reading in readings {
                     ui.horizontal_wrapped(|ui| {
@@ -439,26 +427,72 @@ impl Scope {
             return action;
         }
         let unit = common_unit(&traces);
-        self.show_values(ui, &traces, unit);
-        match self.view {
-            ScopeView::Time => self.show_time(
+        let side_width = if ui.available_width() >= 560.0 {
+            200.0
+        } else {
+            0.0
+        };
+        if side_width > 0.0 {
+            ui.horizontal_top(|ui| {
+                let plot_width = (ui.available_width() - side_width - 8.0).max(180.0);
+                ui.allocate_ui_with_layout(
+                    Vec2::new(plot_width, plot_height),
+                    egui::Layout::top_down(egui::Align::Min),
+                    |ui| {
+                        self.show_plot(
+                            ui,
+                            &traces,
+                            unit,
+                            instruments.scope_step(),
+                            plot_height,
+                            reset_view,
+                        );
+                    },
+                );
+                ui.separator();
+                ui.allocate_ui_with_layout(
+                    Vec2::new(side_width, plot_height),
+                    egui::Layout::top_down(egui::Align::Min),
+                    |ui| {
+                        egui::ScrollArea::vertical()
+                            .id_salt(format!("scope_values_{}", self.id))
+                            .max_height(plot_height)
+                            .auto_shrink([false, false])
+                            .show(ui, |ui| {
+                                self.show_values(ui, &traces, unit);
+                            });
+                    },
+                );
+            });
+        } else {
+            ui.horizontal_wrapped(|ui| self.show_values(ui, &traces, unit));
+            self.show_plot(
                 ui,
                 &traces,
                 unit,
                 instruments.scope_step(),
                 plot_height,
                 reset_view,
-            ),
-            ScopeView::Spectrum => self.show_spectrum(
-                ui,
-                &traces,
-                unit,
-                instruments.scope_step(),
-                plot_height,
-                reset_view,
-            ),
+            );
         }
         action
+    }
+
+    fn show_plot(
+        &mut self,
+        ui: &mut Ui,
+        traces: &[Trace],
+        unit: Option<SignalUnit>,
+        step: Option<f64>,
+        plot_height: f32,
+        reset_view: bool,
+    ) {
+        match self.view {
+            ScopeView::Time => self.show_time(ui, traces, unit, step, plot_height, reset_view),
+            ScopeView::Spectrum => {
+                self.show_spectrum(ui, traces, unit, step, plot_height, reset_view)
+            }
+        }
     }
 
     fn traces(&mut self, instruments: &InstrumentsState) -> Arc<Vec<Trace>> {
@@ -482,32 +516,28 @@ impl Scope {
     }
 
     fn show_values(&self, ui: &mut Ui, traces: &[Trace], unit: Option<SignalUnit>) {
-        ui.horizontal_wrapped(|ui| {
-            for trace in traces {
-                let value = trace.points.last().map_or(0.0, |point| point[1]);
-                ui.label(
-                    RichText::new(format!("{} = {}", trace.label(), format_axis(value, unit)))
-                        .small()
-                        .color(signal_color(&trace.signal)),
-                );
-            }
-        });
-        ui.horizontal_wrapped(|ui| {
-            for measurement in measurements(traces) {
-                let measurement_unit = measurement.signal.unit().unit();
-                ui.label(
-                    RichText::new(format!(
-                        "{} min {} · max {} · RMS {}",
-                        measurement.signal.label(),
-                        format_si_precision(measurement.minimum, measurement_unit, 3),
-                        format_si_precision(measurement.maximum, measurement_unit, 3),
-                        format_si_precision(measurement.rms, measurement_unit, 3)
-                    ))
+        for trace in traces {
+            let value = trace.points.last().map_or(0.0, |point| point[1]);
+            ui.label(
+                RichText::new(format!("{} = {}", trace.label(), format_axis(value, unit)))
                     .small()
-                    .color(MUTED),
-                );
-            }
-        });
+                    .color(signal_color(&trace.signal)),
+            );
+        }
+        for measurement in measurements(traces) {
+            let measurement_unit = measurement.signal.unit().unit();
+            ui.label(
+                RichText::new(format!(
+                    "{} min {} · max {} · RMS {}",
+                    measurement.signal.label(),
+                    format_si_precision(measurement.minimum, measurement_unit, 3),
+                    format_si_precision(measurement.maximum, measurement_unit, 3),
+                    format_si_precision(measurement.rms, measurement_unit, 3)
+                ))
+                .small()
+                .color(MUTED),
+            );
+        }
         if let (Some(a), Some(b)) = (self.cursor_a, self.cursor_b) {
             let times = traces
                 .first()
@@ -531,25 +561,23 @@ impl Scope {
                 .small()
                 .color(MUTED),
             );
-            ui.horizontal_wrapped(|ui| {
-                for trace in traces {
-                    if let (Some(va), Some(vb)) =
-                        (value_at(&trace.points, a), value_at(&trace.points, b))
-                    {
-                        ui.label(
-                            RichText::new(format!(
-                                "{} A={} B={} Δ={}",
-                                trace.label(),
-                                format_axis(va, unit),
-                                format_axis(vb, unit),
-                                format_axis(vb - va, unit)
-                            ))
-                            .small()
-                            .color(signal_color(&trace.signal)),
-                        );
-                    }
+            for trace in traces {
+                if let (Some(va), Some(vb)) =
+                    (value_at(&trace.points, a), value_at(&trace.points, b))
+                {
+                    ui.label(
+                        RichText::new(format!(
+                            "{} A={} B={} Δ={}",
+                            trace.label(),
+                            format_axis(va, unit),
+                            format_axis(vb, unit),
+                            format_axis(vb - va, unit)
+                        ))
+                        .small()
+                        .color(signal_color(&trace.signal)),
+                    );
                 }
-            });
+            }
         }
     }
 
@@ -863,6 +891,24 @@ mod tests {
         assert!(scopes.scopes[0].signals.contains(&signal));
         scopes.toggle_active_signal(signal.clone(), false);
         assert!(!scopes.scopes[0].signals.contains(&signal));
+    }
+
+    #[test]
+    fn adding_a_scope_from_controls_uses_the_default_signal() {
+        let catalog = SignalCatalog {
+            voltages: vec!["OUT".to_owned()],
+            currents: Vec::new(),
+            sources: Vec::new(),
+        };
+        let mut scopes = InlineScopes::default();
+        assert!(scopes.add_default_scope(&catalog));
+        assert_eq!(scopes.scopes.len(), 1);
+        assert_eq!(
+            scopes.scopes[0].signals,
+            BTreeSet::from([SignalId::Voltage("OUT".to_owned())])
+        );
+        assert!(!scopes.add_default_scope(&SignalCatalog::default()));
+        assert_eq!(scopes.scopes.len(), 1);
     }
 
     #[test]
