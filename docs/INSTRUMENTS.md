@@ -94,11 +94,11 @@ automatique ou manuelle et son identifiant de graphe stable pour conserver le zo
 entre les frames. Elle peut afficher les signaux superposés ou séparés, en
 temporel ou en FFT. Les valeurs courantes et les mesures sont lues sur le dernier
 point de chaque trace et affichées dans une colonne à droite du graphique. Le
-menu **Signaux** sépare les tensions des courants de composants : courants de
-branche, résistances et interrupteurs dérivés de la tension, condensateurs par
-différence finie, diodes par le modèle de Shockley et sources de courant par leur
-valeur. Le bouton **Ajouter une portée** est dans les contrôles. Un marqueur de
-couleur rappelle sur le schéma le fil ou le composant tracé.
+menu **Signaux** sépare les tensions des courants de **nets** : chaque fil/net
+expose `I(nom)`, dérivé des courants de ses composants (branches, résistances,
+interrupteurs, condensateurs, diodes et sources). Le bouton **Ajouter une portée**
+est dans les contrôles. Un marqueur de couleur rappelle sur le schéma le fil ou le
+composant tracé.
 Le même panneau reste la référence pour le Bode et les exports.
 
 Chaque signal devient une `Trace` de points `[temps_s, valeur_SI]` en ordre

@@ -32,15 +32,18 @@ pub const MAX_FFT_POINTS: usize = 16_384;
 pub enum SignalId {
     /// Voltage of a named net.
     Voltage(String),
+    /// Current flowing in a named net.
+    NetCurrent(String),
     /// Branch current of a named component.
     Current(String),
 }
 
 impl SignalId {
-    /// Returns the plot label, such as `V(OUT)` or `I(V1)`.
+    /// Returns the plot label, such as `V(OUT)` or `I(OUT)`.
     pub fn label(&self) -> String {
         match self {
             Self::Voltage(name) => format!("V({name})"),
+            Self::NetCurrent(name) => format!("I({name})"),
             Self::Current(name) => format!("I({name})"),
         }
     }
@@ -49,7 +52,7 @@ impl SignalId {
     pub const fn unit(&self) -> SignalUnit {
         match self {
             Self::Voltage(_) => SignalUnit::Volt,
-            Self::Current(_) => SignalUnit::Ampere,
+            Self::NetCurrent(_) | Self::Current(_) => SignalUnit::Ampere,
         }
     }
 }
@@ -169,7 +172,7 @@ impl SignalCatalog {
     /// Returns true when the catalog contains the signal.
     pub fn contains(&self, signal: &SignalId) -> bool {
         match signal {
-            SignalId::Voltage(name) => self.voltages.contains(name),
+            SignalId::Voltage(name) | SignalId::NetCurrent(name) => self.voltages.contains(name),
             SignalId::Current(name) => self.currents.contains(name),
         }
     }
@@ -1142,24 +1145,7 @@ pub fn prepare_realtime(
     })
 }
 
-/// Lists components whose current can be plotted by the scopes.
-pub fn component_current_labels(document: &crate::document::Document) -> Vec<String> {
-    let mut labels = document
-        .schematic()
-        .symbols()
-        .filter(|symbol| {
-            !symbol.kind.is_measurement()
-                && !symbol.kind.is_ground()
-                && !matches!(symbol.kind, SymbolKind::Custom(_))
-        })
-        .map(|symbol| symbol.label.clone())
-        .collect::<Vec<_>>();
-    labels.sort();
-    labels.dedup();
-    labels
-}
-
-/// Extracts traces from an arbitrary sample buffer, deriving component currents
+/// Extracts traces from an arbitrary sample buffer, deriving net currents
 /// that the solver does not expose as branch variables.
 pub fn transient_traces_from_samples_with_document(
     samples: &[TransientSample],
@@ -1180,6 +1166,19 @@ pub fn transient_traces_from_samples_with_document(
                     .ok_or_else(|| SimulationError::MissingSignal(signal.label()))?;
                 for sample in samples {
                     if let Some(value) = sample.node_voltage(node) {
+                        points.push([sample.time, value]);
+                    }
+                }
+            }
+            SignalId::NetCurrent(name) => {
+                let Some(extraction) = extraction else {
+                    return Err(SimulationError::MissingSignal(signal.label()));
+                };
+                for (index, sample) in samples.iter().enumerate() {
+                    let previous = index.checked_sub(1).and_then(|index| samples.get(index));
+                    if let Some(value) =
+                        sample_net_current(extraction, document, sample, previous, name)
+                    {
                         points.push([sample.time, value]);
                     }
                 }
@@ -1217,6 +1216,69 @@ pub fn transient_traces_from_samples_with_document(
         });
     }
     Ok(traces)
+}
+
+fn sample_net_current(
+    extraction: &Extraction,
+    document: &crate::document::Document,
+    sample: &TransientSample,
+    previous: Option<&TransientSample>,
+    net_name: &str,
+) -> Option<f64> {
+    if !extraction
+        .nets
+        .iter()
+        .any(|net| net.name.as_str() == net_name)
+    {
+        return None;
+    }
+    let mut strength = 0.0_f64;
+    for symbol in document.schematic().symbols() {
+        if symbol.kind.is_measurement() || symbol.kind.is_ground() {
+            continue;
+        }
+        let Some(definition) = document.registry().get(&symbol.kind) else {
+            continue;
+        };
+        if definition.pins.len() != 2 {
+            continue;
+        }
+        let Some(spec) = extraction
+            .netlist
+            .components
+            .iter()
+            .find(|spec| spec.label == symbol.label)
+        else {
+            continue;
+        };
+        if spec.kind == ComponentKind::Switch
+            && !spec
+                .params
+                .get("closed")
+                .and_then(ParamValue::as_bool)
+                .unwrap_or(false)
+        {
+            continue;
+        }
+        let current = sample
+            .branch_current(spec.id)
+            .or_else(|| derived_component_current(spec, sample, previous));
+        let Some(current) = current.filter(|current| current.is_finite()) else {
+            continue;
+        };
+        for (index, injection) in [-current, current].into_iter().enumerate() {
+            let Some(&node) = spec.pins.get(index) else {
+                continue;
+            };
+            let Some(net) = extraction.nets.iter().find(|net| net.node == node) else {
+                continue;
+            };
+            if net.name.as_str() == net_name {
+                strength = strength.max(injection.abs());
+            }
+        }
+    }
+    Some(strength)
 }
 
 fn derived_component_current(
@@ -1315,6 +1377,9 @@ pub fn transient_traces_from_samples(
                         points.push([sample.time, value]);
                     }
                 }
+            }
+            SignalId::NetCurrent(name) => {
+                return Err(SimulationError::MissingSignal(format!("I({name})")));
             }
             SignalId::Current(name) => {
                 let component = context
@@ -1911,7 +1976,7 @@ mod tests {
     }
 
     #[test]
-    fn scope_component_current_traces_derive_resistor_currents() {
+    fn scope_net_current_traces_are_derived_from_samples() {
         let document = Document::demo().unwrap();
         let extraction = document.extraction().unwrap().clone();
         let catalog = SignalCatalog::from_extraction(&extraction);
@@ -1924,14 +1989,11 @@ mod tests {
         let AnalysisResult::Transient(result) = run.result else {
             panic!("expected transient result");
         };
-        let labels = component_current_labels(&document);
-        assert!(labels.contains(&"R1".to_owned()));
-        assert!(labels.contains(&"C1".to_owned()));
         let traces = transient_traces_from_samples_with_document(
             &result.samples,
             &run.context,
             &document,
-            &[SignalId::Current("R1".to_owned())],
+            &[SignalId::NetCurrent("VIN".to_owned())],
         )
         .unwrap();
         assert_eq!(traces.len(), 1);
