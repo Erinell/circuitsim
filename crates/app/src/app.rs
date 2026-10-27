@@ -1329,6 +1329,8 @@ impl CircuitApp {
             CommandAction::Onboarding => self.show_onboarding = true,
             CommandAction::LoadDemo => self.load_demo(),
             CommandAction::Preferences => self.show_preferences = true,
+            CommandAction::Project => self.project_dialog.open_with(&self.document),
+            CommandAction::About => self.show_about = true,
             CommandAction::Help => self.show_help = true,
         }
     }

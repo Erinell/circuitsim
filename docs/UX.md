@@ -225,6 +225,10 @@ Les raccourcis sont ignorés lorsqu’un champ texte a le focus, à l’exceptio
 - **Projet** sérialise le schéma en JSON versionné, permet de le copier, de le
   charger après collage et, selon la plateforme, de lire/enregistrer un fichier
   ou de le télécharger. Un JSON invalide est refusé sans toucher au schéma.
+- **Accessibilité** : contrastes vérifiés par test pour les thèmes sombre,
+  contrasté et clair ; aucune information n’est portée uniquement par la
+  couleur. La palette de commandes reprend les libellés de raccourcis des outils
+  et propose **Projet** et **À propos**.
 - Les animations d’interface sont limitées à 150 ms et désactivables. Les
   actions principales ont un libellé, une infobulle et un raccourci issu de la
   même table que l’aide.

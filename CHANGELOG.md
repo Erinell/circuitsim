@@ -39,6 +39,8 @@ sémantique.
   animations limitées à 150 ms.
 - Menus **Fichier**, **Édition**, **Dessin**, **Afficher**, **Options** et
   **Aide**, et déplacement de la vue au glisser en lecture seule.
+- Palette de commandes enrichie (**Projet**, **À propos**) et contrastes des
+  trois thèmes vérifiés par test.
 
 ### Changed
 

@@ -258,7 +258,8 @@ les formats de fichiers sont dans [INSTRUMENTS.md](INSTRUMENTS.md).
 Les raccourcis sont ignorés si un champ texte a le focus, à l’exception de
 `Ctrl+K` pour la palette de commandes. `Espace` et `F5` pilotent la session
 continue sans ouvrir de fenêtre. La fenêtre **Aide** est générée depuis la même
-table que les infobulles, afin d’éviter les divergences.
+table que les infobulles, afin d’éviter les divergences. La palette de commandes
+reprend les touches des outils et propose **Projet** et **À propos**.
 
 ## 7. Atomicité, limites et tests
 
