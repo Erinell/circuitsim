@@ -569,7 +569,6 @@ impl CircuitApp {
     }
 
     fn toolbar(&mut self, ui: &mut Ui) {
-        let compact = self.compact_symbols();
         ui.add_space(2.0);
         ui.horizontal_wrapped(|ui| {
             ui.label(RichText::new("CircuitSim").strong().size(16.0));
@@ -620,38 +619,6 @@ impl CircuitApp {
                     self.redo();
                 }
             });
-            ui.separator();
-
-            tool_toggle(
-                ui,
-                &mut self.tool,
-                &mut self.canvas,
-                Tool::Select,
-                "Sélection",
-            );
-            tool_toggle(ui, &mut self.tool, &mut self.canvas, Tool::Wire, "Fil");
-            tool_toggle(
-                ui,
-                &mut self.tool,
-                &mut self.canvas,
-                Tool::Junction,
-                "Jonction",
-            );
-            tool_toggle(ui, &mut self.tool, &mut self.canvas, Tool::Label, "Label");
-            ui.separator();
-            for kind in compact {
-                let short = compact_symbol_label(&kind);
-                let name = ui::symbol_kind_name(&kind);
-                let selected = self.tool == Tool::Place(kind.clone());
-                if ui
-                    .selectable_label(selected, short)
-                    .on_hover_text(format!("{name} : placer"))
-                    .clicked()
-                {
-                    self.set_tool(Tool::Place(kind));
-                    self.canvas.cancel_interaction();
-                }
-            }
             ui.separator();
 
             let has_symbols = selection_has_symbols(&self.document);
@@ -2069,49 +2036,11 @@ fn light_visuals() -> egui::Visuals {
     visuals
 }
 
-fn tool_toggle(ui: &mut Ui, tool: &mut Tool, canvas: &mut CanvasState, target: Tool, label: &str) {
-    let selected = *tool == target;
-    let shortcut = match label {
-        "Sélection" => "V",
-        "Fil" => "W",
-        "Jonction" => "J",
-        "Label" => "L",
-        _ => "",
-    };
-    let response = ui
-        .selectable_label(selected, label)
-        .on_hover_text(format!("{label} ({shortcut})"));
-    if response.clicked() && !selected {
-        *tool = target;
-        canvas.cancel_interaction();
-    }
-}
-
 fn selection_has_symbols(document: &Document) -> bool {
     document
         .selection()
         .iter()
         .any(|object| matches!(object, ObjectRef::Symbol(_)))
-}
-
-fn compact_symbol_label(kind: &editor_core::SymbolKind) -> &'static str {
-    match kind {
-        editor_core::SymbolKind::Resistor => "R",
-        editor_core::SymbolKind::Capacitor => "C",
-        editor_core::SymbolKind::Inductor => "L",
-        editor_core::SymbolKind::Diode => "D",
-        editor_core::SymbolKind::VoltageSource => "V",
-        editor_core::SymbolKind::CurrentSource => "I",
-        editor_core::SymbolKind::Ground => "GND",
-        editor_core::SymbolKind::Switch => "SW",
-        editor_core::SymbolKind::Led => "LED",
-        editor_core::SymbolKind::Zener => "Z",
-        editor_core::SymbolKind::OpAmp => "AOP",
-        editor_core::SymbolKind::Voltmeter => "V",
-        editor_core::SymbolKind::Ammeter => "A",
-        editor_core::SymbolKind::Ohmmeter => "Ω",
-        editor_core::SymbolKind::Custom(_) => "?",
-    }
 }
 
 fn shortcut(ui: &mut Ui, keys: &str, description: &str) {

@@ -144,9 +144,9 @@ Les raccourcis sont ignorés lorsqu’un champ texte a le focus, à l’exceptio
 - Le menu contextuel propose les propriétés, les transformations, la
   duplication, la suppression, les mesures et, sur un fil, la coupe, une
   jonction ou un label. Sur le fond, il propose les sous-menus **Ajouter**.
-- La barre d’outils compacte affiche les composants favoris puis les composants
-  fréquents, avec la lettre de placement en infobulle. La barre d’état rappelle
-  l’outil actif.
+- Les outils et composants sont dans la palette et dans le menu **Dessin** ; la
+  barre supérieure reste réservée aux commandes de document, de simulation et de
+  présentation. La barre d’état rappelle l’outil actif.
 - Un clic droit sur un composant propose **Ajouter un curseur**. Le curseur se
   règle au glisser ou à la molette, affiche la valeur SI et applique la
   modification à chaud en une seule étape annulable.

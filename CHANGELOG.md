@@ -43,6 +43,8 @@ sémantique.
   **Aide**, et déplacement de la vue au glisser en lecture seule.
 - Palette de commandes enrichie (**Projet**, **À propos**) et contrastes des
   trois thèmes vérifiés par test.
+- Barre supérieure allégée : les outils de sélection, fil, jonction, label et
+  les raccourcis de composants restent dans la palette et le menu **Dessin**.
 
 ### Changed
 
