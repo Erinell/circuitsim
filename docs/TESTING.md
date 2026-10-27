@@ -34,7 +34,7 @@ l'installe séparément.
 
 ## 3. Suite et couverture
 
-Au 27 octobre 2026, `cargo test --workspace` exécute **264 tests** :
+Au 27 octobre 2026, `cargo test --workspace` exécute **265 tests** :
 
 | Groupe | Tests | Points clés |
 | --- | ---: | --- |
@@ -43,7 +43,7 @@ Au 27 octobre 2026, `cargo test --workspace` exécute **264 tests** :
 | `sim-core` transitoire | 19 | RC/RL, événements, diode, opamp, énergie, session incrémentale, mise à jour à chaud |
 | `sim-core` AC | 15 | RC/RL/RLC, phase, diode, opamp, balayages, erreurs |
 | `editor-core` | 47 | grille, symboles, schéma, historique, ERC, extraction, JSON, séries E, snap/routage |
-| `circuitsim-app` | 122 | document, vue, navigation, mini-carte, UI, inspecteur, historique, presse-papiers, simulation continue, mise à jour à chaud, calques, palettes, survol, câblage direct, raccourcis, portées incrustées, FFT et curseurs A/B, curseurs de réglage, exemples, préférences persistées, À propos, onboarding, accessibilité, sondes, instruments, worker, FFT, Bode, CSV |
+| `circuitsim-app` | 123 | document, projet JSON, vue, navigation, mini-carte, UI, inspecteur, historique, presse-papiers, simulation continue, mise à jour à chaud, calques, palettes, survol, câblage direct, raccourcis, portées incrustées, FFT et curseurs A/B, curseurs de réglage, exemples, préférences persistées, À propos, onboarding, accessibilité, sondes, instruments, worker, FFT, Bode, CSV |
 | `worker-protocol` | 11 | trames, version, netlist, erreurs, transports |
 | `worker` | 13 | coalescence, cadence, révisions, DC/transitoire/AC |
 | `editor_invariants` | 2 | proptest undo/redo et extraction |

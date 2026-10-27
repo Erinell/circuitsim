@@ -33,6 +33,8 @@ sémantique.
 - Préférences versionnées persistées en natif et dans `localStorage`, avec
   restauration des thèmes, calques, favoris, vitesses et panneaux visibles.
 - Écran **À propos** avec version, licence et licences tierces.
+- Projets JSON versionnés : copie, chargement, lecture/enregistrement natif,
+  téléchargement web et revalidation avant remplacement du document.
 
 ### Changed
 

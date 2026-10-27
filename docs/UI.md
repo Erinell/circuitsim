@@ -132,7 +132,12 @@ Ces réglages, les calques, les palettes, la grille, les favoris, les vitesses e
 la disposition des panneaux sont enregistrés automatiquement. Sur le Web, le
 stockage est `localStorage` ; en natif, un fichier `preferences.json` versionné
 est écrit dans le dossier de configuration. Un fichier absent, corrompu ou d’une
-version future est ignoré et remplacé par les valeurs par défaut. Le bouton
+version future est ignoré et remplacé par les valeurs par défaut.
+
+Le bouton **Projet** ouvre un dialogue JSON versionné : **Copier le JSON** pour
+partager, **Charger ce JSON** après collage, et selon la plateforme **Lire /
+Enregistrer le fichier** ou **Télécharger**. Le chargement revalide le schéma et
+remplace le document, l’historique, les résultats et les portées. Le bouton
 **À propos** affiche la version, la licence et les licences tierces.
 
 ## 4. Propriétés et ERC
@@ -265,8 +270,8 @@ masquables et redimensionnables, mais il n'y a pas de dockage libre ni de
 disposition persistée. Les portées incrustées couvrent le tracé temporel, la
 FFT, les signaux multiples, les curseurs A/B, le gel, le zoom, la séparation et
 la fusion par bouton ; le mode XY, la fusion par glisser et le Bode incrusté
-restent dans le panneau classique. Les préférences sont persistées, mais les
-projets et le partage de schéma restent à livrer.
+restent dans le panneau classique. Les préférences et les projets JSON sont
+persistés ; le partage de projet se fait par copie du JSON ou téléchargement.
 
 Tests : `cargo test -p circuitsim-app` couvre document, vue, navigation,
 mini-carte, édition, palette, propriétés, historique, presse-papiers, sélection

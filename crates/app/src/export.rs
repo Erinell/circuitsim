@@ -27,7 +27,7 @@ pub enum ExportError {
 
 /// Saves UTF-8 text to a native file path.
 #[cfg(not(target_arch = "wasm32"))]
-pub fn save_csv(path: &str, contents: &str) -> Result<(), ExportError> {
+pub fn save_text(path: &str, contents: &str) -> Result<(), ExportError> {
     let path = path.trim();
     if path.is_empty() {
         return Err(ExportError::EmptyPath);
@@ -38,9 +38,15 @@ pub fn save_csv(path: &str, contents: &str) -> Result<(), ExportError> {
     })
 }
 
-/// Starts a browser download for UTF-8 CSV content.
+/// Saves UTF-8 CSV to a native file path.
+#[cfg(not(target_arch = "wasm32"))]
+pub fn save_csv(path: &str, contents: &str) -> Result<(), ExportError> {
+    save_text(path, contents)
+}
+
+/// Starts a browser download for UTF-8 text.
 #[cfg(target_arch = "wasm32")]
-pub fn download_csv(filename: &str, contents: &str) -> Result<(), ExportError> {
+pub fn download_text(filename: &str, mime: &str, contents: &str) -> Result<(), ExportError> {
     use wasm_bindgen::JsCast as _;
     use wasm_bindgen::JsValue;
 
@@ -52,7 +58,7 @@ pub fn download_csv(filename: &str, contents: &str) -> Result<(), ExportError> {
         .ok_or_else(|| browser_error("document indisponible".to_owned()))?;
     let parts = js_sys::Array::of1(&JsValue::from_str(contents));
     let options = web_sys::BlobPropertyBag::new();
-    options.set_type("text/csv;charset=utf-8");
+    options.set_type(mime);
     let blob = web_sys::Blob::new_with_str_sequence_and_options(parts.as_ref(), &options)
         .map_err(|error| browser_error(format!("{error:?}")))?;
     let url = web_sys::Url::create_object_url_with_blob(&blob)
@@ -74,6 +80,12 @@ pub fn download_csv(filename: &str, contents: &str) -> Result<(), ExportError> {
     anchor.remove();
     web_sys::Url::revoke_object_url(&url).map_err(|error| browser_error(format!("{error:?}")))?;
     Ok(())
+}
+
+/// Starts a browser download for UTF-8 CSV content.
+#[cfg(target_arch = "wasm32")]
+pub fn download_csv(filename: &str, contents: &str) -> Result<(), ExportError> {
+    download_text(filename, "text/csv;charset=utf-8", contents)
 }
 
 #[cfg(all(test, not(target_arch = "wasm32")))]
