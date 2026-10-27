@@ -176,11 +176,14 @@ source est désactivé par défaut pour ne pas fausser le démarrage live.
 
 - **Portées incrustées** : zone redimensionnable en bas du canevas, une ou
   plusieurs portées empilées. Chaque portée accepte plusieurs tensions et
-  courants, avec légende, valeurs courantes, zoom, déplacement et infobulle.
-  **Figer** conserve le tracé, **Effacer** le vide et **Supprimer** retire la
-  portée. Un clic droit sur un composant ou un fil propose **Tracer dans une
-  portée**. Le panneau classique reste accessible par **Vue → Panneau
-  d'instruments**.
+  courants, avec légende, valeurs courantes, zoom, déplacement, double-clic
+  d’auto-échelle et infobulle. Le menu **Affichage** règle la superposition ou la
+  séparation des signaux, l’échelle Y automatique ou manuelle et la vue
+  temporelle ou FFT. Les curseurs A/B se posent au clic et affichent tA, tB, Δt
+  et les valeurs par signal. **Figer** conserve le tracé, **Effacer** le vide,
+  les flèches réordonnent, **Fusionner** joint la portée suivante et
+  **Supprimer** la retire. Les signaux tracés sont rappelés par un marqueur de
+  couleur sur le fil ou le composant correspondant.
 - **Contrôles live** : état `En marche`, `Pause`, `Arrêtée` ou `Circuit
   invalide`, rapport temps simulé/réel, badge `trop lent (×0,3)`, vitesse de
   simulation logarithmique, vitesse des points de courant et luminosité de
@@ -254,11 +257,11 @@ navigateur non automatisés, transitoire à pas fixe, FFT plafonnée, pas de
 PNG/persistance de projet, opamp sans alimentation/pôle, pas de mobile
 spécifique, fils non extensibles par une extrémité connectée. Les panneaux sont
 masquables et redimensionnables, mais il n'y a pas de dockage libre ni de
-disposition persistée. Les portées incrustées couvrent le tracé temporel, le
-gel, les signaux multiples et le zoom ; le mode XY, la fusion par glisser, le
-tri et la FFT incrustée restent dans le panneau classique. Les calques, palettes
-et préférences d’affichage sont session-locaux ; leur persistance appartient au
-lot U6.
+disposition persistée. Les portées incrustées couvrent le tracé temporel, la
+FFT, les signaux multiples, les curseurs A/B, le gel, le zoom, la séparation et
+la fusion par bouton ; le mode XY, la fusion par glisser et le Bode incrusté
+restent dans le panneau classique. Les calques, palettes et préférences
+d’affichage sont session-locaux ; leur persistance appartient au lot U6.
 
 Tests : `cargo test -p circuitsim-app` couvre document, vue, navigation,
 mini-carte, édition, palette, propriétés, historique, presse-papiers, sélection

@@ -47,6 +47,7 @@ pub struct CanvasState {
     power_brightness: f32,
     settings: CanvasSettings,
     controls: ParameterControls,
+    scope_signals: BTreeSet<SignalId>,
     property_request: Option<SymbolId>,
     scope_request: Option<SignalId>,
     label_dialog: Option<LabelDialog>,
@@ -112,6 +113,7 @@ impl CanvasState {
             power_brightness: 0.6,
             settings: CanvasSettings::default(),
             controls: ParameterControls::default(),
+            scope_signals: BTreeSet::new(),
             property_request: None,
             scope_request: None,
             label_dialog: None,
@@ -260,6 +262,11 @@ impl CanvasState {
         self.settings.theme = theme;
     }
 
+    /// Sets the signals currently plotted in inline scopes.
+    pub fn set_scope_signals(&mut self, signals: BTreeSet<SignalId>) {
+        self.scope_signals = signals;
+    }
+
     /// Takes one pending double-click property request.
     pub fn take_property_request(&mut self) -> Option<SymbolId> {
         self.property_request.take()
@@ -361,6 +368,7 @@ impl CanvasState {
 
         self.paint_grid(&painter, rect);
         self.paint_document(&painter, rect, document, live);
+        self.paint_scope_markers(&painter, rect, document);
         self.paint_current_flow(&painter, rect, document, live, flow_time);
         self.paint_voltage_legend(&painter, rect, document, live);
         self.paint_parameter_controls(&painter, rect, document);
@@ -1567,6 +1575,53 @@ impl CanvasState {
             }
         }
         Vec2::ZERO
+    }
+
+    fn paint_scope_markers(&self, painter: &Painter, rect: Rect, document: &Document) {
+        if self.scope_signals.is_empty() {
+            return;
+        }
+        for signal in &self.scope_signals {
+            let color = crate::ui::scopes::signal_color(signal);
+            match signal {
+                SignalId::Voltage(name) => {
+                    let Some(net) = document
+                        .nets()
+                        .iter()
+                        .find(|net| net.name.as_str() == name.as_str())
+                    else {
+                        continue;
+                    };
+                    let Some(wire) = net.wires.first().and_then(|id| document.wire(*id)) else {
+                        continue;
+                    };
+                    let position = self.viewport.grid_to_screen(
+                        rect,
+                        GridPos::new(
+                            (wire.a.x + wire.b.x).div_euclid(2),
+                            (wire.a.y + wire.b.y).div_euclid(2),
+                        ),
+                    );
+                    painter.circle_filled(position, 3.0, color);
+                    painter.circle_stroke(position, 6.0, Stroke::new(1.2, color));
+                }
+                SignalId::Current(label) => {
+                    let Some(symbol) = document
+                        .schematic()
+                        .symbols()
+                        .find(|symbol| symbol.label == *label)
+                    else {
+                        continue;
+                    };
+                    let position = self.viewport.grid_to_screen(rect, symbol.at);
+                    painter.circle_stroke(
+                        position,
+                        (self.viewport.scale() * 1.4).clamp(9.0, 22.0),
+                        Stroke::new(1.2, color),
+                    );
+                }
+            }
+        }
     }
 
     fn paint_voltage_legend(

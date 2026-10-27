@@ -84,10 +84,12 @@ ampèremètre et ohmmètre sur un composant.
 
 La zone **Portées incrustées** en bas du canevas réutilise les mêmes `Trace` que
 le panneau classique. Chaque portée possède son propre ensemble de signaux, son
-gel et son identifiant de graphe stable pour conserver le zoom entre les frames.
-Les valeurs courantes sont lues sur le dernier point de chaque trace. Le panneau
-classique reste la référence pour les curseurs A/B, les mesures d’intervalle, le
-spectre et le Bode.
+gel, son cache de traces, ses curseurs A/B, son échelle automatique ou manuelle
+et son identifiant de graphe stable pour conserver le zoom entre les frames.
+Elle peut afficher les signaux superposés ou séparés, en temporel ou en FFT. Les
+valeurs courantes sont lues sur le dernier point de chaque trace. Un marqueur de
+couleur rappelle sur le schéma le fil ou le composant tracé. Le panneau classique
+reste la référence pour le Bode, le mode XY et les exports.
 
 Chaque signal devient une `Trace` de points `[temps_s, valeur_SI]` en ordre
 croissant. En temps réel, la portée ne conserve que les 500 derniers

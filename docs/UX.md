@@ -172,7 +172,9 @@ Les raccourcis sont ignorés lorsqu’un champ texte a le focus, à l’exceptio
   la vitesse des points de courant et la luminosité de puissance.
 - **Portées incrustées** : la zone en bas du canevas empile une ou plusieurs
   portées redimensionnables. Chaque portée accepte plusieurs tensions et
-  courants, avec zoom, déplacement, infobulle, gel, effacement et suppression.
+  courants, avec zoom, déplacement, double-clic d’auto-échelle, infobulle,
+  échelle automatique ou manuelle, signaux superposés ou séparés, vue temporelle
+  ou FFT, curseurs A/B, gel, effacement, réordonnancement, fusion et suppression.
   Un clic droit sur un composant ou un fil ajoute le signal à la dernière
   portée. Le panneau classique reste accessible par **Vue**.
 - La portée classique affiche une fenêtre glissante des derniers échantillons. Le tampon

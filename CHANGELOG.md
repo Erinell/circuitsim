@@ -27,6 +27,9 @@ sémantique.
   zoom et ajout par clic droit.
 - Curseurs de réglage sur le canevas et galerie d’exemples originaux (RC,
   diviseur, LED, interrupteur, RLC).
+- Portées incrustées consolidées : échelle automatique ou manuelle, signaux
+  superposés ou séparés, FFT, curseurs A/B, réordonnancement, fusion, cache de
+  traces et marqueurs de couleur sur le schéma.
 
 ### Changed
 

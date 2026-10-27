@@ -240,6 +240,24 @@ impl InstrumentsState {
         result.samples.last().map(|sample| sample.time)
     }
 
+    /// Returns the nominal integration step of the active transient.
+    pub fn nominal_step(&self) -> Option<f64> {
+        if let Some(run) = &self.realtime {
+            return run.context().nominal_step;
+        }
+        self.transient_run
+            .as_ref()
+            .and_then(|run| run.context.nominal_step)
+    }
+
+    /// Returns a cache key for the current transient traces.
+    pub fn trace_key(&self) -> (u64, Option<f64>) {
+        (
+            self.transient_revision().unwrap_or(0),
+            self.transient_time(),
+        )
+    }
+
     /// Returns whether edits trigger an automatic transient refresh.
     pub const fn auto_refresh(&self) -> bool {
         self.auto_refresh
@@ -2041,7 +2059,7 @@ fn symbol_kind_short(kind: &SymbolKind) -> &'static str {
     }
 }
 
-fn nearest_sample_time(times: &[f64], target: f64) -> Option<f64> {
+pub(crate) fn nearest_sample_time(times: &[f64], target: f64) -> Option<f64> {
     let index = times.partition_point(|time| *time < target);
     let left = index.checked_sub(1).and_then(|index| times.get(index));
     let right = times.get(index);
@@ -2059,7 +2077,7 @@ fn nearest_sample_time(times: &[f64], target: f64) -> Option<f64> {
     }
 }
 
-fn value_at(points: &[[f64; 2]], time: f64) -> Option<f64> {
+pub(crate) fn value_at(points: &[[f64; 2]], time: f64) -> Option<f64> {
     let index = points.partition_point(|point| point[0] < time);
     let left = index.checked_sub(1).and_then(|index| points.get(index));
     let right = points.get(index);
@@ -2243,7 +2261,7 @@ fn format_plain(value: f64) -> String {
     }
 }
 
-fn format_frequency(value: f64) -> String {
+pub(crate) fn format_frequency(value: f64) -> String {
     format_si_precision(value, Unit::Hertz, 3)
 }
 
