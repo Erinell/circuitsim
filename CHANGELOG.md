@@ -43,8 +43,9 @@ sémantique.
   **Aide**, et déplacement de la vue au glisser en lecture seule.
 - Palette de commandes enrichie (**Projet**, **À propos**) et contrastes des
   trois thèmes vérifiés par test.
-- Barre supérieure allégée : les outils de sélection, fil, jonction, label et
-  les raccourcis de composants restent dans la palette et le menu **Dessin**.
+- Barre supérieure allégée : les boutons dupliqués par les menus sont retirés ;
+  seuls les contrôles de simulation restent visibles. Les outils, composants et
+  exemples sont dans les menus et la palette.
 
 ### Changed
 

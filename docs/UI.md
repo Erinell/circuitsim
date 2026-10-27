@@ -22,15 +22,14 @@ La distribution web utilise `index.html` et Trunk.
 | `ui/instruments.rs` | panneau de simulation et graphiques |
 
 De haut en bas : barre d'outils avec menus **Fichier**, **Édition**, **Dessin**,
-**Afficher**, **Options** et **Aide**, puis commandes de document,
-transformations, alignement, **Cadrer sél.**, **Marche/Arrêt**, **Reset**,
-**Pas**, **Vue**, **Commandes** et aide ; palette filtrable à gauche, canevas
+**Afficher**, **Options** et **Aide**, puis uniquement les contrôles
+**Marche/Arrêt**, **Reset** et **Pas** ; palette filtrable à gauche, canevas
 central avec portées incrustées en bas, inspecteur/ERC à droite, panneau
-d'instruments optionnel en bas (210–560 px), barre d'état. Les outils et
-composants restent dans la palette et le menu **Dessin**. `Ctrl+K` ouvre la
-palette de commandes. Les onglets **Portée**, **Spectre** et **Bode** du panneau
-classique conservent leurs résultats séparément. La démonstration présélectionne
-`V1`, `5 V` et `OUT`.
+d'instruments optionnel en bas (210–560 px), barre d'état. Les outils,
+composants, transformations, alignements, exemples et commandes de vue sont dans
+les menus et la palette. `Ctrl+K` ouvre la palette de commandes. Les onglets
+**Portée**, **Spectre** et **Bode** du panneau classique conservent leurs
+résultats séparément. La démonstration présélectionne `V1`, `5 V` et `OUT`.
 
 À l'ouverture d'un schéma valide, la session temps réel démarre seule : le
 circuit est déjà en marche et les instruments affichent le signal sans clic.

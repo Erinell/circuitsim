@@ -437,6 +437,7 @@ impl CircuitApp {
                 ui.close();
             }
             ui.separator();
+            ui.label(RichText::new("Exemples").small().color(ui::MUTED));
             for (label, builder) in [
                 (
                     "RC",
@@ -545,6 +546,32 @@ impl CircuitApp {
                     ui.close();
                 }
             }
+            ui.separator();
+            if ui.button("Ajuster la vue").clicked() {
+                self.canvas.request_fit();
+                ui.close();
+            }
+            if ui.button("Cadrer la sélection").clicked() {
+                self.fit_selection();
+                ui.close();
+            }
+            ui.horizontal(|ui| {
+                if ui.small_button("−").clicked() {
+                    self.canvas.zoom_out();
+                }
+                ui.label(format!("{:.0} %", self.canvas.viewport().zoom_percent()));
+                if ui.small_button("+").clicked() {
+                    self.canvas.zoom_in();
+                }
+            });
+            if ui.button("Zoom 100 %").clicked() {
+                self.canvas.reset_zoom();
+                ui.close();
+            }
+            if ui.button("Origine").clicked() {
+                self.canvas.reset_view();
+                ui.close();
+            }
         });
         ui.menu_button("Options", |ui| {
             if ui.button("Préférences d'affichage…").clicked() {
@@ -580,152 +607,6 @@ impl CircuitApp {
             self.menu_bar(ui);
             ui.separator();
 
-            if ui
-                .button("Nouveau")
-                .on_hover_text("Efface le schéma (annulable)")
-                .clicked()
-            {
-                let was_empty = self.document.schematic().is_empty();
-                match self.document.clear() {
-                    Ok(()) => {
-                        self.canvas.cancel_interaction();
-                        self.canvas.request_fit();
-                        if was_empty {
-                            self.status.info("Le schéma est déjà vide.");
-                        } else {
-                            self.status
-                                .success("Schéma effacé. Ctrl+Z permet de le restaurer.");
-                        }
-                    }
-                    Err(error) => self.status.error(error.user_message()),
-                }
-            }
-
-            if ui
-                .button("Projet")
-                .on_hover_text("Enregistrer, charger ou partager le schéma en JSON")
-                .clicked()
-            {
-                self.project_dialog.open_with(&self.document);
-            }
-
-            ui.add_enabled_ui(self.document.can_undo(), |ui| {
-                if ui.button("Annuler").on_hover_text("Ctrl+Z").clicked() {
-                    self.undo();
-                }
-            });
-            ui.add_enabled_ui(self.document.can_redo(), |ui| {
-                if ui.button("Rétablir").on_hover_text("Ctrl+Y").clicked() {
-                    self.redo();
-                }
-            });
-            ui.separator();
-
-            let has_symbols = selection_has_symbols(&self.document);
-            ui.add_enabled_ui(has_symbols, |ui| {
-                if ui.button("Pivoter").on_hover_text("Maj+R").clicked() {
-                    self.rotate();
-                }
-                if ui.button("Miroir").on_hover_text("M").clicked() {
-                    self.mirror();
-                }
-            });
-            ui.add_enabled_ui(!self.document.selection().is_empty(), |ui| {
-                if ui.button("Supprimer").on_hover_text("Suppr").clicked() {
-                    self.delete();
-                }
-            });
-            ui.add_enabled_ui(!self.document.selection().is_empty(), |ui| {
-                if ui
-                    .button("Copier")
-                    .on_hover_text("Ctrl+C : copie interne")
-                    .clicked()
-                {
-                    self.copy();
-                }
-                if ui
-                    .button("Dupliquer")
-                    .on_hover_text("Ctrl+D : copie et colle avec décalage")
-                    .clicked()
-                {
-                    self.duplicate();
-                }
-            });
-            ui.add_enabled_ui(self.document.clipboard().is_some(), |ui| {
-                if ui
-                    .button("Coller")
-                    .on_hover_text("Ctrl+V : aperçu fantôme puis clic")
-                    .clicked()
-                {
-                    self.paste();
-                }
-            });
-            ui.add_enabled_ui(self.document.selection().len() >= 2, |ui| {
-                ui.menu_button("Aligner", |ui| {
-                    if ui.button("Gauche").clicked() {
-                        self.align(Alignment::Left);
-                        ui.close();
-                    }
-                    if ui.button("Centre horizontal").clicked() {
-                        self.align(Alignment::CenterX);
-                        ui.close();
-                    }
-                    if ui.button("Droite").clicked() {
-                        self.align(Alignment::Right);
-                        ui.close();
-                    }
-                    if ui.button("Haut").clicked() {
-                        self.align(Alignment::Top);
-                        ui.close();
-                    }
-                    if ui.button("Milieu vertical").clicked() {
-                        self.align(Alignment::CenterY);
-                        ui.close();
-                    }
-                    if ui.button("Bas").clicked() {
-                        self.align(Alignment::Bottom);
-                        ui.close();
-                    }
-                    ui.separator();
-                    if ui
-                        .add_enabled(
-                            self.document.selection().len() >= 3,
-                            egui::Button::new("Distribuer horizontalement"),
-                        )
-                        .clicked()
-                    {
-                        self.distribute(DistributionAxis::Horizontal);
-                        ui.close();
-                    }
-                    if ui
-                        .add_enabled(
-                            self.document.selection().len() >= 3,
-                            egui::Button::new("Distribuer verticalement"),
-                        )
-                        .clicked()
-                    {
-                        self.distribute(DistributionAxis::Vertical);
-                        ui.close();
-                    }
-                });
-            });
-            if ui
-                .button("Ajuster")
-                .on_hover_text("Home : cadrer tout le schéma")
-                .clicked()
-            {
-                self.canvas.request_fit();
-            }
-            ui.add_enabled_ui(!self.document.selection().is_empty(), |ui| {
-                if ui
-                    .button("Cadrer sél.")
-                    .on_hover_text("Ctrl+Home : cadrer la sélection")
-                    .clicked()
-                {
-                    self.fit_selection();
-                }
-            });
-            ui.separator();
             let now = ui.input(|input| input.time);
             let running = self.instruments.realtime_active();
             let paused = self.instruments.realtime_paused();
@@ -771,201 +652,6 @@ impl CircuitApp {
             }
             if self.instruments.is_busy() {
                 ui.spinner();
-            }
-            ui.menu_button("Afficher", |ui| {
-                let settings = self.canvas.settings_mut();
-                ui.label(RichText::new("Calques").strong());
-                ui.checkbox(&mut settings.layers.voltage, "Tension des fils");
-                ui.checkbox(&mut settings.layers.current, "Courant animé");
-                ui.checkbox(&mut settings.layers.power, "Puissance");
-                ui.checkbox(&mut settings.layers.values, "Valeurs");
-                ui.checkbox(&mut settings.layers.references, "Références");
-                ui.checkbox(&mut settings.layers.net_labels, "Labels de nets");
-                ui.separator();
-                ui.horizontal(|ui| {
-                    ui.label("Palette tension");
-                    egui::ComboBox::from_id_salt("voltage_palette")
-                        .selected_text(settings.voltage_palette.label())
-                        .show_ui(ui, |ui| {
-                            for palette in [
-                                crate::ui::theme::VoltagePalette::Colorblind,
-                                crate::ui::theme::VoltagePalette::HighVisibility,
-                            ] {
-                                ui.selectable_value(
-                                    &mut settings.voltage_palette,
-                                    palette,
-                                    palette.label(),
-                                );
-                            }
-                        });
-                });
-                ui.horizontal(|ui| {
-                    ui.label("Courant");
-                    egui::ComboBox::from_id_salt("current_direction")
-                        .selected_text(settings.current_direction.label())
-                        .show_ui(ui, |ui| {
-                            for direction in [
-                                crate::ui::theme::CurrentDirection::Conventional,
-                                crate::ui::theme::CurrentDirection::Electrons,
-                            ] {
-                                ui.selectable_value(
-                                    &mut settings.current_direction,
-                                    direction,
-                                    direction.label(),
-                                );
-                            }
-                        });
-                });
-                ui.horizontal(|ui| {
-                    ui.label("Résistance");
-                    egui::ComboBox::from_id_salt("resistor_style")
-                        .selected_text(settings.resistor_style.label())
-                        .show_ui(ui, |ui| {
-                            for style in [
-                                crate::ui::theme::ResistorStyle::European,
-                                crate::ui::theme::ResistorStyle::American,
-                            ] {
-                                ui.selectable_value(
-                                    &mut settings.resistor_style,
-                                    style,
-                                    style.label(),
-                                );
-                            }
-                        });
-                });
-                ui.checkbox(&mut settings.small_grid, "Petite grille");
-                ui.add(
-                    egui::Slider::new(&mut settings.value_scale, 0.7..=1.5)
-                        .text("Taille des valeurs"),
-                );
-            });
-            ui.menu_button("Vue", |ui| {
-                ui.checkbox(&mut self.show_palette, "Palette");
-                ui.checkbox(&mut self.show_inspector, "Inspecteur");
-                ui.checkbox(&mut self.show_instruments, "Panneau d'instruments");
-                let mut scopes = self.scopes.visible();
-                if ui.checkbox(&mut scopes, "Portées incrustées").changed() {
-                    self.scopes.set_visible(scopes);
-                }
-                let mut minimap = self.canvas.minimap_visible();
-                if ui.checkbox(&mut minimap, "Mini-carte").changed() {
-                    self.canvas.set_minimap_visible(minimap);
-                }
-                let mut flow = self.canvas.current_flow_visible();
-                if ui
-                    .checkbox(&mut flow, "Courant animé")
-                    .on_hover_text("Anime le flux de courant après une simulation")
-                    .changed()
-                {
-                    self.canvas.set_current_flow_visible(flow);
-                }
-                ui.separator();
-                ui.label(RichText::new("Disposition").small().color(ui::MUTED));
-                for layout in LayoutPreset::ALL {
-                    if ui.button(layout.label()).clicked() {
-                        self.apply_layout(layout);
-                        ui.close();
-                    }
-                }
-                ui.separator();
-                if ui
-                    .button("Préférences d’affichage…")
-                    .on_hover_text("Contraste, taille de l’interface et animations (Ctrl+Maj+A)")
-                    .clicked()
-                {
-                    self.show_preferences = true;
-                    ui.close();
-                }
-                ui.separator();
-                ui.horizontal(|ui| {
-                    if ui
-                        .small_button("−")
-                        .on_hover_text("Zoom arrière (-)")
-                        .clicked()
-                    {
-                        self.canvas.zoom_out();
-                    }
-                    ui.label(format!("{:.0} %", self.canvas.viewport().zoom_percent()));
-                    if ui
-                        .small_button("+")
-                        .on_hover_text("Zoom avant (+)")
-                        .clicked()
-                    {
-                        self.canvas.zoom_in();
-                    }
-                });
-                if ui
-                    .button("Zoom 100 %")
-                    .on_hover_text("0 : zoom par défaut")
-                    .clicked()
-                {
-                    self.canvas.reset_zoom();
-                    ui.close();
-                }
-                if ui
-                    .button("Origine")
-                    .on_hover_text("Centrer la grille sur l'origine")
-                    .clicked()
-                {
-                    self.canvas.reset_view();
-                    ui.close();
-                }
-            });
-            ui.separator();
-            if ui
-                .button("Démarrage")
-                .on_hover_text("Guide de démarrage rapide")
-                .clicked()
-            {
-                self.show_onboarding = true;
-            }
-            if ui
-                .button("Accessibilité")
-                .on_hover_text("Contraste, taille de l’interface et animations (Ctrl+Maj+A)")
-                .clicked()
-            {
-                self.show_preferences = true;
-            }
-            ui.menu_button("Exemples", |ui| {
-                for (label, builder) in [
-                    (
-                        "RC",
-                        Document::demo as fn() -> Result<Document, crate::document::ActionError>,
-                    ),
-                    ("Diviseur", Document::divider_example),
-                    ("LED", Document::led_example),
-                    ("Interrupteur", Document::switch_example),
-                    ("RLC", Document::rlc_example),
-                ] {
-                    if ui.button(label).clicked() {
-                        match builder() {
-                            Ok(document) => self.load_example(document, label),
-                            Err(error) => self.status.error(error.user_message()),
-                        }
-                        ui.close();
-                    }
-                }
-            });
-            if ui
-                .button("Commandes")
-                .on_hover_text("Palette de commandes (Ctrl+K)")
-                .clicked()
-            {
-                self.palette.open(self.canvas.last_pointer_grid());
-            }
-            if ui
-                .button("À propos")
-                .on_hover_text("Version, licence et licences tierces")
-                .clicked()
-            {
-                self.show_about = true;
-            }
-            if ui
-                .button("Aide")
-                .on_hover_text("Raccourcis et fonctionnement (?)")
-                .clicked()
-            {
-                self.show_help = !self.show_help;
             }
         });
         ui.add_space(2.0);
