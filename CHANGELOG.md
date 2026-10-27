@@ -36,6 +36,11 @@ sémantique.
 - L’échelon de source est désactivé par défaut pour le mode live.
 - La barre d’outils remplace **Simuler** par les contrôles de session continue.
 
+### Fixed
+
+- La hauteur des portées incrustées suit désormais la hauteur de la section et
+  se répartit entre les portées visibles.
+
 ## [0.4.0] - 2026-10-26
 
 ### Added

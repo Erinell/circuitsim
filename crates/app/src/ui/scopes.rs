@@ -182,13 +182,16 @@ impl InlineScopes {
             );
         });
         ui.separator();
+        let available = ui.available_height();
+        let count = self.scopes.len().max(1) as f32;
+        let plot_height = ((available - 24.0) / count - 78.0).clamp(96.0, 640.0);
         egui::ScrollArea::vertical()
             .id_salt("inline_scopes")
             .auto_shrink([false, false])
             .show(ui, |ui| {
                 let mut actions = Vec::new();
                 for (index, scope) in self.scopes.iter_mut().enumerate() {
-                    let action = scope.show(ui, instruments, &catalog);
+                    let action = scope.show(ui, instruments, &catalog, plot_height);
                     if action != ScopeAction::None {
                         actions.push((index, action));
                     }
@@ -240,6 +243,7 @@ impl Scope {
         ui: &mut Ui,
         instruments: &InstrumentsState,
         catalog: &SignalCatalog,
+        plot_height: f32,
     ) -> ScopeAction {
         let mut action = ScopeAction::None;
         let live_traces = self.traces(instruments);
@@ -346,9 +350,11 @@ impl Scope {
         let unit = common_unit(&traces);
         self.show_values(ui, &traces, unit);
         match self.view {
-            ScopeView::Time => self.show_time(ui, &traces, unit, instruments.nominal_step()),
+            ScopeView::Time => {
+                self.show_time(ui, &traces, unit, instruments.nominal_step(), plot_height)
+            }
             ScopeView::Spectrum => {
-                self.show_spectrum(ui, &traces, unit, instruments.nominal_step())
+                self.show_spectrum(ui, &traces, unit, instruments.nominal_step(), plot_height)
             }
         }
         action
@@ -436,21 +442,27 @@ impl Scope {
         traces: &[Trace],
         unit: Option<SignalUnit>,
         nominal_step: Option<f64>,
+        plot_height: f32,
     ) {
         let _ = nominal_step;
         let mut clicked_time = None;
         if self.separate {
+            let each = ((plot_height - 30.0) / traces.len().max(1) as f32).max(80.0);
             for (index, trace) in traces.iter().enumerate() {
                 let plot_id = format!("inline_scope_{}_signal_{index}", self.id);
                 if let Some(time) =
-                    self.plot_one(ui, plot_id, std::slice::from_ref(trace), unit, 90.0)
+                    self.plot_one(ui, plot_id, std::slice::from_ref(trace), unit, each)
                 {
                     clicked_time = Some(time);
                 }
             }
-        } else if let Some(time) =
-            self.plot_one(ui, format!("inline_scope_{}", self.id), traces, unit, 150.0)
-        {
+        } else if let Some(time) = self.plot_one(
+            ui,
+            format!("inline_scope_{}", self.id),
+            traces,
+            unit,
+            plot_height,
+        ) {
             clicked_time = Some(time);
         }
         if let Some(time) = clicked_time {
@@ -464,6 +476,7 @@ impl Scope {
         traces: &[Trace],
         unit: Option<SignalUnit>,
         nominal_step: Option<f64>,
+        plot_height: f32,
     ) {
         let Some(step) = nominal_step else {
             ui.label(RichText::new("FFT indisponible sans pas nominal.").color(MUTED));
@@ -487,7 +500,7 @@ impl Scope {
             .map(|(frequency, magnitude)| [*frequency, *magnitude])
             .collect::<Vec<_>>();
         Plot::new(format!("inline_scope_{}_fft", self.id))
-            .height(150.0)
+            .height(plot_height)
             .allow_drag(true)
             .allow_zoom(true)
             .x_axis_label("Fréquence")
