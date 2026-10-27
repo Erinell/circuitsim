@@ -425,6 +425,52 @@ fn led_vf_and_if_define_the_forward_characteristic() {
 }
 
 #[test]
+fn schottky_diode_uses_its_lower_forward_voltage() {
+    let mut builder = NetlistBuilder::new();
+    let ground = builder.add_node("0", NodeKind::Ground).unwrap();
+    let input = builder.add_node("in", NodeKind::Electrical).unwrap();
+    let output = builder.add_node("out", NodeKind::Electrical).unwrap();
+    builder
+        .add_component(
+            ComponentKind::VoltageSource,
+            "V1",
+            number_param("dc", 5.0),
+            vec![input, ground],
+        )
+        .unwrap();
+    builder
+        .add_component(
+            ComponentKind::Resistor,
+            "R1",
+            number(465.0),
+            vec![input, output],
+        )
+        .unwrap();
+    let mut params = ParamMap::new();
+    params.insert("type".to_owned(), ParamValue::Text("schottky".to_owned()));
+    params.insert("vf".to_owned(), ParamValue::Number(0.35));
+    params.insert("if".to_owned(), ParamValue::Number(0.01));
+    params.insert("n".to_owned(), ParamValue::Number(1.05));
+    params.insert("imax".to_owned(), ParamValue::Number(0.2));
+    builder
+        .add_component(ComponentKind::Diode, "D1", params, vec![output, ground])
+        .unwrap();
+    let netlist = builder.build().unwrap();
+
+    let result = solve_dc(&netlist, DcOptions::default()).unwrap();
+    let voltage = result.node_voltage(output).unwrap();
+    let current = (5.0 - voltage) / 465.0;
+    assert!(
+        (0.3..0.4).contains(&voltage),
+        "Schottky voltage was {voltage}"
+    );
+    assert!(
+        (0.008..0.012).contains(&current),
+        "Schottky current was {current}"
+    );
+}
+
+#[test]
 fn reports_non_convergence_for_a_limited_iteration_budget() {
     let mut builder = NetlistBuilder::new();
     let ground = builder.add_node("0", NodeKind::Ground).unwrap();

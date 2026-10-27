@@ -359,7 +359,7 @@ fn builtin_defs() -> Vec<SymbolDef> {
         )
         .expect("ground definition is valid"),
         switch_def(),
-        two_terminal(SymbolKind::Diode, &[("is", 1e-14), ("n", 1.0)]),
+        diode_def(),
         two_terminal(
             SymbolKind::Led,
             &[
@@ -413,6 +413,20 @@ fn probe_defs() -> Vec<SymbolDef> {
         .expect("probe definition is valid")
     })
     .collect()
+}
+
+fn diode_def() -> SymbolDef {
+    let mut defaults = numeric_params(&[("vf", 0.7), ("if", 0.01), ("n", 1.0), ("imax", 0.2)]);
+    defaults.insert("type".to_owned(), ParamValue::Text("standard".to_owned()));
+    SymbolDef::new(
+        SymbolKind::Diode,
+        vec![
+            PinDef::new("a", GridPos::new(-2, 0)),
+            PinDef::new("b", GridPos::new(2, 0)),
+        ],
+        defaults,
+    )
+    .expect("diode definition is valid")
 }
 
 fn two_terminal(kind: SymbolKind, defaults: &[(&str, f64)]) -> SymbolDef {
@@ -482,6 +496,17 @@ mod tests {
         let inductor = registry.get(&SymbolKind::Inductor).unwrap();
         assert!(inductor.defaults.contains_key("inductance"));
         assert!(inductor.defaults.contains_key("resistance"));
+        let diode = registry.get(&SymbolKind::Diode).unwrap();
+        for key in ["type", "vf", "if", "n", "imax"] {
+            assert!(
+                diode.defaults.contains_key(key),
+                "missing diode param {key}"
+            );
+        }
+        assert_eq!(
+            diode.defaults.get("type").and_then(ParamValue::as_text),
+            Some("standard")
+        );
     }
 
     #[test]
