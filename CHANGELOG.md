@@ -15,6 +15,9 @@ sémantique.
 - Nouvel exemple **RLC parallèle commuté** dans **Fichier → Exemples**, avec
   `V1 = 5 V`, `R1 = 10 Ω`, `L1 = 1 H`, `C1 = 15 µF`, `R2 = 100 Ω` et `SW1`
   ouvert.
+- L’exemple **Diviseur** adopte la disposition demandée : source à droite,
+  masse à gauche, `OUT` entre les deux résistances de 1 kΩ ; la sortie reste à
+  2,5 V.
 
 ### Changed
 
