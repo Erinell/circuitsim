@@ -62,6 +62,8 @@ cargo xtask web-serve
 ```
 
 L'application ouvre le circuit RC de démonstration et le panneau Instruments.
+La galerie **Fichier → Exemples** contient RC, diviseur, LED, interrupteur, RLC
+série et RLC parallèle commuté.
 `web-build` produit `dist/`, `web-serve` écoute sur `http://127.0.0.1:8080`.
 Utilisation : [UI.md](UI.md), [INSTRUMENTS.md](INSTRUMENTS.md) ; déploiement :
 [DELIVERY.md](DELIVERY.md).

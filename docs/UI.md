@@ -69,8 +69,8 @@ nets peuvent être masqués séparément. Le thème **Clair**, la **petite grill
 le style de résistance **européen** ou **américain** complètent les thèmes
 Sombre et Contraste élevé.
 
-Le menu **Exemples** charge des circuits originaux : RC, diviseur, LED,
-interrupteur et RLC. Un clic droit sur un composant propose **Ajouter un
+Le menu **Fichier → Exemples** charge des circuits originaux : RC, diviseur, LED,
+interrupteur, RLC série et RLC parallèle commuté. Un clic droit sur un composant propose **Ajouter un
 curseur** : le curseur apparaît sous le symbole, se règle par glisser ou molette
 et applique la valeur à chaud en une seule étape annulable.
 
@@ -214,10 +214,10 @@ live.
   RMS et nombre d’échantillons restent disponibles lorsque le signal est
   sélectionné.
 - **Sondes** : les composants **Voltmètre**, **Ampèremètre** et **Ohmmètre** sont
-  placés depuis la palette. La liste des sondes apparaît dans la colonne des
-  contrôles, à côté des portées, avec **Afficher** (valeur sur le canevas) et
-  **Graphique** (tracé quand le signal existe). Le voltmètre se pose sur un fil ;
-  l’ampèremètre et l’ohmmètre mesurent le composant sous la sonde.
+  placés depuis la palette. Leur liste est intégrée aux portées, dans la section
+  **Sondes** du panneau : valeur courante, **Graphique** (ajout du signal à la
+  portée active) et **Afficher** (valeur sur le canevas). Le voltmètre se pose sur
+  un fil ; l’ampèremètre et l’ohmmètre mesurent le composant sous la sonde.
 - **Spectre** : réutilise le dernier transitoire, choisit un signal et affiche
   pic non continu, fréquence et résolution. Il reste à la demande.
 - **Bode** : analyse AC logarithmique, source, amplitude, sortie ; gain et phase

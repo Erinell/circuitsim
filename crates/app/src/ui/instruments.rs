@@ -3,7 +3,7 @@
 use std::collections::BTreeSet;
 use std::time::Duration;
 
-use editor_core::{SymbolId, SymbolKind};
+use editor_core::SymbolId;
 use eframe::egui::{self, Align, Align2, Color32, FontId, Layout, RichText, Ui, Vec2};
 use egui_plot::{HoverPosition, Line, Plot};
 use sim_core::units::{format_si_precision, Unit};
@@ -12,10 +12,10 @@ use worker::protocol::{AnalysisKind, AnalysisResult};
 #[cfg(test)]
 use crate::analysis::prepare_transient;
 use crate::analysis::{
-    analysis_name, bode_csv, bode_trace, compute_spectrum, prepare_ac, probe_readings,
-    spectrum_csv, transient_csv, transient_traces, transient_traces_from_samples, AcSettings,
-    BodePoint, BodeTrace, CompletedRun, SignalCatalog, SignalId, SignalUnit, SimulationClient,
-    SimulationError, Spectrum, Trace, TransientSettings, MAX_AC_POINTS,
+    analysis_name, bode_csv, bode_trace, compute_spectrum, prepare_ac, spectrum_csv, transient_csv,
+    transient_traces, transient_traces_from_samples, AcSettings, BodePoint, BodeTrace,
+    CompletedRun, SignalCatalog, SignalId, SignalUnit, SimulationClient, SimulationError, Spectrum,
+    Trace, TransientSettings, MAX_AC_POINTS,
 };
 use crate::document::Document;
 use crate::export;
@@ -455,7 +455,7 @@ impl InstrumentsState {
         let height = ui.available_height().max(120.0);
         match self.tab {
             InstrumentTab::Scope => {
-                self.scope_tab(ui, scopes, document, &catalog, status, height);
+                self.scope_tab(ui, scopes, document, status, height);
             }
             InstrumentTab::Spectrum | InstrumentTab::Bode => {
                 ui.horizontal_top(|ui| {
@@ -509,7 +509,6 @@ impl InstrumentsState {
         ui: &mut Ui,
         scopes: &mut InlineScopes,
         document: &Document,
-        catalog: &SignalCatalog,
         status: &mut Status,
         height: f32,
     ) {
@@ -533,8 +532,6 @@ impl InstrumentsState {
                         .show(ui, |ui| {
                             self.live_controls(ui, document, now, status);
                             ui.separator();
-                            self.probe_controls(ui, document, catalog, scopes);
-                            ui.separator();
                             self.export_controls(ui, status);
                         });
                 },
@@ -545,8 +542,7 @@ impl InstrumentsState {
                 Vec2::new(plot_width, height),
                 Layout::top_down(Align::Min),
                 |ui| {
-                    let instruments: &InstrumentsState = self;
-                    scopes.show(ui, instruments, document, status);
+                    scopes.show(ui, self, document, status);
                 },
             );
         });
@@ -738,85 +734,6 @@ impl InstrumentsState {
         }
         ui.separator();
         self.export_controls(ui, status);
-    }
-
-    fn probe_controls(
-        &mut self,
-        ui: &mut Ui,
-        document: &Document,
-        catalog: &SignalCatalog,
-        scopes: &mut InlineScopes,
-    ) {
-        let readings = probe_readings(document, &self.live_values());
-        if readings.is_empty() {
-            ui.label(
-                RichText::new(
-                    "Placez un voltmètre, un ampèremètre ou un ohmmètre depuis la palette.",
-                )
-                .small()
-                .color(MUTED),
-            );
-            return;
-        }
-        ui.heading("Sondes");
-        for reading in readings {
-            ui.horizontal(|ui| {
-                let mut visible = self.probe_visible(reading.id);
-                if ui
-                    .checkbox(&mut visible, &reading.label)
-                    .on_hover_text("Afficher ou masquer la mesure sur le canevas")
-                    .changed()
-                {
-                    self.set_probe_visible(reading.id, visible);
-                }
-                ui.label(
-                    RichText::new(symbol_kind_short(&reading.kind))
-                        .small()
-                        .color(MUTED),
-                );
-            });
-            let value = reading.value.map_or_else(
-                || "—".to_owned(),
-                |value| {
-                    format_si_precision(
-                        value,
-                        reading.unit.unwrap_or(sim_core::units::Unit::Volt),
-                        4,
-                    )
-                },
-            );
-            ui.label(
-                RichText::new(format!("Valeur : {value}"))
-                    .small()
-                    .color(MUTED),
-            );
-            if let Some(signal) = reading.signal() {
-                if catalog.contains(&signal) {
-                    let mut plotted = scopes.contains_signal(&signal);
-                    if ui
-                        .checkbox(&mut plotted, "Graphique")
-                        .on_hover_text("Ajouter ou retirer ce signal de la portée")
-                        .changed()
-                    {
-                        if plotted {
-                            scopes.push_signal(signal.clone());
-                            self.selected.insert(signal);
-                        } else {
-                            scopes.remove_signal(&signal);
-                            self.selected.remove(&signal);
-                        }
-                    }
-                }
-            }
-        }
-        ui.label(
-            RichText::new(
-                "Le voltmètre se pose sur un fil ; l’ampèremètre et l’ohmmètre \
-                 mesurent le composant sous la sonde.",
-            )
-            .small()
-            .color(MUTED),
-        );
     }
 
     fn spectrum_controls(
@@ -1757,15 +1674,6 @@ fn bode_output_control(ui: &mut Ui, output: &mut Option<String>, catalog: &Signa
                 ui.selectable_value(output, Some(name.clone()), name.as_str());
             }
         });
-}
-
-fn symbol_kind_short(kind: &SymbolKind) -> &'static str {
-    match kind {
-        SymbolKind::Voltmeter => "V",
-        SymbolKind::Ammeter => "A",
-        SymbolKind::Ohmmeter => "Ω",
-        _ => "sonde",
-    }
 }
 
 pub(crate) fn nearest_sample_time(times: &[f64], target: f64) -> Option<f64> {

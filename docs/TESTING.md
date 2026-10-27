@@ -43,7 +43,7 @@ Au 27 octobre 2026, `cargo test --workspace` exécute **267 tests** :
 | `sim-core` transitoire | 19 | RC/RL, événements, diode, opamp, énergie, session incrémentale, mise à jour à chaud |
 | `sim-core` AC | 15 | RC/RL/RLC, phase, diode, opamp, balayages, erreurs |
 | `editor-core` | 47 | grille, symboles, schéma, historique, ERC, extraction, JSON, séries E, snap/routage |
-| `circuitsim-app` | 133 | document, projet JSON, vue, navigation, mini-carte, UI, inspecteur, historique, presse-papiers, simulation continue, mise à jour à chaud, calques, palettes, survol, câblage direct, raccourcis, aide générée, contrastes, panneau unifié et portées, FFT et curseurs A/B, curseurs de réglage, exemples et polarité, préférences persistées et migration, À propos, onboarding, accessibilité, sondes, instruments, worker, FFT, Bode, CSV |
+| `circuitsim-app` | 134 | document, projet JSON, vue, navigation, mini-carte, UI, inspecteur, historique, presse-papiers, simulation continue, mise à jour à chaud, calques, palettes, survol, câblage direct, raccourcis, aide générée, contrastes, panneau unifié et portées, sondes intégrées, FFT et curseurs A/B, curseurs de réglage, exemples et polarité, préférences persistées et migration, À propos, onboarding, accessibilité, sondes, instruments, worker, FFT, Bode, CSV |
 | `worker-protocol` | 11 | trames, version, netlist, erreurs, transports |
 | `worker` | 13 | coalescence, cadence, révisions, DC/transitoire/AC |
 | `editor_invariants` | 2 | proptest undo/redo et extraction |
@@ -63,14 +63,14 @@ recherche floue, placement sur canevas, zoom/pan, cadrage de sélection,
 mini-carte, dispositions, courant animé, session transitoire incrémentale,
 mise à jour à chaud d'une session, démarrage live, pause/reset/pas, mapping
 tension→couleur, calques et palettes, lecture au survol, câblage direct depuis
-une broche, coupe de fil, raccourcis sans collision, panneau unifié avec portées
-et FFT, curseurs A/B, fusion et réordonnancement, curseurs de réglage, exemples
-originaux et polarité positive des sources, préférences versionnées et À propos,
-sondes V/A/Ω, redimensionnement d’extrémités, déplacement de segment sans embout,
-fils en erreur ERC, basculement d’interrupteur, arrêt du flux à l’ouverture,
-propriétés par double-clic, debounce du rafraîchissement automatique, cible figée
-du menu contextuel, zone de clic resserrée, marqueur Bode, guide de démarrage et
-préférences d’affichage.
+une broche, coupe de fil, raccourcis sans collision, panneau unifié avec portées,
+sondes intégrées et FFT, curseurs A/B, fusion et réordonnancement, curseurs de
+réglage, exemples originaux dont le RLC parallèle commuté et polarité positive des
+sources, préférences versionnées et À propos, sondes V/A/Ω, redimensionnement
+d’extrémités, déplacement de segment sans embout, fils en erreur ERC, basculement
+d’interrupteur, arrêt du flux à l’ouverture, propriétés par double-clic, debounce
+du rafraîchissement automatique, cible figée du menu contextuel, zone de clic
+resserrée, marqueur Bode, guide de démarrage et préférences d’affichage.
 
 Deux propriétés proptest utilisent 64 cas dans les invariants : undo/redo
 restaure exactement les contenus et l’historique final ; deux extractions du même

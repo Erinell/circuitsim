@@ -10,7 +10,11 @@ sémantique.
 
 - Panneau inférieur unique **Instruments et portées** : les contrôles live, les
   sondes, l’export et les portées empilées partagent désormais la même zone, avec
-  les onglets **Portées**, **Spectre** et **Bode**.
+  les onglets **Portées**, **Spectre** et **Bode**. Les sondes sont regroupées
+  avec les signaux directement dans les portées.
+- Nouvel exemple **RLC parallèle commuté** dans **Fichier → Exemples**, avec
+  `V1 = 5 V`, `R1 = 10 Ω`, `L1 = 1 H`, `C1 = 15 µF`, `R2 = 100 Ω` et `SW1`
+  ouvert.
 
 ### Changed
 
