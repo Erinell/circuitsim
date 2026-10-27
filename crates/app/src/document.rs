@@ -69,6 +69,9 @@ pub enum ActionError {
     /// The selected symbol is not a switch.
     #[error("le symbole n'est pas un interrupteur")]
     NotASwitch,
+    /// The cut point is not strictly inside the wire.
+    #[error("le point de coupe doit être à l'intérieur du fil")]
+    CannotSplitWire,
 }
 
 impl ActionError {
@@ -130,6 +133,9 @@ impl ActionError {
                     .to_owned()
             }
             Self::NotASwitch => "Ce composant n'est pas un interrupteur.".to_owned(),
+            Self::CannotSplitWire => {
+                "Le point de coupe doit être strictement à l'intérieur du fil.".to_owned()
+            }
         }
     }
 }
@@ -1426,6 +1432,35 @@ impl Document {
         self.execute(Command::ReplaceWire { old, new: moved })
     }
 
+    /// Splits a wire into two segments at an interior point.
+    pub fn split_wire(&mut self, wire_id: WireId, at: GridPos) -> Result<(), ActionError> {
+        let old = self
+            .wire(wire_id)
+            .ok_or(ActionError::MissingObject)?
+            .clone();
+        if !old.contains(at) || at == old.a || at == old.b {
+            return Err(ActionError::CannotSplitWire);
+        }
+        let mut allocator = self.schematic.clone();
+        let first_id = WireId(
+            allocator
+                .allocate_id()
+                .map_err(|_| ActionError::IdSpaceExhausted)?,
+        );
+        let second_id = WireId(
+            allocator
+                .allocate_id()
+                .map_err(|_| ActionError::IdSpaceExhausted)?,
+        );
+        let first = Wire::new(first_id, old.a, at)?;
+        let second = Wire::new(second_id, at, old.b)?;
+        self.execute(single_or_composite(vec![
+            Command::RemoveWire(old),
+            Command::AddWire(first),
+            Command::AddWire(second),
+        ]))
+    }
+
     /// Returns free wire endpoints that can be extended or shortened.
     pub fn free_wire_endpoints(&self) -> Vec<(WireId, WireEnd, GridPos)> {
         let mut endpoints = Vec::new();
@@ -2269,6 +2304,45 @@ mod tests {
             .unwrap()[0];
         let problems = document.problem_wires();
         assert!(problems.contains(&wire));
+    }
+
+    #[test]
+    fn splits_a_wire_with_one_undo() {
+        let mut document = Document::new();
+        let wire = document
+            .add_wire(GridPos::new(0, 0), GridPos::new(8, 0))
+            .unwrap()[0];
+        document.split_wire(wire, GridPos::new(4, 0)).unwrap();
+        assert_eq!(document.schematic().wires().count(), 2);
+        assert!(document.wire(wire).is_none());
+        assert!(document
+            .schematic()
+            .wires()
+            .any(|wire| wire.a == GridPos::new(0, 0) && wire.b == GridPos::new(4, 0)));
+        assert!(document
+            .schematic()
+            .wires()
+            .any(|wire| wire.a == GridPos::new(4, 0) && wire.b == GridPos::new(8, 0)));
+        document.undo().unwrap();
+        assert_eq!(document.schematic().wires().count(), 1);
+        assert!(document.wire(wire).is_some());
+    }
+
+    #[test]
+    fn rejects_a_wire_split_outside_its_interior() {
+        let mut document = Document::new();
+        let wire = document
+            .add_wire(GridPos::new(0, 0), GridPos::new(8, 0))
+            .unwrap()[0];
+        assert!(matches!(
+            document.split_wire(wire, GridPos::new(0, 0)),
+            Err(ActionError::CannotSplitWire)
+        ));
+        assert!(matches!(
+            document.split_wire(wire, GridPos::new(4, 2)),
+            Err(ActionError::CannotSplitWire)
+        ));
+        assert_eq!(document.schematic().wires().count(), 1);
     }
 
     #[test]

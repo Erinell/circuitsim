@@ -34,7 +34,7 @@ l'installe séparément.
 
 ## 3. Suite et couverture
 
-Au 27 octobre 2026, `cargo test --workspace` exécute **248 tests** :
+Au 27 octobre 2026, `cargo test --workspace` exécute **253 tests** :
 
 | Groupe | Tests | Points clés |
 | --- | ---: | --- |
@@ -43,7 +43,7 @@ Au 27 octobre 2026, `cargo test --workspace` exécute **248 tests** :
 | `sim-core` transitoire | 19 | RC/RL, événements, diode, opamp, énergie, session incrémentale, mise à jour à chaud |
 | `sim-core` AC | 15 | RC/RL/RLC, phase, diode, opamp, balayages, erreurs |
 | `editor-core` | 47 | grille, symboles, schéma, historique, ERC, extraction, JSON, séries E, snap/routage |
-| `circuitsim-app` | 106 | document, vue, navigation, mini-carte, UI, inspecteur, historique, presse-papiers, simulation continue, mise à jour à chaud, calques, palettes, curseurs, onboarding, accessibilité, sondes, instruments, worker, FFT, Bode, CSV |
+| `circuitsim-app` | 111 | document, vue, navigation, mini-carte, UI, inspecteur, historique, presse-papiers, simulation continue, mise à jour à chaud, calques, palettes, survol, câblage direct, raccourcis, curseurs, onboarding, accessibilité, sondes, instruments, worker, FFT, Bode, CSV |
 | `worker-protocol` | 11 | trames, version, netlist, erreurs, transports |
 | `worker` | 13 | coalescence, cadence, révisions, DC/transitoire/AC |
 | `editor_invariants` | 2 | proptest undo/redo et extraction |
@@ -62,9 +62,10 @@ presse-papiers, duplication, rotation/miroir de groupe, valeurs simulées,
 recherche floue, placement sur canevas, zoom/pan, cadrage de sélection,
 mini-carte, dispositions, courant animé, session transitoire incrémentale,
 mise à jour à chaud d'une session, démarrage live, pause/reset/pas, mapping
-tension→couleur, calques et palettes, sondes V/A/Ω, redimensionnement
-d’extrémités, déplacement de segment sans embout, fils en erreur ERC,
-basculement d’interrupteur, propriétés par double-clic, debounce du
+tension→couleur, calques et palettes, lecture au survol, câblage direct depuis
+une broche, coupe de fil, raccourcis sans collision, sondes V/A/Ω,
+redimensionnement d’extrémités, déplacement de segment sans embout, fils en
+erreur ERC, basculement d’interrupteur, propriétés par double-clic, debounce du
 rafraîchissement automatique, curseurs A/B, mesures d’intervalle, marqueur Bode,
 guide de démarrage et préférences d’affichage.
 

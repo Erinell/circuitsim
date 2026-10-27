@@ -19,6 +19,10 @@ sémantique.
   labels, avec taille des valeurs et placement évitant les fils.
 - Thème clair, petite grille, halos de puissance et styles de résistance
   européen/américain.
+- Lecture au survol, câblage par glisser depuis une broche, menus contextuels
+  enrichis, coupe de fil et mesures directes.
+- Raccourcis de placement à une lettre et barre d’outils compacte pilotée par
+  les favoris.
 
 ### Changed
 

@@ -21,13 +21,13 @@ La distribution web utilise `index.html` et Trunk.
 | `ui/properties.rs`, `ui/erc.rs` | inspecteur, ERC et nets |
 | `ui/instruments.rs` | panneau de simulation et graphiques |
 
-De haut en bas : barre d'outils (document, undo/redo, outils, transformations,
-alignement, **Cadrer sél.**, **Marche/Arrêt**, **Reset**, **Pas**, **Vue**,
-**Commandes**, aide), palette filtrable à gauche, canevas central,
-inspecteur/ERC à droite, instruments en bas (210–560 px), barre d'état. `Ctrl+K`
-ouvre la palette de commandes. Les onglets **Portée**, **Spectre** et **Bode**
-conservent leurs résultats séparément. La démonstration présélectionne `V1`,
-`5 V` et `OUT`.
+De haut en bas : barre d'outils (document, undo/redo, outils, composants
+fréquents, transformations, alignement, **Cadrer sél.**, **Marche/Arrêt**,
+**Reset**, **Pas**, **Afficher**, **Vue**, **Commandes**, aide), palette
+filtrable à gauche, canevas central, inspecteur/ERC à droite, instruments en bas
+(210–560 px), barre d'état. `Ctrl+K` ouvre la palette de commandes. Les onglets
+**Portée**, **Spectre** et **Bode** conservent leurs résultats séparément. La
+démonstration présélectionne `V1`, `5 V` et `OUT`.
 
 À l'ouverture d'un schéma valide, la session temps réel démarre seule : le
 circuit est déjà en marche et les instruments affichent le signal sans clic.
@@ -73,9 +73,16 @@ Sombre et Contraste élevé.
 - `Alt` + clic : sélectionne le net complet.
 - Rectangle gauche→droite : objets entièrement inclus ; droite→gauche : touchés.
 - Glisser un symbole/label/jonction : déplace la sélection d'un delta entier.
+- Glisser une broche : crée un fil orthogonal avec accroche et aperçu, sans
+  changer d'outil. Le relâchement sur une broche, un fil ou le vide termine ou
+  annule proprement.
 - Glisser un fil : déplace le segment perpendiculairement et coupe ses
   extrémités ; aucun fil supplémentaire n'est créé.
 - Glisser une extrémité libre : allonge ou raccourcit le fil sur son axe.
+- Survol : une bulle affiche le type, le nom, les paramètres, V aux broches, I
+  et P. Elle reste lisible en pause et signale un résultat antérieur.
+- Clic droit : propriétés, rotation, miroir, duplication, suppression, mesures
+  et coupe de fil ; sur le fond, sous-menus **Ajouter** par catégorie.
 - `Ctrl+A` : tout sélectionner ; `Échap` : annuler l'outil, le collage ou la sélection.
 - `Espace` : marche/arrêt de la simulation continue ; `F5` : reset à `t = 0`.
 - `Ctrl+C`, `Ctrl+V`, `Ctrl+D` : copier, coller avec aperçu, dupliquer.
@@ -193,8 +200,9 @@ les formats de fichiers sont dans [INSTRUMENTS.md](INSTRUMENTS.md).
 | Touche | Action |
 | --- | --- |
 | `Ctrl+K` | palette de commandes |
-| `V`, `W`, `J`, `L` | Sélection, Fil, Jonction, Label |
-| `R`, `M` | pivoter, miroir |
+| `W`, `J`, `N` | Fil, Jonction, Label |
+| `R`, `C`, `L`, `D`, `V`, `G`, `S` | placer résistance, condensateur, bobine, diode, source, masse, interrupteur |
+| `Maj+R`, `M` | pivoter, miroir |
 | `R`, `F` | orienter/miroiter l’aperçu de placement |
 | `Maj` / `Ctrl` + clic | ajouter / inverser dans la sélection |
 | `Maj` pendant un fil | changer le coude |
