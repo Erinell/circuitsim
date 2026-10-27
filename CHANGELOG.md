@@ -23,6 +23,8 @@ sémantique.
   enrichis, coupe de fil et mesures directes.
 - Raccourcis de placement à une lettre et barre d’outils compacte pilotée par
   les favoris.
+- Portées incrustées empilables dans le canevas, avec signaux multiples, gel,
+  zoom et ajout par clic droit.
 
 ### Changed
 

@@ -82,6 +82,13 @@ ampèremètre et ohmmètre sur un composant.
 
 ## 4. Portée et mesures
 
+La zone **Portées incrustées** en bas du canevas réutilise les mêmes `Trace` que
+le panneau classique. Chaque portée possède son propre ensemble de signaux, son
+gel et son identifiant de graphe stable pour conserver le zoom entre les frames.
+Les valeurs courantes sont lues sur le dernier point de chaque trace. Le panneau
+classique reste la référence pour les curseurs A/B, les mesures d’intervalle, le
+spectre et le Bode.
+
 Chaque signal devient une `Trace` de points `[temps_s, valeur_SI]` en ordre
 croissant. En temps réel, la portée ne conserve que les 500 derniers
 échantillons pour l’affichage, alors que le tampon complet alimente le spectre.

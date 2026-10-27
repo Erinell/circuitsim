@@ -165,7 +165,12 @@ Les raccourcis sont ignorés lorsqu’un champ texte a le focus, à l’exceptio
   scénarios qui en ont besoin.
 - Les contrôles live règlent la vitesse de simulation (échelle logarithmique),
   la vitesse des points de courant et la luminosité de puissance.
-- La portée affiche une fenêtre glissante des derniers échantillons. Le tampon
+- **Portées incrustées** : la zone en bas du canevas empile une ou plusieurs
+  portées redimensionnables. Chaque portée accepte plusieurs tensions et
+  courants, avec zoom, déplacement, infobulle, gel, effacement et suppression.
+  Un clic droit sur un composant ou un fil ajoute le signal à la dernière
+  portée. Le panneau classique reste accessible par **Vue**.
+- La portée classique affiche une fenêtre glissante des derniers échantillons. Le tampon
   peut être mis en pause sans perdre les données ; il est plafonné en mémoire.
 - Un circuit invalide affiche l’état `Circuit invalide` et un lien vers le
   diagnostic, sans modale bloquante.

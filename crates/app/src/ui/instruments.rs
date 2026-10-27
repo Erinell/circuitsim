@@ -24,7 +24,7 @@ use crate::ui::{Status, ACCENT, HOVER, MUTED, SYMBOL};
 
 const ERROR: Color32 = Color32::from_rgb(240, 128, 128);
 const CONTROL_WIDTH: f32 = 304.0;
-const MAX_PLOT_POINTS: usize = 4096;
+pub(crate) const MAX_PLOT_POINTS: usize = 4096;
 
 const TRACE_COLORS: [Color32; 8] = [
     Color32::from_rgb(255, 190, 92),
@@ -1467,12 +1467,21 @@ impl InstrumentsState {
         }
     }
 
-    fn current_traces(&self) -> Result<Option<Vec<Trace>>, SimulationError> {
+    /// Returns the selected scope signals.
+    pub fn selected_signals(&self) -> BTreeSet<SignalId> {
+        self.selected.clone()
+    }
+
+    /// Returns traces for an arbitrary signal set.
+    pub fn traces_for(
+        &self,
+        signals: &BTreeSet<SignalId>,
+    ) -> Result<Option<Vec<Trace>>, SimulationError> {
         if let Some(run) = &self.realtime {
-            if self.selected.is_empty() {
+            if signals.is_empty() {
                 return Ok(Some(Vec::new()));
             }
-            let signals = self.selected.iter().cloned().collect::<Vec<_>>();
+            let signals = signals.iter().cloned().collect::<Vec<_>>();
             let samples = if let Some(step) = run.context().nominal_step {
                 let latest = run.last_sample().map_or(0.0, |sample| sample.time);
                 let start = latest - step * 500.0;
@@ -1489,11 +1498,15 @@ impl InstrumentsState {
         let AnalysisResult::Transient(result) = &run.result else {
             return Ok(None);
         };
-        if self.selected.is_empty() {
+        if signals.is_empty() {
             return Ok(Some(Vec::new()));
         }
-        let signals = self.selected.iter().cloned().collect::<Vec<_>>();
+        let signals = signals.iter().cloned().collect::<Vec<_>>();
         transient_traces(result, &run.context, &signals).map(Some)
+    }
+
+    fn current_traces(&self) -> Result<Option<Vec<Trace>>, SimulationError> {
+        self.traces_for(&self.selected)
     }
 
     fn spectrum_data(&self) -> Result<Option<(Trace, Spectrum)>, SimulationError> {
@@ -2203,7 +2216,7 @@ fn completion_message(run: &CompletedRun) -> String {
     }
 }
 
-fn common_unit(traces: &[Trace]) -> Option<SignalUnit> {
+pub(crate) fn common_unit(traces: &[Trace]) -> Option<SignalUnit> {
     let first = traces.first()?.unit();
     traces
         .iter()
@@ -2211,11 +2224,11 @@ fn common_unit(traces: &[Trace]) -> Option<SignalUnit> {
         .then_some(first)
 }
 
-fn trace_color(index: usize) -> Color32 {
+pub(crate) fn trace_color(index: usize) -> Color32 {
     TRACE_COLORS[index % TRACE_COLORS.len()]
 }
 
-fn format_axis(value: f64, unit: Option<SignalUnit>) -> String {
+pub(crate) fn format_axis(value: f64, unit: Option<SignalUnit>) -> String {
     unit.map_or_else(
         || format_plain(value),
         |unit| format_si_precision(value, unit.unit(), 3),
@@ -2242,7 +2255,7 @@ fn position_position(position: &HoverPosition<'_>) -> egui_plot::PlotPoint {
     }
 }
 
-fn decimate(points: &[[f64; 2]], limit: usize) -> Vec<[f64; 2]> {
+pub(crate) fn decimate(points: &[[f64; 2]], limit: usize) -> Vec<[f64; 2]> {
     if points.len() <= limit {
         return points.to_vec();
     }

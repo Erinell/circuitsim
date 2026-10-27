@@ -24,9 +24,10 @@ La distribution web utilise `index.html` et Trunk.
 De haut en bas : barre d'outils (document, undo/redo, outils, composants
 fréquents, transformations, alignement, **Cadrer sél.**, **Marche/Arrêt**,
 **Reset**, **Pas**, **Afficher**, **Vue**, **Commandes**, aide), palette
-filtrable à gauche, canevas central, inspecteur/ERC à droite, instruments en bas
-(210–560 px), barre d'état. `Ctrl+K` ouvre la palette de commandes. Les onglets
-**Portée**, **Spectre** et **Bode** conservent leurs résultats séparément. La
+filtrable à gauche, canevas central avec portées incrustées en bas, inspecteur/ERC
+à droite, panneau d'instruments optionnel en bas (210–560 px), barre d'état.
+`Ctrl+K` ouvre la palette de commandes. Les onglets **Portée**, **Spectre** et
+**Bode** du panneau classique conservent leurs résultats séparément. La
 démonstration présélectionne `V1`, `5 V` et `OUT`.
 
 À l'ouverture d'un schéma valide, la session temps réel démarre seule : le
@@ -167,6 +168,13 @@ disponible pour relancer après une modification, mais les changements de
 paramètres sont désormais appliqués à chaud sans remise à zéro. L’échelon de
 source est désactivé par défaut pour ne pas fausser le démarrage live.
 
+- **Portées incrustées** : zone redimensionnable en bas du canevas, une ou
+  plusieurs portées empilées. Chaque portée accepte plusieurs tensions et
+  courants, avec légende, valeurs courantes, zoom, déplacement et infobulle.
+  **Figer** conserve le tracé, **Effacer** le vide et **Supprimer** retire la
+  portée. Un clic droit sur un composant ou un fil propose **Tracer dans une
+  portée**. Le panneau classique reste accessible par **Vue → Panneau
+  d'instruments**.
 - **Contrôles live** : état `En marche`, `Pause`, `Arrêtée` ou `Circuit
   invalide`, rapport temps simulé/réel, badge `trop lent (×0,3)`, vitesse de
   simulation logarithmique, vitesse des points de courant et luminosité de
@@ -240,8 +248,11 @@ navigateur non automatisés, transitoire à pas fixe, FFT plafonnée, pas de
 PNG/persistance de projet, opamp sans alimentation/pôle, pas de mobile
 spécifique, fils non extensibles par une extrémité connectée. Les panneaux sont
 masquables et redimensionnables, mais il n'y a pas de dockage libre ni de
-disposition persistée. Les calques, palettes et préférences d’affichage sont
-session-locaux ; leur persistance appartient au lot U6.
+disposition persistée. Les portées incrustées couvrent le tracé temporel, le
+gel, les signaux multiples et le zoom ; le mode XY, la fusion par glisser, le
+tri et la FFT incrustée restent dans le panneau classique. Les calques, palettes
+et préférences d’affichage sont session-locaux ; leur persistance appartient au
+lot U6.
 
 Tests : `cargo test -p circuitsim-app` couvre document, vue, navigation,
 mini-carte, édition, palette, propriétés, historique, presse-papiers, sélection
