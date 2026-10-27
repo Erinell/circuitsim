@@ -232,8 +232,7 @@ les formats de fichiers sont dans [INSTRUMENTS.md](INSTRUMENTS.md).
 | --- | --- |
 | `Ctrl+K` | palette de commandes |
 | `W`, `J`, `N` | Fil, Jonction, Label |
-| `R`, `C`, `L`, `D`, `V`, `G`, `S` | placer résistance, condensateur, bobine, diode, source, masse, interrupteur |
-| `Maj+R`, `M` | pivoter, miroir |
+| `R`, `M` | pivoter, miroir |
 | `R`, `F` | orienter/miroiter l’aperçu de placement |
 | `Maj` / `Ctrl` + clic | ajouter / inverser dans la sélection |
 | `Maj` pendant un fil | changer le coude |

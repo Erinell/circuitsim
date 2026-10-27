@@ -6,6 +6,12 @@ sémantique.
 
 ## [Unreleased]
 
+### Changed
+
+- Les raccourcis à une lettre pour placer les composants sont retirés ; le
+  placement passe uniquement par la palette et le menu **Dessin**. `R` pivote
+  de nouveau la sélection et `M` la met en miroir.
+
 ## [0.5.0] - 2026-10-27
 
 ### Added
