@@ -37,6 +37,8 @@ sémantique.
   téléchargement web et revalidation avant remplacement du document.
 - Aide générée depuis la table unique des raccourcis, panneaux repliables et
   animations limitées à 150 ms.
+- Menus **Fichier**, **Édition**, **Dessin**, **Afficher**, **Options** et
+  **Aide**, et déplacement de la vue au glisser en lecture seule.
 
 ### Changed
 

@@ -80,6 +80,8 @@ Les raccourcis sont ignorés lorsqu’un champ texte a le focus, à l’exceptio
 - Les flèches déplacent la vue de deux cases, `Maj` de huit cases. Le bouton
   milieu reste disponible pour un déplacement libre.
 - `Home` cadre tout le contenu ; `Ctrl+Home` cadre la sélection.
+- En lecture seule, un glisser gauche sur le fond déplace la vue sans éditer le
+  schéma. La mini-carte et le zoom molette restent disponibles.
 - La mini-carte montre le contenu, la sélection et la fenêtre visible. Un clic
   recentre la vue sur le point correspondant.
 - Le menu **Vue** masque la palette, l’inspecteur, les instruments ou la

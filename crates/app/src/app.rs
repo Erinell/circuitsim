@@ -420,6 +420,154 @@ impl CircuitApp {
         self.preferences_dirty = false;
     }
 
+    fn menu_bar(&mut self, ui: &mut Ui) {
+        ui.menu_button("Fichier", |ui| {
+            if ui.button("Nouveau").clicked() {
+                match self.document.clear() {
+                    Ok(()) => {
+                        self.canvas.request_fit();
+                        self.status.success("Schéma effacé.");
+                    }
+                    Err(error) => self.status.error(error.user_message()),
+                }
+                ui.close();
+            }
+            if ui.button("Projet…").clicked() {
+                self.project_dialog.open_with(&self.document);
+                ui.close();
+            }
+            ui.separator();
+            for (label, builder) in [
+                (
+                    "RC",
+                    Document::demo as fn() -> Result<Document, crate::document::ActionError>,
+                ),
+                ("Diviseur", Document::divider_example),
+                ("LED", Document::led_example),
+                ("Interrupteur", Document::switch_example),
+                ("RLC", Document::rlc_example),
+            ] {
+                if ui.button(label).clicked() {
+                    match builder() {
+                        Ok(document) => self.load_example(document, label),
+                        Err(error) => self.status.error(error.user_message()),
+                    }
+                    ui.close();
+                }
+            }
+        });
+        ui.menu_button("Édition", |ui| {
+            if ui.button("Annuler").clicked() {
+                self.undo();
+                ui.close();
+            }
+            if ui.button("Rétablir").clicked() {
+                self.redo();
+                ui.close();
+            }
+            ui.separator();
+            if ui.button("Copier").clicked() {
+                self.copy();
+                ui.close();
+            }
+            if ui.button("Coller").clicked() {
+                self.paste();
+                ui.close();
+            }
+            if ui.button("Dupliquer").clicked() {
+                self.duplicate();
+                ui.close();
+            }
+            if ui.button("Supprimer").clicked() {
+                self.delete();
+                ui.close();
+            }
+        });
+        ui.menu_button("Dessin", |ui| {
+            for (label, tool) in [
+                ("Sélection", Tool::Select),
+                ("Fil", Tool::Wire),
+                ("Jonction", Tool::Junction),
+                ("Label", Tool::Label),
+            ] {
+                if ui.selectable_label(self.tool == tool, label).clicked() {
+                    self.set_tool(tool);
+                    ui.close();
+                }
+            }
+            ui.separator();
+            for kind in self.compact_symbols() {
+                let label = ui::symbol_kind_name(&kind).to_owned();
+                if ui.button(label).clicked() {
+                    self.set_tool(Tool::Place(kind));
+                    ui.close();
+                }
+            }
+            ui.separator();
+            if ui.button("Pivoter").clicked() {
+                self.rotate();
+                ui.close();
+            }
+            if ui.button("Miroir").clicked() {
+                self.mirror();
+                ui.close();
+            }
+        });
+        ui.menu_button("Afficher", |ui| {
+            ui.checkbox(&mut self.show_palette, "Palette");
+            ui.checkbox(&mut self.show_inspector, "Inspecteur");
+            ui.checkbox(&mut self.show_instruments, "Panneau d'instruments");
+            let mut scopes = self.scopes.visible();
+            if ui.checkbox(&mut scopes, "Portées incrustées").changed() {
+                self.scopes.set_visible(scopes);
+            }
+            let mut minimap = self.canvas.minimap_visible();
+            if ui.checkbox(&mut minimap, "Mini-carte").changed() {
+                self.canvas.set_minimap_visible(minimap);
+            }
+            let mut flow = self.canvas.current_flow_visible();
+            if ui.checkbox(&mut flow, "Courant animé").changed() {
+                self.canvas.set_current_flow_visible(flow);
+            }
+            ui.separator();
+            let settings = self.canvas.settings_mut();
+            ui.checkbox(&mut settings.layers.voltage, "Tension des fils");
+            ui.checkbox(&mut settings.layers.current, "Courant");
+            ui.checkbox(&mut settings.layers.power, "Puissance");
+            ui.checkbox(&mut settings.layers.values, "Valeurs");
+            ui.checkbox(&mut settings.layers.references, "Références");
+            ui.checkbox(&mut settings.layers.net_labels, "Labels de nets");
+            ui.checkbox(&mut settings.small_grid, "Petite grille");
+            ui.separator();
+            for layout in LayoutPreset::ALL {
+                if ui.button(layout.label()).clicked() {
+                    self.apply_layout(layout);
+                    ui.close();
+                }
+            }
+        });
+        ui.menu_button("Options", |ui| {
+            if ui.button("Préférences d'affichage…").clicked() {
+                self.show_preferences = true;
+                ui.close();
+            }
+        });
+        ui.menu_button("Aide", |ui| {
+            if ui.button("Aide et raccourcis").clicked() {
+                self.show_help = true;
+                ui.close();
+            }
+            if ui.button("Démarrage").clicked() {
+                self.show_onboarding = true;
+                ui.close();
+            }
+            if ui.button("À propos").clicked() {
+                self.show_about = true;
+                ui.close();
+            }
+        });
+    }
+
     fn toolbar(&mut self, ui: &mut Ui) {
         let compact = self.compact_symbols();
         ui.add_space(2.0);
@@ -429,6 +577,8 @@ impl CircuitApp {
             if self.document.is_dirty() {
                 ui.label(RichText::new("● modifié").small().color(ui::ACCENT));
             }
+            ui.separator();
+            self.menu_bar(ui);
             ui.separator();
 
             if ui
