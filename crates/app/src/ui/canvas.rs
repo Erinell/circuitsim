@@ -1652,7 +1652,7 @@ impl CanvasState {
                     painter.circle_filled(position, 3.0, color);
                     painter.circle_stroke(position, 6.0, Stroke::new(1.2, color));
                 }
-                SignalId::Current(label) => {
+                SignalId::ComponentVoltage(label) | SignalId::Current(label) => {
                     let Some(symbol) = document
                         .schematic()
                         .symbols()
@@ -1811,6 +1811,16 @@ impl CanvasState {
                                     |value| format_si_precision(value, Unit::Volt, 3),
                                 );
                                 lines.push(format!("{} · {net} : {voltage}", pin.name));
+                            }
+                            if let (Some(first), Some(second)) =
+                                (observed.pins.first(), observed.pins.get(1))
+                            {
+                                if let (Some(a), Some(b)) = (first.voltage, second.voltage) {
+                                    lines.push(format!(
+                                        "U : {}",
+                                        format_si_precision(a - b, Unit::Volt, 3)
+                                    ));
+                                }
                             }
                             if let Some(current) = observed.current {
                                 lines.push(format!(

@@ -32,6 +32,8 @@ pub const MAX_FFT_POINTS: usize = 16_384;
 pub enum SignalId {
     /// Voltage of a named net.
     Voltage(String),
+    /// Voltage across a named two-terminal component.
+    ComponentVoltage(String),
     /// Current flowing in a named net.
     NetCurrent(String),
     /// Branch current of a named component.
@@ -43,6 +45,7 @@ impl SignalId {
     pub fn label(&self) -> String {
         match self {
             Self::Voltage(name) => format!("V({name})"),
+            Self::ComponentVoltage(name) => format!("U({name})"),
             Self::NetCurrent(name) => format!("I({name})"),
             Self::Current(name) => format!("I({name})"),
         }
@@ -51,7 +54,7 @@ impl SignalId {
     /// Returns the physical unit of this signal.
     pub const fn unit(&self) -> SignalUnit {
         match self {
-            Self::Voltage(_) => SignalUnit::Volt,
+            Self::Voltage(_) | Self::ComponentVoltage(_) => SignalUnit::Volt,
             Self::NetCurrent(_) | Self::Current(_) => SignalUnit::Ampere,
         }
     }
@@ -109,6 +112,8 @@ pub struct SignalCatalog {
     pub voltages: Vec<String>,
     /// Branch-current components, sorted by label.
     pub currents: Vec<String>,
+    /// Two-terminal components whose voltage can be plotted, sorted by label.
+    pub components: Vec<String>,
     /// Independent voltage and current sources, sorted by label.
     pub sources: Vec<SourceChoice>,
 }
@@ -134,6 +139,16 @@ impl SignalCatalog {
             .collect::<Vec<_>>();
         currents.sort();
         currents.dedup();
+
+        let mut components = extraction
+            .netlist
+            .components
+            .iter()
+            .filter(|component| component.pins.len() == 2)
+            .map(|component| component.label.clone())
+            .collect::<Vec<_>>();
+        components.sort();
+        components.dedup();
 
         let mut sources = extraction
             .netlist
@@ -165,6 +180,7 @@ impl SignalCatalog {
         Self {
             voltages,
             currents,
+            components,
             sources,
         }
     }
@@ -173,6 +189,7 @@ impl SignalCatalog {
     pub fn contains(&self, signal: &SignalId) -> bool {
         match signal {
             SignalId::Voltage(name) | SignalId::NetCurrent(name) => self.voltages.contains(name),
+            SignalId::ComponentVoltage(name) => self.components.contains(name),
             SignalId::Current(name) => self.currents.contains(name),
         }
     }
@@ -1146,6 +1163,19 @@ pub fn prepare_realtime(
     })
 }
 
+/// Lists capacitors whose voltage can be plotted by the scopes.
+pub fn capacitor_labels(document: &crate::document::Document) -> Vec<String> {
+    let mut labels = document
+        .schematic()
+        .symbols()
+        .filter(|symbol| symbol.kind == SymbolKind::Capacitor)
+        .map(|symbol| symbol.label.clone())
+        .collect::<Vec<_>>();
+    labels.sort();
+    labels.dedup();
+    labels
+}
+
 /// Lists components whose current can be plotted by the scopes.
 pub fn component_current_labels(document: &crate::document::Document) -> Vec<String> {
     let mut labels = document
@@ -1185,6 +1215,28 @@ pub fn transient_traces_from_samples_with_document(
                 for sample in samples {
                     if let Some(value) = sample.node_voltage(node) {
                         points.push([sample.time, value]);
+                    }
+                }
+            }
+            SignalId::ComponentVoltage(name) => {
+                let Some(extraction) = extraction else {
+                    return Err(SimulationError::MissingSignal(signal.label()));
+                };
+                let spec = extraction
+                    .netlist
+                    .components
+                    .iter()
+                    .find(|spec| spec.label == *name)
+                    .ok_or_else(|| SimulationError::MissingSignal(signal.label()))?;
+                if spec.pins.len() != 2 {
+                    return Err(SimulationError::MissingSignal(signal.label()));
+                }
+                for sample in samples {
+                    if let (Some(a), Some(b)) = (
+                        sample.node_voltage(spec.pins[0]),
+                        sample.node_voltage(spec.pins[1]),
+                    ) {
+                        points.push([sample.time, a - b]);
                     }
                 }
             }
@@ -1395,6 +1447,9 @@ pub fn transient_traces_from_samples(
                         points.push([sample.time, value]);
                     }
                 }
+            }
+            SignalId::ComponentVoltage(name) => {
+                return Err(SimulationError::MissingSignal(format!("U({name})")));
             }
             SignalId::NetCurrent(name) => {
                 return Err(SimulationError::MissingSignal(format!("I({name})")));
@@ -2042,6 +2097,17 @@ mod tests {
         assert_eq!(component.len(), 1);
         assert!(component[0].points.len() > 400);
         assert!(component[0].points.iter().all(|point| point[1].is_finite()));
+        assert!(capacitor_labels(&document).contains(&"C1".to_owned()));
+        let capacitor = transient_traces_from_samples_with_document(
+            &result.samples,
+            &run.context,
+            &document,
+            &[SignalId::ComponentVoltage("C1".to_owned())],
+        )
+        .unwrap();
+        assert_eq!(capacitor.len(), 1);
+        assert!(capacitor[0].points.len() > 400);
+        assert!(capacitor[0].points.iter().all(|point| point[1].is_finite()));
     }
 
     #[test]

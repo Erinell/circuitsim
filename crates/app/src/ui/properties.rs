@@ -688,6 +688,14 @@ fn show_symbol_live(ui: &mut Ui, info: &SymbolLive, live: &LiveValues, revision:
         );
         ui.label(format!("{} · {net} : {voltage}", pin.name));
     }
+    if let (Some(first), Some(second)) = (info.pins.first(), info.pins.get(1)) {
+        if let (Some(a), Some(b)) = (first.voltage, second.voltage) {
+            ui.label(format!(
+                "Tension : {}",
+                format_si_precision(a - b, Unit::Volt, 4)
+            ));
+        }
+    }
     if let Some(current) = info.current {
         ui.label(format!(
             "Courant : {}",
