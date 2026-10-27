@@ -81,8 +81,10 @@ pédagogiques.
 
 L'allocateur réserve `0` à la masse.
 
-- Le premier net de masse devient `0`, même avec un label ; ce label émet
-  `GroundLabelIgnored`.
+- Tous les symboles de masse séparés sont fusionnés dans le même net `0`, même
+  sans fil commun ; la masse est donc toujours commune au canevas.
+- Une fusion de plusieurs masses émet un `MultipleGround` d'information.
+- Le label d'un net de masse est ignoré et émet `GroundLabelIgnored`.
 - Un autre net prend son plus petit label.
 - Un label déjà pris reçoit `#2`, `#3`, etc., sans dépasser 128 caractères.
 - Le label `0` hors masse est renommé et produit `ReservedNetName`.
@@ -169,7 +171,7 @@ bloque. Le contrat de simulation reste séparé.
 | Code | Sévérité | Sens |
 | --- | --- | --- |
 | `NoGround` | erreur | aucun symbole de masse |
-| `MultipleGround` | erreur | plusieurs nets de masse séparés |
+| `MultipleGround` | information | plusieurs symboles de masse fusionnés en `0` |
 | `DuplicateNetName` | erreur | label dupliqué, net renommé |
 | `ReservedNetName` | erreur | label `0` hors masse |
 | `FloatingPin` | avertissement | broche seule sans fil ni label |

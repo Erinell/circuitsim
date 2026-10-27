@@ -113,8 +113,10 @@ valide peut donc être incomplète. `Netlist::empty()` est valide mais non
 simulable.
 
 `validate_for_simulation` ajoute exactement un nœud `Ground` nommé `0`
-(`NoGround`, `MultipleGround`, `InvalidGroundName`). La masse n'est pas
-nécessairement le premier nœud et est exclue des inconnues.
+(`NoGround`, `MultipleGround`, `InvalidGroundName`). L'extraction fusionne tous
+les symboles de masse du schéma dans ce nœud unique, même s'ils ne partagent pas
+de fil. La masse n'est pas nécessairement le premier nœud et est exclue des
+inconnues.
 
 ## 6. Construction et sérialisation
 

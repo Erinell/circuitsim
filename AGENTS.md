@@ -78,7 +78,7 @@ cargo deny check licenses
 - Chevauchement colinéaire connecte avec ERC `WireOverlap`.
 - Un label ne connecte que les conducteurs à sa position.
 - Un groupe sans broche ne produit pas de net simulable.
-- Noms : masse `0`, sinon plus petit label, sinon `N$001`, `N$002`, etc.
+- Noms : toutes les masses fusionnent en `0`, sinon plus petit label, sinon `N$001`, `N$002`, etc.
 - L'ERC est un rapport ; seule une `ExtractError` bloque l'extraction.
 
 ## Stack cible

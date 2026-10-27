@@ -297,6 +297,43 @@ pub fn extract_netlist(
         groups.entry(root).or_default().labels.extend(labels);
     }
 
+    let ground_root_list: Vec<usize> = groups
+        .iter()
+        .filter(|(_, group)| group.pins.iter().any(|&index| pins[index].is_ground))
+        .map(|(&root, _)| root)
+        .collect();
+    if let Some((&primary, others)) = ground_root_list.split_first() {
+        if !others.is_empty() {
+            for &root in others {
+                if let Some(group) = groups.remove(&root) {
+                    if let Some(target) = groups.get_mut(&primary) {
+                        target.pins.extend(group.pins);
+                        target.wires.extend(group.wires);
+                        target.labels.extend(group.labels);
+                    }
+                }
+            }
+            if let Some(group) = groups.get_mut(&primary) {
+                group.pins.sort_by_key(|&index| pins[index].key);
+                group.wires.sort_by_key(|&index| wires[index].id);
+                group.labels.sort();
+            }
+            let count = others.len() + 1;
+            let mut issue = ErcIssue::new(
+                ErcCode::MultipleGround,
+                format!("{count} symboles de masse sont reliés à la masse commune '0'"),
+            );
+            if let Some(group) = groups.get(&primary) {
+                if let Some(&index) = group.pins.iter().find(|&&index| pins[index].is_ground) {
+                    issue = issue
+                        .at(pins[index].at)
+                        .subject(ObjectRef::Symbol(pins[index].key.symbol));
+                }
+            }
+            erc.push(issue);
+        }
+    }
+
     for group in groups.values() {
         if group.pins.is_empty() {
             for &wire_index in &group.wires {
@@ -391,14 +428,6 @@ pub fn extract_netlist(
         erc.push(ErcIssue::new(
             ErcCode::NoGround,
             "netlist has no ground symbol",
-        ));
-    } else if ground_roots.len() > 1 {
-        erc.push(ErcIssue::new(
-            ErcCode::MultipleGround,
-            format!(
-                "schematic contains {} separate ground nets",
-                ground_roots.len()
-            ),
         ));
     }
 
@@ -747,6 +776,101 @@ mod tests {
             GridPos::new(-2, 0),
         );
         schematic
+    }
+
+    #[test]
+    fn separate_ground_symbols_share_the_same_reference_node() {
+        let mut schematic = Schematic::new();
+        let mut history = UndoStack::new();
+        let mut add_loop = |x: i32, suffix: &str| {
+            let source = add_symbol(
+                &mut schematic,
+                &mut history,
+                SymbolKind::VoltageSource,
+                GridPos::new(x, 0),
+                &format!("V{suffix}"),
+            );
+            add_symbol(
+                &mut schematic,
+                &mut history,
+                SymbolKind::Resistor,
+                GridPos::new(x + 6, 0),
+                &format!("R{suffix}"),
+            );
+            let ground = add_symbol(
+                &mut schematic,
+                &mut history,
+                SymbolKind::Ground,
+                GridPos::new(x - 2, 4),
+                &format!("GND{suffix}"),
+            );
+            add_wire(
+                &mut schematic,
+                &mut history,
+                GridPos::new(x - 2, 0),
+                GridPos::new(x - 2, 4),
+            );
+            add_wire(
+                &mut schematic,
+                &mut history,
+                GridPos::new(x + 2, 0),
+                GridPos::new(x + 4, 0),
+            );
+            add_wire(
+                &mut schematic,
+                &mut history,
+                GridPos::new(x + 8, 0),
+                GridPos::new(x + 8, 4),
+            );
+            add_wire(
+                &mut schematic,
+                &mut history,
+                GridPos::new(x + 8, 4),
+                GridPos::new(x - 2, 4),
+            );
+            (source, ground)
+        };
+        let (_, gnd1) = add_loop(0, "1");
+        let (_, gnd2) = add_loop(20, "2");
+
+        let extraction = extract_netlist(&schematic, &registry()).unwrap();
+        let grounds = extraction
+            .netlist
+            .nodes
+            .iter()
+            .filter(|node| node.kind.is_ground())
+            .collect::<Vec<_>>();
+        assert_eq!(grounds.len(), 1);
+        assert_eq!(grounds[0].name.as_str(), "0");
+        let ground_node = grounds[0].id;
+        assert_eq!(
+            extraction
+                .net_of_pin
+                .get(&PinKey {
+                    symbol: gnd1.id,
+                    pin: 0,
+                })
+                .copied(),
+            Some(ground_node)
+        );
+        assert_eq!(
+            extraction
+                .net_of_pin
+                .get(&PinKey {
+                    symbol: gnd2.id,
+                    pin: 0,
+                })
+                .copied(),
+            Some(ground_node)
+        );
+        assert!(extraction.netlist.validate_for_simulation().is_ok());
+        assert!(!extraction.erc.has_errors(), "{:?}", extraction.erc);
+        assert!(extraction
+            .erc
+            .issues()
+            .iter()
+            .any(|issue| issue.code == ErcCode::MultipleGround
+                && issue.severity == crate::erc::ErcSeverity::Info));
     }
 
     #[test]

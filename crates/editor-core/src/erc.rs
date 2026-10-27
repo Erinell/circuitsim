@@ -37,13 +37,11 @@ impl ErcCode {
     /// Default severity for this finding.
     pub const fn default_severity(self) -> ErcSeverity {
         match self {
-            Self::NoGround
-            | Self::MultipleGround
-            | Self::DuplicateNetName
-            | Self::ReservedNetName => ErcSeverity::Error,
-            Self::StackedPins | Self::RedundantJunction | Self::GroundLabelIgnored => {
-                ErcSeverity::Info
-            }
+            Self::NoGround | Self::DuplicateNetName | Self::ReservedNetName => ErcSeverity::Error,
+            Self::MultipleGround
+            | Self::StackedPins
+            | Self::RedundantJunction
+            | Self::GroundLabelIgnored => ErcSeverity::Info,
             Self::FloatingPin
             | Self::DanglingWire
             | Self::UnconnectedWireEnd
