@@ -12,10 +12,10 @@ sémantique.
   sondes, l’export et les portées empilées partagent désormais la même zone, avec
   les onglets **Portées**, **Spectre** et **Bode**. Les sondes sont regroupées
   avec les signaux directement dans les portées.
-- Les portées proposent désormais les courants des **nets**, pas les courants
-  internes des composants. Chaque fil/net expose `I(nom)` ; le courant est dérivé
-  des courants de composants du net (branches, résistances, interrupteurs,
-  condensateurs, diodes et sources).
+- Les portées peuvent afficher les courants de **nets** (`I(nom)`) et les courants
+  de **composants** (`I(R1)`, `I(V1)`, etc.). Les courants de composants sont
+  dérivés comme les courants de nets : branches, résistances, interrupteurs,
+  condensateurs, diodes et sources.
 - Un composant déposé au bout d’un fil ou sur une broche aligne maintenant une de
   ses broches sur la cible, au lieu de centrer le symbole sur le point d’accroche.
 - Nouvel exemple **RLC parallèle commuté** dans **Fichier → Exemples**, avec

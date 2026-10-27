@@ -1145,6 +1145,23 @@ pub fn prepare_realtime(
     })
 }
 
+/// Lists components whose current can be plotted by the scopes.
+pub fn component_current_labels(document: &crate::document::Document) -> Vec<String> {
+    let mut labels = document
+        .schematic()
+        .symbols()
+        .filter(|symbol| {
+            !symbol.kind.is_measurement()
+                && !symbol.kind.is_ground()
+                && !matches!(symbol.kind, SymbolKind::Custom(_))
+        })
+        .map(|symbol| symbol.label.clone())
+        .collect::<Vec<_>>();
+    labels.sort();
+    labels.dedup();
+    labels
+}
+
 /// Extracts traces from an arbitrary sample buffer, deriving net currents
 /// that the solver does not expose as branch variables.
 pub fn transient_traces_from_samples_with_document(
@@ -1999,6 +2016,17 @@ mod tests {
         assert_eq!(traces.len(), 1);
         assert!(traces[0].points.len() > 400);
         assert!(traces[0].points.iter().all(|point| point[1].is_finite()));
+        assert!(component_current_labels(&document).contains(&"R1".to_owned()));
+        let component = transient_traces_from_samples_with_document(
+            &result.samples,
+            &run.context,
+            &document,
+            &[SignalId::Current("R1".to_owned())],
+        )
+        .unwrap();
+        assert_eq!(component.len(), 1);
+        assert!(component[0].points.len() > 400);
+        assert!(component[0].points.iter().all(|point| point[1].is_finite()));
     }
 
     #[test]
