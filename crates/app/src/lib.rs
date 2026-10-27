@@ -2,8 +2,10 @@
 
 pub mod analysis;
 pub mod app;
+pub mod currents;
 pub mod document;
 pub mod export;
+pub mod overcurrent;
 pub mod preferences;
 pub mod simulation;
 pub mod ui;

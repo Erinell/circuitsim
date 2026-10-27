@@ -2149,7 +2149,8 @@ pub fn parameter_unit(kind: &SymbolKind, key: &str) -> Option<sim_core::units::U
         (SymbolKind::Inductor, "resistance") => Some(Unit::Ohm),
         (SymbolKind::Led, "wavelength") => None,
         (SymbolKind::Led | SymbolKind::Diode, "vf") => Some(Unit::Volt),
-        (SymbolKind::Led | SymbolKind::Diode, "if" | "imax") => Some(Unit::Ampere),
+        (SymbolKind::Led | SymbolKind::Diode, "if") => Some(Unit::Ampere),
+        (_, "imax") => Some(Unit::Ampere),
         (SymbolKind::VoltageSource, "dc")
         | (SymbolKind::Zener, "bv")
         | (SymbolKind::OpAmp, "v_sat_pos" | "v_sat_neg") => Some(Unit::Volt),

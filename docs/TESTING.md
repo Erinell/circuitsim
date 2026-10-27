@@ -34,7 +34,7 @@ l'installe séparément.
 
 ## 3. Suite et couverture
 
-Au 27 octobre 2026, `cargo test --workspace` exécute **267 tests** :
+Au 27 octobre 2026, `cargo test --workspace` exécute **304 tests** :
 
 | Groupe | Tests | Points clés |
 | --- | ---: | --- |
@@ -43,7 +43,7 @@ Au 27 octobre 2026, `cargo test --workspace` exécute **267 tests** :
 | `sim-core` transitoire | 20 | RC/RL, condensateurs initialement déchargés, événements, diode, opamp, énergie, session incrémentale, mise à jour à chaud |
 | `sim-core` AC | 15 | RC/RL/RLC, phase, diode, opamp, balayages, erreurs |
 | `editor-core` | 49 | grille, symboles, schéma, historique, ERC, extraction, masses communes, paramètres LED/bobine, JSON, séries E, snap/routage |
-| `circuitsim-app` | 150 | document, projet JSON, vue, navigation, mini-carte, UI, petits textes à 10 px, inspecteur avec sélecteur de diode, historique, presse-papiers, simulation continue, mise à jour à chaud, calques, palettes, survol avec tension et intensité de fil, interrupteur ouvert sans fuite affichée, placement aligné sur broche, câblage direct, raccourcis, aide générée, contrastes, panneau unifié et portées, tensions de condensateurs et courants de nets/composants dérivés, ajout de portée depuis les contrôles, valeurs à droite, fenêtre réglable 0,5–30 s, 10 s par défaut et décimation, réordonnancement et recentrage, sondes intégrées, FFT et curseurs A/B, curseurs de réglage, exemples dont le RC de démonstration, diviseur, RLC et polarité, préférences persistées et migration, À propos, onboarding, accessibilité, ohmmètre, instruments, worker, FFT, Bode, CSV |
+| `circuitsim-app` | 156 | document, projet JSON, vue, navigation, mini-carte, UI, petits textes à 10 px, inspecteur avec sélecteur de diode, historique, presse-papiers, simulation continue, mise à jour à chaud, calques, palettes, survol avec tension, intensité de fil et limite, interrupteur ouvert sans fuite affichée, surintensités et diagnostics cliquables, placement aligné sur broche, câblage direct, raccourcis, aide générée, contrastes, panneau unifié et portées, tensions de condensateurs et courants de nets/composants dérivés, ajout de portée depuis les contrôles, valeurs à droite, fenêtre réglable 0,5–30 s, 10 s par défaut et décimation, réordonnancement et recentrage, sondes intégrées, FFT et curseurs A/B, curseurs de réglage, exemples dont le RC de démonstration, diviseur, RLC et polarité, préférences persistées et migration, À propos, onboarding, accessibilité, ohmmètre, instruments, worker, FFT, Bode, CSV |
 | `worker-protocol` | 11 | trames, version, netlist, erreurs, transports |
 | `worker` | 13 | coalescence, cadence, révisions, DC/transitoire/AC |
 | `editor_invariants` | 2 | proptest undo/redo et extraction |
@@ -64,7 +64,9 @@ presse-papiers, duplication, rotation/miroir de groupe, valeurs simulées,
 recherche floue, placement sur canevas, zoom/pan, cadrage de sélection,
 mini-carte, dispositions, courant animé, session transitoire incrémentale,
 mise à jour à chaud d'une session, démarrage live, pause/reset/pas, mapping
-tension→couleur, calques et palettes, lecture au survol, câblage direct depuis
+tension→couleur, calques et palettes, lecture au survol, seuils de surintensité
+ambre/rouge, statistiques de dépassement et diagnostics cliquables, câblage
+direct depuis
 une broche, coupe de fil, raccourcis sans collision, panneau unifié avec portées,
 fenêtre temporelle réglable de 0,5 à 30 s et décimation du tampon, réordonnancement
 par identifiant et recentrage X/Y, ajout de portée depuis les contrôles, valeurs

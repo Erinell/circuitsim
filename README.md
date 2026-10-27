@@ -21,6 +21,8 @@ distribution web.
   avec valeurs simulées, fils colorés par tension avec palettes daltoniennes,
   calques indépendants, courant animé orienté, erreurs ERC en rouge, halos de
   puissance, LED lumineuses, interrupteurs cliquables,
+  surintensités ambre/rouge avec badges, liste de diagnostics cliquable et
+  limites de courant par composant ou par fil,
   lecture au survol,
   câblage par glisser, menus contextuels, placement par palette/menu, curseurs de
   réglage, galerie d’exemples, édition par double-clic, panneau unifié

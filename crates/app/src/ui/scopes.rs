@@ -4,18 +4,19 @@ use std::collections::BTreeSet;
 use std::sync::Arc;
 
 use eframe::egui::{self, Color32, RichText, Ui, Vec2};
-use egui_plot::{Corner, Legend, Line, Plot, VLine};
+use egui_plot::{Corner, HLine, Legend, Line, LineStyle, Plot, VLine};
 
 use crate::analysis::{
     capacitor_labels, component_current_labels, compute_spectrum, measurements, probe_readings,
     SignalCatalog, SignalId, SignalUnit, Spectrum, Trace,
 };
 use crate::document::Document;
+use crate::overcurrent::{over_limit_stats, severity, signal_limit, Severity};
 use crate::ui::instruments::{
     common_unit, decimate, format_axis, format_frequency, nearest_sample_time, trace_color,
     value_at, InstrumentsState, MAX_PLOT_POINTS,
 };
-use crate::ui::{Status, ACCENT, HOVER, MUTED};
+use crate::ui::{Status, ACCENT, CRITICAL, HOVER, MUTED, WARNING};
 use sim_core::units::{format_si_precision, Unit};
 
 /// Signal view shown by one inline scope.
@@ -162,6 +163,7 @@ impl InlineScopes {
         instruments: &mut InstrumentsState,
         document: &Document,
         status: &mut Status,
+        wire_limit: f64,
     ) {
         let catalog = document
             .extraction()
@@ -198,6 +200,7 @@ impl InlineScopes {
                                     &catalog,
                                     index > 0,
                                     index + 1 < scope_count,
+                                    wire_limit,
                                 )
                             },
                         )
@@ -310,6 +313,7 @@ impl InlineScopes {
 }
 
 impl Scope {
+    #[allow(clippy::too_many_arguments)]
     fn show(
         &mut self,
         ui: &mut Ui,
@@ -318,6 +322,7 @@ impl Scope {
         catalog: &SignalCatalog,
         can_move_up: bool,
         can_move_down: bool,
+        wire_limit: f64,
     ) -> ScopeAction {
         let mut action = ScopeAction::None;
         let live_traces = self.traces(instruments, document);
@@ -472,6 +477,8 @@ impl Scope {
                             instruments.scope_step(),
                             plot_height,
                             reset_view,
+                            document,
+                            wire_limit,
                         );
                     },
                 );
@@ -488,13 +495,13 @@ impl Scope {
                             .max_height(plot_height)
                             .auto_shrink([false, false])
                             .show(ui, |ui| {
-                                self.show_values(ui, &traces, unit);
+                                self.show_values(ui, &traces, unit, document, wire_limit);
                             });
                     },
                 );
             });
         } else {
-            ui.horizontal_wrapped(|ui| self.show_values(ui, &traces, unit));
+            ui.horizontal_wrapped(|ui| self.show_values(ui, &traces, unit, document, wire_limit));
             self.show_plot(
                 ui,
                 &traces,
@@ -502,11 +509,14 @@ impl Scope {
                 instruments.scope_step(),
                 plot_height,
                 reset_view,
+                document,
+                wire_limit,
             );
         }
         action
     }
 
+    #[allow(clippy::too_many_arguments)]
     fn show_plot(
         &mut self,
         ui: &mut Ui,
@@ -515,9 +525,20 @@ impl Scope {
         step: Option<f64>,
         plot_height: f32,
         reset_view: bool,
+        document: &Document,
+        wire_limit: f64,
     ) {
         match self.view {
-            ScopeView::Time => self.show_time(ui, traces, unit, step, plot_height, reset_view),
+            ScopeView::Time => self.show_time(
+                ui,
+                traces,
+                unit,
+                step,
+                plot_height,
+                reset_view,
+                document,
+                wire_limit,
+            ),
             ScopeView::Spectrum => {
                 self.show_spectrum(ui, traces, unit, step, plot_height, reset_view)
             }
@@ -544,7 +565,14 @@ impl Scope {
         traces
     }
 
-    fn show_values(&self, ui: &mut Ui, traces: &[Trace], unit: Option<SignalUnit>) {
+    fn show_values(
+        &self,
+        ui: &mut Ui,
+        traces: &[Trace],
+        unit: Option<SignalUnit>,
+        document: &Document,
+        wire_limit: f64,
+    ) {
         for trace in traces {
             let value = trace.points.last().map_or(0.0, |point| point[1]);
             ui.label(
@@ -552,6 +580,21 @@ impl Scope {
                     .small()
                     .color(signal_color(&trace.signal)),
             );
+            if let Some(limit) = signal_limit(document, &trace.signal, wire_limit) {
+                if let Some(stats) = over_limit_stats(&trace.points, limit) {
+                    let severity = severity(stats.peak, Some(limit));
+                    ui.label(
+                        RichText::new(format!(
+                            "! {} : {} · {}",
+                            trace.label(),
+                            crate::overcurrent::format_limit_line(stats.peak, limit, severity),
+                            format_si_precision(stats.duration, Unit::Second, 3)
+                        ))
+                        .small()
+                        .color(severity_color(severity)),
+                    );
+                }
+            }
         }
         for measurement in measurements(traces) {
             let measurement_unit = measurement.signal.unit().unit();
@@ -610,6 +653,7 @@ impl Scope {
         }
     }
 
+    #[allow(clippy::too_many_arguments)]
     fn show_time(
         &mut self,
         ui: &mut Ui,
@@ -618,6 +662,8 @@ impl Scope {
         nominal_step: Option<f64>,
         plot_height: f32,
         reset_view: bool,
+        document: &Document,
+        wire_limit: f64,
     ) {
         let _ = nominal_step;
         let mut clicked_time = None;
@@ -632,6 +678,8 @@ impl Scope {
                     unit,
                     each,
                     reset_view,
+                    document,
+                    wire_limit,
                 ) {
                     clicked_time = Some(time);
                 }
@@ -643,6 +691,8 @@ impl Scope {
             unit,
             plot_height,
             reset_view,
+            document,
+            wire_limit,
         ) {
             clicked_time = Some(time);
         }
@@ -726,6 +776,7 @@ impl Scope {
         );
     }
 
+    #[allow(clippy::too_many_arguments)]
     fn plot_one(
         &mut self,
         ui: &mut Ui,
@@ -734,6 +785,8 @@ impl Scope {
         unit: Option<SignalUnit>,
         height: f32,
         reset_view: bool,
+        document: &Document,
+        wire_limit: f64,
     ) -> Option<f64> {
         let mut clicked = None;
         let y_formatter = move |mark: egui_plot::GridMark, _: &std::ops::RangeInclusive<f64>| {
@@ -788,6 +841,50 @@ impl Scope {
                         .color(signal_color(&trace.signal))
                         .width(1.8),
                 );
+                if let Some(limit) = signal_limit(document, &trace.signal, wire_limit) {
+                    plot_ui.hline(
+                        HLine::new("", limit)
+                            .id(egui::Id::new(format!(
+                                "imax_pos_{}_{}",
+                                self.id,
+                                trace.label()
+                            )))
+                            .color(WARNING)
+                            .width(1.0)
+                            .style(LineStyle::dashed_dense())
+                            .allow_hover(false),
+                    );
+                    plot_ui.hline(
+                        HLine::new("", -limit)
+                            .id(egui::Id::new(format!(
+                                "imax_neg_{}_{}",
+                                self.id,
+                                trace.label()
+                            )))
+                            .color(WARNING)
+                            .width(1.0)
+                            .style(LineStyle::dashed_dense())
+                            .allow_hover(false),
+                    );
+                    for (index, segment) in
+                        crate::overcurrent::over_limit_segments(&trace.points, limit)
+                            .into_iter()
+                            .enumerate()
+                    {
+                        plot_ui.line(
+                            Line::new("", segment)
+                                .color(CRITICAL)
+                                .width(2.6)
+                                .allow_hover(false)
+                                .id(egui::Id::new(format!(
+                                    "overcurrent_{}_{}_{}",
+                                    self.id,
+                                    trace.label(),
+                                    index
+                                ))),
+                        );
+                    }
+                }
             }
             if let Some(value) = self.cursor_a {
                 plot_ui.vline(VLine::new("A", value).color(ACCENT).width(1.0));
@@ -852,6 +949,14 @@ pub(crate) fn signal_color(signal: &SignalId) -> Color32 {
         .bytes()
         .fold(0_usize, |acc, byte| acc.wrapping_add(byte as usize));
     trace_color(hash)
+}
+
+fn severity_color(severity: Severity) -> Color32 {
+    match severity {
+        Severity::Critical => CRITICAL,
+        Severity::Warning => WARNING,
+        Severity::None => MUTED,
+    }
 }
 
 #[cfg(test)]

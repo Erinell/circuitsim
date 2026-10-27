@@ -344,14 +344,20 @@ impl Symbol {
 
 fn builtin_defs() -> Vec<SymbolDef> {
     vec![
-        two_terminal(SymbolKind::Resistor, &[("resistance", 1_000.0)]),
-        two_terminal(SymbolKind::Capacitor, &[("capacitance", 1e-6)]),
+        two_terminal(
+            SymbolKind::Resistor,
+            &[("resistance", 1_000.0), ("imax", 0.25)],
+        ),
+        two_terminal(
+            SymbolKind::Capacitor,
+            &[("capacitance", 1e-6), ("imax", 1.0)],
+        ),
         two_terminal(
             SymbolKind::Inductor,
-            &[("inductance", 1e-3), ("resistance", 0.01)],
+            &[("inductance", 1e-3), ("resistance", 0.01), ("imax", 0.5)],
         ),
-        two_terminal(SymbolKind::VoltageSource, &[("dc", 5.0)]),
-        two_terminal(SymbolKind::CurrentSource, &[("dc", 0.001)]),
+        two_terminal(SymbolKind::VoltageSource, &[("dc", 5.0), ("imax", 1.0)]),
+        two_terminal(SymbolKind::CurrentSource, &[("dc", 0.001), ("imax", 1.0)]),
         SymbolDef::new(
             SymbolKind::Ground,
             vec![PinDef::new("gnd", GridPos::new(0, 0))],
@@ -377,6 +383,7 @@ fn builtin_defs() -> Vec<SymbolDef> {
                 ("bv", 5.1),
                 ("ibv", 1e-3),
                 ("nbv", 1.0),
+                ("imax", 0.2),
             ],
         ),
         SymbolDef::new(
@@ -442,7 +449,7 @@ fn two_terminal(kind: SymbolKind, defaults: &[(&str, f64)]) -> SymbolDef {
 }
 
 fn switch_def() -> SymbolDef {
-    let mut defaults = numeric_params(&[("ron", 1e-3), ("roff", 1e18)]);
+    let mut defaults = numeric_params(&[("ron", 1e-3), ("roff", 1e18), ("imax", 1.0)]);
     defaults.insert("closed".to_owned(), ParamValue::Bool(false));
     SymbolDef::new(
         SymbolKind::Switch,
@@ -496,6 +503,21 @@ mod tests {
         let inductor = registry.get(&SymbolKind::Inductor).unwrap();
         assert!(inductor.defaults.contains_key("inductance"));
         assert!(inductor.defaults.contains_key("resistance"));
+        assert!(inductor.defaults.contains_key("imax"));
+        for kind in [
+            SymbolKind::Resistor,
+            SymbolKind::Capacitor,
+            SymbolKind::VoltageSource,
+            SymbolKind::CurrentSource,
+            SymbolKind::Switch,
+            SymbolKind::Zener,
+        ] {
+            let definition = registry.get(&kind).unwrap();
+            assert!(
+                definition.defaults.contains_key("imax"),
+                "missing imax for {kind:?}"
+            );
+        }
         let diode = registry.get(&SymbolKind::Diode).unwrap();
         for key in ["type", "vf", "if", "n", "imax"] {
             assert!(

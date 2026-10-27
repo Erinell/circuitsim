@@ -130,7 +130,12 @@ Les raccourcis sont ignorés lorsqu’un champ texte a le focus, à l’exceptio
   proportionnelles au courant. `Vue → Courant animé` masque ce flux.
 - La couleur des fils suit la tension du net : bleu/gris/orange par défaut,
   variante cyan/gris/magenta, avec une légende. Le menu **Afficher** règle les
-  calques Tension, Courant, Puissance, Valeurs, Références et Labels.
+  calques Tension, Courant, Surintensités, Puissance, Valeurs, Références et
+  Labels.
+- Une surintensité ajoute un liseré ambre (80–100 %) ou rouge (> 100 %) sans
+  recolorer le fil, un badge `I / Imax`, et un contour avec triangle `!` sur le
+  composant. Le survol donne courant, limite, pourcentage et sévérité. La limite
+  des fils est réglable ; sans simulation à jour, aucune alerte n’apparaît.
 - La puissance dissipée ajoute un halo dont la luminosité est réglable. Le sens
   du courant peut être conventionnel ou électronique.
 - Un fil signalé par l’ERC (erreur ou avertissement) est tracé en rouge, prioritaire
