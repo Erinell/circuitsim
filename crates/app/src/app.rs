@@ -444,6 +444,7 @@ impl CircuitApp {
                 ("LED", Document::led_example),
                 ("Interrupteur", Document::switch_example),
                 ("RLC", Document::rlc_example),
+                ("RLC parallèle", Document::parallel_rlc_example),
             ] {
                 if ui.button(label).clicked() {
                     match builder() {

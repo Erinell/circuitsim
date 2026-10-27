@@ -370,6 +370,38 @@ impl Document {
         finish_example(document)
     }
 
+    /// Creates a switched parallel RLC example.
+    pub fn parallel_rlc_example() -> Result<Self, ActionError> {
+        let mut document = Self::new();
+        document.add_symbol(SymbolKind::VoltageSource, GridPos::new(5, -7))?;
+        let resistor = document.add_symbol(SymbolKind::Resistor, GridPos::new(-2, 0))?;
+        set_orientation(&mut document, resistor, Orientation::R90)?;
+        set_number(&mut document, resistor, "resistance", 10.0)?;
+        let switch = document.add_symbol(SymbolKind::Switch, GridPos::new(-2, -5))?;
+        set_orientation(&mut document, switch, Orientation::R90)?;
+        let inductor = document.add_symbol(SymbolKind::Inductor, GridPos::new(5, -3))?;
+        set_number(&mut document, inductor, "inductance", 1.0)?;
+        let capacitor = document.add_symbol(SymbolKind::Capacitor, GridPos::new(14, 0))?;
+        set_orientation(&mut document, capacitor, Orientation::R90)?;
+        set_number(&mut document, capacitor, "capacitance", 15e-6)?;
+        let load = document.add_symbol(SymbolKind::Resistor, GridPos::new(14, -5))?;
+        set_orientation(&mut document, load, Orientation::R90)?;
+        set_number(&mut document, load, "resistance", 100.0)?;
+        document.add_symbol(SymbolKind::Ground, GridPos::new(10, -7))?;
+
+        document.add_wire(GridPos::new(-2, 2), GridPos::new(-2, 4))?;
+        document.add_wire(GridPos::new(-2, 4), GridPos::new(2, 4))?;
+        document.add_wire(GridPos::new(2, 4), GridPos::new(14, 4))?;
+        document.add_wire(GridPos::new(-2, -7), GridPos::new(3, -7))?;
+        document.add_wire(GridPos::new(7, -7), GridPos::new(14, -7))?;
+        document.add_wire(GridPos::new(-2, -3), GridPos::new(3, -3))?;
+        document.add_wire(GridPos::new(7, -3), GridPos::new(14, -3))?;
+        document.add_wire(GridPos::new(14, 2), GridPos::new(14, 4))?;
+        document.add_wire(GridPos::new(14, -3), GridPos::new(14, -2))?;
+        document.add_wire(GridPos::new(-2, -3), GridPos::new(-2, -2))?;
+        finish_example(document)
+    }
+
     /// Returns the current schematic.
     pub const fn schematic(&self) -> &Schematic {
         &self.schematic
@@ -1925,6 +1957,22 @@ fn set_orientation(
     document.update_symbol(symbol)
 }
 
+fn set_number(
+    document: &mut Document,
+    id: SymbolId,
+    key: &str,
+    value: f64,
+) -> Result<(), ActionError> {
+    let mut symbol = document
+        .symbol(id)
+        .ok_or(ActionError::MissingObject)?
+        .clone();
+    symbol
+        .params
+        .insert(key.to_owned(), sim_core::netlist::ParamValue::Number(value));
+    document.update_symbol(symbol)
+}
+
 fn single_or_composite(mut commands: Vec<Command>) -> Command {
     if commands.len() == 1 {
         commands.remove(0)
@@ -2177,6 +2225,7 @@ mod tests {
             ("led", Document::led_example().unwrap()),
             ("switch", Document::switch_example().unwrap()),
             ("rlc", Document::rlc_example().unwrap()),
+            ("parallel-rlc", Document::parallel_rlc_example().unwrap()),
         ] {
             assert!(
                 document.extraction().is_some(),
@@ -2213,6 +2262,44 @@ mod tests {
                 "{name} must drive OUT positive, got {voltage}"
             );
         }
+    }
+
+    #[test]
+    fn parallel_rlc_example_keeps_the_requested_values() {
+        let document = Document::parallel_rlc_example().unwrap();
+        let expected = [
+            ("V1", "dc", 5.0),
+            ("R1", "resistance", 10.0),
+            ("L1", "inductance", 1.0),
+            ("C1", "capacitance", 15e-6),
+            ("R2", "resistance", 100.0),
+        ];
+        for (label, key, value) in expected {
+            let symbol = document
+                .schematic()
+                .symbols()
+                .find(|symbol| symbol.label == label)
+                .unwrap_or_else(|| panic!("{label} must exist"));
+            let actual = symbol
+                .params
+                .get(key)
+                .and_then(sim_core::netlist::ParamValue::as_number)
+                .unwrap_or_else(|| panic!("{label}.{key} must be numeric"));
+            assert!(
+                (actual - value).abs() <= value.abs().max(1.0) * 1e-12,
+                "{label}.{key} is {actual}, expected {value}"
+            );
+        }
+        let switch = document
+            .schematic()
+            .symbols()
+            .find(|symbol| symbol.kind == SymbolKind::Switch)
+            .unwrap();
+        assert!(!switch
+            .params
+            .get("closed")
+            .and_then(sim_core::netlist::ParamValue::as_bool)
+            .unwrap_or(true));
     }
 
     #[test]

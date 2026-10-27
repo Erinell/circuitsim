@@ -7,7 +7,8 @@ use eframe::egui::{self, Color32, RichText, Ui};
 use egui_plot::{Corner, Legend, Line, Plot, VLine};
 
 use crate::analysis::{
-    compute_spectrum, measurements, SignalCatalog, SignalId, SignalUnit, Spectrum, Trace,
+    compute_spectrum, measurements, probe_readings, SignalCatalog, SignalId, SignalUnit, Spectrum,
+    Trace,
 };
 use crate::document::Document;
 use crate::ui::instruments::{
@@ -111,23 +112,6 @@ impl InlineScopes {
         }
     }
 
-    /// Returns true when any scope displays the signal.
-    pub fn contains_signal(&self, signal: &SignalId) -> bool {
-        self.scopes
-            .iter()
-            .any(|scope| scope.signals.contains(signal))
-    }
-
-    /// Removes a signal from every scope.
-    pub fn remove_signal(&mut self, signal: &SignalId) {
-        for scope in &mut self.scopes {
-            scope.signals.remove(signal);
-            scope.frozen = false;
-            scope.frozen_traces = None;
-            scope.cache = None;
-        }
-    }
-
     /// Adds several signals, creating a scope when necessary.
     pub fn push_signals(&mut self, signals: BTreeSet<SignalId>) {
         if signals.is_empty() {
@@ -155,7 +139,7 @@ impl InlineScopes {
     pub fn show(
         &mut self,
         ui: &mut Ui,
-        instruments: &InstrumentsState,
+        instruments: &mut InstrumentsState,
         document: &Document,
         status: &mut Status,
     ) {
@@ -190,6 +174,7 @@ impl InlineScopes {
                 .color(MUTED),
             );
         });
+        self.probe_strip(ui, instruments, document, &catalog);
         ui.separator();
         let available = ui.available_height();
         let count = self.scopes.len().max(1) as f32;
@@ -211,6 +196,63 @@ impl InlineScopes {
                     self.apply_action(index, action, status);
                 }
             });
+    }
+
+    fn probe_strip(
+        &mut self,
+        ui: &mut Ui,
+        instruments: &mut InstrumentsState,
+        document: &Document,
+        catalog: &SignalCatalog,
+    ) {
+        let readings = probe_readings(document, &instruments.live_values());
+        if readings.is_empty() {
+            return;
+        }
+        egui::CollapsingHeader::new(format!("Sondes ({})", readings.len()))
+            .default_open(true)
+            .show(ui, |ui| {
+                for reading in readings {
+                    ui.horizontal_wrapped(|ui| {
+                        let unit = reading.unit.unwrap_or(Unit::Volt);
+                        let value = reading.value.map_or_else(
+                            || "—".to_owned(),
+                            |value| format_si_precision(value, unit, 4),
+                        );
+                        ui.label(
+                            RichText::new(format!("{} : {value}", reading.label))
+                                .small()
+                                .color(MUTED),
+                        );
+                        if let Some(signal) =
+                            reading.signal().filter(|signal| catalog.contains(signal))
+                        {
+                            let mut plotted = self
+                                .scopes
+                                .last()
+                                .is_some_and(|scope| scope.signals.contains(&signal));
+                            if ui.checkbox(&mut plotted, "Graphique").changed() {
+                                self.toggle_active_signal(signal, plotted);
+                            }
+                        }
+                        let mut visible = instruments.probe_visible(reading.id);
+                        if ui.checkbox(&mut visible, "Afficher").changed() {
+                            instruments.set_probe_visible(reading.id, visible);
+                        }
+                    });
+                }
+            });
+    }
+
+    fn toggle_active_signal(&mut self, signal: SignalId, plotted: bool) {
+        if plotted {
+            self.push_signal(signal);
+        } else if let Some(scope) = self.scopes.last_mut() {
+            scope.signals.remove(&signal);
+            scope.frozen = false;
+            scope.frozen_traces = None;
+            scope.cache = None;
+        }
     }
 
     fn apply_action(&mut self, index: usize, action: ScopeAction, status: &mut Status) {
@@ -738,14 +780,13 @@ mod tests {
     }
 
     #[test]
-    fn probe_helpers_add_and_remove_signals_everywhere() {
+    fn toggling_a_probe_signal_updates_the_active_scope() {
         let signal = SignalId::Voltage("OUT".to_owned());
         let mut scopes = InlineScopes::default();
-        scopes.push_signals(BTreeSet::from([signal.clone()]));
-        scopes.push_signals(BTreeSet::from([signal.clone()]));
-        assert!(scopes.contains_signal(&signal));
-        scopes.remove_signal(&signal);
-        assert!(!scopes.contains_signal(&signal));
+        scopes.toggle_active_signal(signal.clone(), true);
+        assert!(scopes.scopes[0].signals.contains(&signal));
+        scopes.toggle_active_signal(signal.clone(), false);
+        assert!(!scopes.scopes[0].signals.contains(&signal));
     }
 
     #[test]
