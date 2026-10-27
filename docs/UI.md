@@ -159,7 +159,9 @@ la même édition dans une fenêtre centrée, qui se ferme après application ou
 `Échap`. Les aides de saisie sont regroupées dans les infobulles des champs ; le
 panneau ne conserve que les valeurs et les actions utiles.
 
-- Symbole : référence, orientation, miroir, paramètres typés.
+- Symbole : référence, orientation, miroir, paramètres typés. Pour les diodes, un
+  sélecteur **Diode / Diode Schottky** applique les préréglages `vf`, `n` et
+  `imax`.
 - Label : nom du net ; fil/jonction : géométrie en lecture seule.
 - Sélection multiple : compteurs et actions pivoter, miroir, supprimer.
 - Paramètres numériques : saisie directe `4k7`/`100n`, erreur locale, série

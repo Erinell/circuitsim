@@ -614,12 +614,13 @@ impl MnaCircuit {
                 });
             }
             ComponentKind::Diode => {
+                let (saturation_current, emission_coefficient) = diode_model(component)?;
                 self.nonlinear.push(DiodeDevice {
                     component: component.id,
                     a,
                     b,
-                    saturation_current: positive_parameter(component, "is")?,
-                    emission_coefficient: positive_parameter(component, "n")?,
+                    saturation_current,
+                    emission_coefficient,
                     breakdown: None,
                 });
             }
@@ -1009,6 +1010,43 @@ fn optional_number(component: &ComponentSpec, key: &'static str) -> Result<Optio
             expected: "a number",
         }),
         None => Ok(None),
+    }
+}
+
+fn diode_model(component: &ComponentSpec) -> Result<(f64, f64), MnaError> {
+    let emission = optional_number(component, "n")?.unwrap_or(1.0);
+    if emission <= 0.0 {
+        return Err(MnaError::InvalidParameterValue {
+            component: component.id,
+            key: "n",
+            value: emission,
+            requirement: "strictly positive",
+        });
+    }
+    if let Some(saturation) = optional_number(component, "is")? {
+        if saturation > 0.0 {
+            return Ok((saturation, emission));
+        }
+        return Err(MnaError::InvalidParameterValue {
+            component: component.id,
+            key: "is",
+            value: saturation,
+            requirement: "strictly positive",
+        });
+    }
+    let forward_voltage = positive_parameter(component, "vf")?;
+    let forward_current = positive_parameter(component, "if")?;
+    let thermal = emission * THERMAL_VOLTAGE;
+    let saturation = forward_current / ((forward_voltage / thermal).min(MAX_EXPONENT).exp() - 1.0);
+    if saturation.is_finite() && saturation > 0.0 {
+        Ok((saturation, emission))
+    } else {
+        Err(MnaError::InvalidParameterValue {
+            component: component.id,
+            key: "vf",
+            value: forward_voltage,
+            requirement: "a finite positive saturation current",
+        })
     }
 }
 

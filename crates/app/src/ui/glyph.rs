@@ -575,14 +575,47 @@ fn paint_diode(
         &[(-0.55, -0.8), (-0.55, 0.8), (0.6, 0.0), (-0.55, -0.8)],
         stroke,
     );
-    line_local(
-        painter,
-        symbol,
-        center,
-        scale,
-        &[(0.7, -0.8), (0.7, 0.8)],
-        stroke,
-    );
+    let schottky = !led
+        && symbol
+            .params
+            .get("type")
+            .and_then(ParamValue::as_text)
+            .is_some_and(|kind| kind.eq_ignore_ascii_case("schottky"));
+    if schottky {
+        line_local(
+            painter,
+            symbol,
+            center,
+            scale,
+            &[(0.7, -0.8), (0.7, 0.8)],
+            stroke,
+        );
+        line_local(
+            painter,
+            symbol,
+            center,
+            scale,
+            &[(0.7, -0.8), (0.95, -0.8), (0.95, -0.55)],
+            stroke,
+        );
+        line_local(
+            painter,
+            symbol,
+            center,
+            scale,
+            &[(0.7, 0.8), (0.45, 0.8), (0.45, 0.55)],
+            stroke,
+        );
+    } else {
+        line_local(
+            painter,
+            symbol,
+            center,
+            scale,
+            &[(0.7, -0.8), (0.7, 0.8)],
+            stroke,
+        );
+    }
     if led {
         line_local(
             painter,
@@ -695,7 +728,7 @@ fn symbol_value(symbol: &Symbol) -> Option<String> {
         SymbolKind::VoltageSource | SymbolKind::CurrentSource => Some("dc"),
         SymbolKind::Switch => Some("closed"),
         SymbolKind::Led => Some("vf"),
-        SymbolKind::Diode => Some("is"),
+        SymbolKind::Diode => Some("vf"),
         SymbolKind::Zener => Some("bv"),
         SymbolKind::OpAmp => Some("gain"),
         _ => None,

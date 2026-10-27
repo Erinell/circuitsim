@@ -8,6 +8,9 @@ sémantique.
 
 ### Added
 
+- Choix **Diode / Diode Schottky** dans l’inspecteur, avec préréglages `vf`,
+  `if`, `n`, `imax` et dérivation de `is`. Le symbole Schottky est dessiné avec
+  ses crochets de cathode.
 - Paramètres de la **LED** : longueur d’onde/couleur (`wavelength`), tension
   directe `vf`, courant nominal `if`, courant maximal `imax`. Le modèle dérive
   `is` de `vf`/`if` et le halo prend la couleur de la longueur d’onde.

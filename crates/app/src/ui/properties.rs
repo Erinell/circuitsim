@@ -48,7 +48,7 @@ struct ParamDraft {
     value: ParamDraftValue,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 enum ParamDraftValue {
     Number(String),
     Bool(bool),
@@ -522,6 +522,7 @@ fn show_symbol(
                 .on_hover_text("Série E utilisée par la molette et les boutons −/+");
         });
         let kind = draft.kind.clone();
+        let mut diode_type = None;
         Grid::new("symbol_parameters")
             .num_columns(2)
             .spacing([12.0, 8.0])
@@ -600,17 +601,51 @@ fn show_symbol(
                             ui.checkbox(flag, "");
                         }
                         ParamDraftValue::Text(text) => {
-                            ui.add(
-                                TextEdit::singleline(text)
-                                    .desired_width(180.0)
-                                    .hint_text("texte"),
-                            )
-                            .on_hover_text("Paramètre texte");
+                            if kind == SymbolKind::Diode && param.key == "type" {
+                                let mut schottky = text.eq_ignore_ascii_case("schottky");
+                                let mut changed = false;
+                                egui::ComboBox::from_id_salt("diode_type")
+                                    .selected_text(if schottky {
+                                        "Diode Schottky"
+                                    } else {
+                                        "Diode"
+                                    })
+                                    .show_ui(ui, |ui| {
+                                        if ui
+                                            .selectable_value(&mut schottky, false, "Diode")
+                                            .clicked()
+                                        {
+                                            changed = true;
+                                        }
+                                        if ui
+                                            .selectable_value(&mut schottky, true, "Diode Schottky")
+                                            .clicked()
+                                        {
+                                            changed = true;
+                                        }
+                                    });
+                                if changed {
+                                    *text =
+                                        if schottky { "schottky" } else { "standard" }.to_owned();
+                                    diode_type = Some(schottky);
+                                }
+                            } else {
+                                ui.add(
+                                    TextEdit::singleline(text)
+                                        .desired_width(180.0)
+                                        .hint_text("texte"),
+                                )
+                                .on_hover_text("Paramètre texte");
+                            }
                         }
                     }
                     ui.end_row();
                 }
             });
+        if let Some(schottky) = diode_type {
+            apply_diode_preset(&mut draft.params, schottky);
+            commit = true;
+        }
     }
 
     if let Some(probe) = probe_info {
@@ -662,6 +697,25 @@ fn cycle_number(text: &mut String, series: Series, unit: Option<Unit>, steps: i3
         return;
     };
     *text = format_parameter(next, unit);
+}
+
+fn apply_diode_preset(params: &mut [ParamDraft], schottky: bool) {
+    let (forward_voltage, emission, maximum_current) = if schottky {
+        (0.35, 1.05, 0.2)
+    } else {
+        (0.7, 1.0, 0.2)
+    };
+    for param in params {
+        let text = match param.key.as_str() {
+            "vf" => Some(format_parameter(forward_voltage, Some(Unit::Volt))),
+            "n" => Some(format_parameter(emission, None)),
+            "imax" => Some(format_parameter(maximum_current, Some(Unit::Ampere))),
+            _ => None,
+        };
+        if let (Some(text), ParamDraftValue::Number(field)) = (text, &mut param.value) {
+            *field = text;
+        }
+    }
 }
 
 fn show_symbol_live(ui: &mut Ui, info: &SymbolLive, live: &LiveValues, revision: u64) {
@@ -849,6 +903,34 @@ mod tests {
             param.value = ParamDraftValue::Number("not-a-number".to_owned());
         }
         assert!(draft.to_symbol(&symbol).is_err());
+    }
+
+    #[test]
+    fn schottky_preset_updates_forward_parameters() {
+        let mut params = vec![
+            ParamDraft {
+                key: "vf".to_owned(),
+                value: ParamDraftValue::Number("700m".to_owned()),
+            },
+            ParamDraft {
+                key: "n".to_owned(),
+                value: ParamDraftValue::Number("1".to_owned()),
+            },
+            ParamDraft {
+                key: "imax".to_owned(),
+                value: ParamDraftValue::Number("200m".to_owned()),
+            },
+        ];
+        apply_diode_preset(&mut params, true);
+        assert_eq!(
+            params[0].value,
+            ParamDraftValue::Number("350 mV".to_owned())
+        );
+        assert_eq!(params[1].value, ParamDraftValue::Number("1.05".to_owned()));
+        assert_eq!(
+            params[2].value,
+            ParamDraftValue::Number("200 mA".to_owned())
+        );
     }
 
     #[test]

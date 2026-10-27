@@ -61,25 +61,30 @@ interprété.
 
 | Paramètre | Défaut diode | Défaut LED | Rôle |
 | --- | ---: | ---: | --- |
-| `is` | `1e-14` A | dérivé de `vf`/`if` | courant de saturation |
+| `type` | `standard` | — | `standard` ou `schottky` |
+| `is` | dérivé de `vf`/`if` | dérivé de `vf`/`if` | courant de saturation |
 | `n` | `1` | `2` (implicite) | coefficient d'émission |
 | `wavelength` | — | `620` nm | couleur / longueur d'onde |
-| `vf` | — | `2.0` V | tension directe au courant nominal |
-| `if` | — | `0.02` A | courant nominal de la LED |
-| `imax` | — | `0.03` A | courant maximal |
+| `vf` | `0.7` V | `2.0` V | tension directe au courant nominal |
+| `if` | `0.01` A | `0.02` A | courant nominal |
+| `imax` | `0.2` A | `0.03` A | courant maximal |
 
 ```text
 I(v) = is * (exp(v / (n * Vt)) - 1)
 Vt = kT/q ≈ 25.85 mV à 300.15 K
-is = if / (exp(vf / (n * Vt)) - 1)   (LED sans is)
+is = if / (exp(vf / (n * Vt)) - 1)
 ```
 
-`is` et `n` sont strictement positifs. L'exponentielle est plafonnée à `exp(80)`
-pendant Newton ; ce n'est pas une résistance série. La LED n'émet aucun flux
-lumineux modélisé ; sa longueur d'onde colore uniquement le halo de l'interface.
-`imax` est une limite de datasheet éditable, non utilisée par le solveur. La
-diode n'a ni capacité de jonction ni température paramétrable ; en AC, seule la
-conductance `dI/dV` au point DC intervient.
+Le type **Schottky** applique le préréglage `vf = 0.35 V`, `n = 1.05`,
+`if = 0.01 A`, `imax = 0.2 A` et `is ≈ 2.5e-8 A` (dérivé). Le type standard
+utilise `vf = 0.7 V`, `n = 1`, `is ≈ 1.8e-14 A`. `is` et `n` restent
+strictement positifs et les anciennes diodes avec `is`/`n` sont compatibles.
+L'exponentielle est plafonnée à `exp(80)` pendant Newton ; ce n'est pas une
+résistance série. La LED n'émet aucun flux lumineux modélisé ; sa longueur
+d'onde colore uniquement le halo de l'interface. `imax` est une limite de
+datasheet éditable, non utilisée par le solveur. La diode n'a ni capacité de
+jonction ni température paramétrable ; en AC, seule la conductance `dI/dV` au
+point DC intervient.
 
 Le Zener ajoute, pour `v < -bv` :
 
