@@ -56,12 +56,13 @@ pas automatisés.
 ## 4. Simulation temps réel
 
 Le mode temps réel n'exécute plus un nombre fixe de pas par image. Chaque image
-dispose d'un budget mural de **5 ms** (`LIVE_TICK_BUDGET_SECONDS`) et le pas
-d'intégration live est plancheré à **1 ms** (`LIVE_MIN_STEP_SECONDS`) ; les
-analyses complètes gardent le pas saisi (10 µs par défaut). Un échantillon
-n'est construit qu'après un pas, au rythme d'affichage de 1 ms, et le tampon est
-un anneau de **10 000 échantillons** dont la tête est libérée par blocs de 256 :
-aucune allocation ni recopie par image en régime établi.
+dispose d'un budget mural de **5 ms** (`LIVE_TICK_BUDGET_SECONDS`). Le pas
+d'intégration live est réglable de **1 µs à 10 ms** et vaut **1 ms** par défaut
+(`DEFAULT_LIVE_STEP_SECONDS`) ; les analyses complètes gardent le pas saisi
+(10 µs par défaut). Un échantillon est construit après chaque pas live, et le
+tampon est un anneau de **10 000 échantillons** dont la tête est libérée par
+blocs de 256 : aucune allocation ni recopie par image en régime établi. La
+fenêtre conservée vaut donc 10 000 × le pas live : 10 s à 1 ms, 50 ms à 5 µs.
 
 Témoin commun : échelle RC de 60 sections (61 nœuds, 122 composants) avec une
 diode, 60 images/s, 5 s simulées, profil `--release`, même machine que la
@@ -73,25 +74,43 @@ d'allocations pour le tas du tampon.
 | Politique | Image moyenne / p95 / max | Ratio à 1× | Échantillons retenus | Tas du tampon | Trim |
 | --- | ---: | ---: | ---: | ---: | ---: |
 | Avant (`main`) | 17,4 / 22,6 / 30,7 ms | 0,48 | 100 000 | 180 Mo | 0,39 ms/image, 1,06 ms max |
-| Après, 1× | 0,35 / 0,43 / 0,94 ms | 1,000 | 5 001 (5 s) | 8,9 Mo | 0 ms |
-| Après, 12 s à 1× | 0,36 / 0,42 / 1,53 ms | 1,000 | 10 000 (plafond) | 18,1 Mo | 0,20 ms max |
-| Après, 10× | 3,41 / 3,68 / 5,01 ms | 1,000 | 10 000 | 17,8 Mo | 0,26 ms max |
+| Après, pas 1 ms, 1× | 0,35 / 0,43 / 0,94 ms | 1,000 | 5 001 (5 s) | 8,9 Mo | 0 ms |
+| Après, pas 1 ms, 12 s à 1× | 0,36 / 0,42 / 1,53 ms | 1,000 | 10 000 (plafond) | 18,1 Mo | 0,20 ms max |
+| Après, pas 1 ms, 10× | 3,41 / 3,68 / 5,01 ms | 1,000 | 10 000 | 17,8 Mo | 0,26 ms max |
 
 Avant, 300 images sur 300 dépassaient 6 ms et 291 dépassaient 16 ms ; après,
 aucune ne les dépasse, y compris à 10×. À 1× le ratio simulé/réel passe de 0,48
 à 1,000. Le budget borne l'image : à 10× le maximum mesuré (5,01 ms) reste dans
 le budget plus un pas et un échantillon.
 
+Pas fin (5 µs), même témoin, même budget :
+
+| Réglage | Image moyenne / p95 / max | Ratio | Échantillons / fenêtre | Tas |
+| --- | ---: | ---: | ---: | ---: |
+| 5 µs, 1× | 5,02 / 5,04 / 5,14 ms | 0,057 | 9 819 / 49 ms | 17,4 Mo |
+| 5 µs, 0,1× | 5,02 / 5,03 / 5,24 ms | 0,552 | 9 854 / 49 ms | 17,5 Mo |
+| 5 µs, 0,05× | 4,74 / 5,04 / 5,22 ms | 1,000 | 9 809 / 49 ms | 17,4 Mo |
+
+Sur un petit RC (1 kΩ, 100 µF), 5 µs tient 1× à 60 images/s (1,88 ms au pire
+2,57 ms) ; à 5× le ratio tombe à 0,529. Un pas fin coûte donc des pas, pas des
+images : l'interface reste fluide, le temps simulé avance moins vite. Pour
+rester à 100 % du temps réel avec un pas fin, baisser la vitesse (0,05× suffit
+sur le témoin à 5 µs).
+
 Compromis assumés :
 
-- le pas live vaut au moins 1 ms ; les analyses DC/AC/transitoires complètes,
-  les CSV et le spectre hors live gardent tous leurs échantillons au pas saisi ;
-- le spectre du mode live utilise le pas effectif de 1 ms (Nyquist 500 Hz) ;
-- la fenêtre des portées est plafonnée à 10 s pour tenir dans 10 000 échantillons ;
-- un événement de source est appliqué à la première frontière de 1 ms qui suit
-  son instant, avec un décalage maximal de 1 ms ;
-- la session reste sur le fil de l'interface : le budget et le pas plancher
-  bornent le travail par image, mais un pas unique n'est pas préemptible.
+- le pas live par défaut vaut 1 ms ; un pas plus fin est un choix explicite et
+  le ratio affiché montre le ralentissement. Les analyses DC/AC/transitoires
+  complètes, les CSV et les spectres hors live gardent tous leurs échantillons
+  au pas saisi ;
+- le spectre du mode live utilise le pas effectif (Nyquist 500 Hz à 1 ms,
+  100 kHz à 5 µs) ;
+- la fenêtre conservée vaut 10 000 × le pas live (10 s à 1 ms, 50 ms à 5 µs) ;
+  le sélecteur de fenêtre descend à 1 ms ;
+- un événement de source est appliqué à la première frontière du pas live qui
+  suit son instant, avec un décalage maximal d'un pas ;
+- la session reste sur le fil de l'interface : le budget borne le travail par
+  image, mais un pas unique n'est pas préemptible.
 
 ## 5. Précautions et baseline
 

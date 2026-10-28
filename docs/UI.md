@@ -238,7 +238,7 @@ live.
   Les signaux tracés sont rappelés par un marqueur de couleur sur le fil ou le
   composant correspondant. Le panneau reste accessible par **Affichage →
   Instruments et portées**. La fenêtre temporelle couvre **10 s de temps
-  simulé** par défaut et se règle de 0,5 à 10 s dans les contrôles. Le bouton
+  simulé** par défaut et se règle de 1 ms à 10 s dans les contrôles. Le bouton
   **Recentrer** réinitialise le zoom et le déplacement X/Y ; **Monter** et
   **Descendre** réordonnent les portées et sont désactivés aux extrémités.
 - **Contrôles live** : l'état (`En marche`, `En pause`, `Prêt` ou `Circuit
@@ -247,12 +247,16 @@ live.
   de courant et la luminosité de puissance. **Démarrer / Pause / Reprendre**,
   **Réinitialiser** et **Pas suivant** y sont également disponibles. Le lien
   **Voir le diagnostic** ouvre l'inspecteur/ERC.
-- **Pas temps réel** : la session live utilise un pas d'intégration d'au moins
-  **1 ms** et un budget de **5 ms** de calcul par image. Le pas effectif est
-  affiché sous les contrôles ; le pas saisi reste celui des analyses complètes.
-  Le tampon des portées et du spectre est un anneau de 10 000 échantillons
-  (10 s à 1 ms), sans recopie périodique. Un événement de source est appliqué à
-  la frontière de 1 ms suivante.
+- **Pas temps réel** : la session live utilise un pas d'intégration réglable de
+  **1 µs à 10 ms** (1 ms par défaut) et un budget de **5 ms** de calcul par
+  image. Un pas plus fin montre les mouvements en détail mais ralentit le temps
+  simulé : le badge affiche alors « ralenti ×N » ; baisser la vitesse ramène à
+  100 % du temps réel. Le champ **Pas live** s'applique avec **Appliquer** (la
+  session repart de t = 0) ; le champ **Pas** reste celui des analyses
+  complètes. Le tampon des portées et du spectre est un anneau de 10 000
+  échantillons, soit 10 000 × le pas live (10 s à 1 ms, 50 ms à 5 µs), sans
+  recopie périodique. Un événement de source est appliqué à la frontière du pas
+  live suivante.
 - **Fenêtre glissante** : la portée temps réel affiche les derniers
   échantillons sans plage d’arrêt. Les mesures min/max, crête-à-crête, moyenne,
   RMS et nombre d’échantillons restent disponibles lorsque le signal est
@@ -318,8 +322,8 @@ qu'après validation. Une action refusée ne change ni contenu, ni révision, ni
 d'identifiants. Collections et rendu sont ordonnés.
 
 La session temps réel reste sur le fil de l'interface ; son budget de 5 ms par
-image et son pas plancher d'1 ms bornent la durée du tick, et la pause ne
-déclenche ni pas ni repeint de simulation.
+image et son pas live (1 ms par défaut, 1 µs à 10 ms) bornent la durée du tick,
+et la pause ne déclenche ni pas ni repeint de simulation.
 
 Limites : worker et session temps réel dans le fil de l'interface, tests
 navigateur non automatisés, transitoire à pas fixe, FFT plafonnée, pas de

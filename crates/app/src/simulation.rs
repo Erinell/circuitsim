@@ -13,23 +13,30 @@ use crate::document::Document;
 
 /// Wall-clock budget spent on integration during one frame, in seconds.
 pub const LIVE_TICK_BUDGET_SECONDS: f64 = 0.005;
-/// Smallest integration step used by the live session, in seconds.
+/// Integration step used by a live session until the user picks another one.
 ///
-/// The oscilloscope and the spectrum consume one sample per millisecond, so a
-/// finer step only burns CPU. Complete analyses keep the configured step.
-pub const LIVE_MIN_STEP_SECONDS: f64 = 1e-3;
+/// It keeps a medium circuit at real time; finer steps are selectable and trade
+/// simulated speed for precision.
+pub const DEFAULT_LIVE_STEP_SECONDS: f64 = 1e-3;
+/// Finest integration step accepted for the live session, in seconds.
+pub const MIN_LIVE_STEP_SECONDS: f64 = 1e-6;
+/// Coarsest integration step accepted for the live session, in seconds.
+pub const MAX_LIVE_STEP_SECONDS: f64 = 1e-2;
 /// Maximum number of samples retained for the scopes and the spectrum.
+///
+/// One sample is kept per integration step, so the retained window is
+/// `MAX_SAMPLES` × live step: 10 s at 1 ms, 50 ms at 5 µs.
 pub const MAX_SAMPLES: usize = 10_000;
 /// Sliding time window shown by the scopes, in simulated seconds.
 pub const DEFAULT_SCOPE_WINDOW_SECONDS: f64 = 10.0;
 /// Smallest selectable scope window, in simulated seconds.
-pub const MIN_SCOPE_WINDOW_SECONDS: f64 = 0.5;
+pub const MIN_SCOPE_WINDOW_SECONDS: f64 = 1e-3;
 /// Largest selectable scope window, in simulated seconds.
 ///
 /// It matches the retained window at the live cadence (`MAX_SAMPLES` × 1 ms).
 pub const MAX_SCOPE_WINDOW_SECONDS: f64 = 10.0;
 /// Speed multipliers offered by the live controls.
-pub const LIVE_SPEEDS: [f64; 6] = [0.25, 0.5, 1.0, 2.0, 5.0, 10.0];
+pub const LIVE_SPEEDS: [f64; 8] = [0.05, 0.1, 0.25, 0.5, 1.0, 2.0, 5.0, 10.0];
 
 /// Number of dead slots dropped at once when the sample ring is full.
 ///
@@ -79,12 +86,21 @@ impl LiveSimulation {
         settings: &TransientSettings,
         now: f64,
     ) -> Result<Self, SimulationError> {
+        Self::start_with_step(document, settings, now, DEFAULT_LIVE_STEP_SECONDS)
+    }
+
+    /// Creates a live session with an explicit integration step.
+    pub fn start_with_step(
+        document: &Document,
+        settings: &TransientSettings,
+        now: f64,
+        requested_step: f64,
+    ) -> Result<Self, SimulationError> {
         let extraction = document
             .extraction()
             .ok_or_else(|| SimulationError::Transient("aucune netlist valide".to_owned()))?;
         let mut setup = prepare_realtime(extraction, settings, document.revision())?;
-        let requested = setup.context.nominal_step.unwrap_or(setup.options.step);
-        let live_step = live_step(requested);
+        let live_step = live_step(requested_step);
         setup.options.step = live_step;
         setup.context.nominal_step = Some(live_step);
         let mut session = TransientSession::new(&setup.netlist, &setup.options)
@@ -296,10 +312,10 @@ impl LiveSimulation {
 
 /// Returns the integration step used by the live session.
 fn live_step(requested: f64) -> f64 {
-    if requested.is_finite() && requested > LIVE_MIN_STEP_SECONDS {
-        requested
+    if requested.is_finite() && requested > 0.0 {
+        requested.clamp(MIN_LIVE_STEP_SECONDS, MAX_LIVE_STEP_SECONDS)
     } else {
-        LIVE_MIN_STEP_SECONDS
+        DEFAULT_LIVE_STEP_SECONDS
     }
 }
 
@@ -416,16 +432,39 @@ mod tests {
     }
 
     #[test]
-    fn live_step_is_floored_at_one_millisecond() {
-        assert!((live_step(1e-5) - 1e-3).abs() < f64::EPSILON);
-        assert!((live_step(1e-3) - 1e-3).abs() < f64::EPSILON);
-        assert!((live_step(2e-3) - 2e-3).abs() < f64::EPSILON);
-        assert!((live_step(f64::NAN) - 1e-3).abs() < f64::EPSILON);
+    fn live_step_is_clamped_to_the_selectable_range() {
+        assert!((live_step(5e-6) - 5e-6).abs() < f64::EPSILON);
+        assert!((live_step(1e-9) - MIN_LIVE_STEP_SECONDS).abs() < f64::EPSILON);
+        assert!((live_step(1.0) - MAX_LIVE_STEP_SECONDS).abs() < f64::EPSILON);
+        assert!((live_step(f64::NAN) - DEFAULT_LIVE_STEP_SECONDS).abs() < f64::EPSILON);
+        assert!((live_step(0.0) - DEFAULT_LIVE_STEP_SECONDS).abs() < f64::EPSILON);
 
         let document = Document::demo().unwrap();
         let session = LiveSimulation::start(&document, &TransientSettings::default(), 0.0).unwrap();
         assert_eq!(session.effective_step(), Some(1e-3));
         assert_eq!(session.scope_step(), Some(1e-3));
+    }
+
+    #[test]
+    fn a_five_microsecond_live_step_is_honoured() {
+        let document = Document::demo().unwrap();
+        let mut session =
+            LiveSimulation::start_with_step(&document, &TransientSettings::default(), 0.0, 5e-6)
+                .unwrap();
+        let step = session.effective_step().unwrap();
+        assert!((step - 5e-6).abs() < 1e-12, "effective step = {step}");
+        assert_eq!(session.scope_step(), session.effective_step());
+        assert_eq!(
+            session
+                .tick_with_budget(&document, 0.001, Duration::ZERO)
+                .unwrap(),
+            TickOutcome::Advanced
+        );
+        assert_eq!(session.last_steps(), 1);
+        assert_eq!(session.samples().len(), 2);
+        assert!((session.last_sample().unwrap().time - 5e-6).abs() < 1e-12);
+        // Ten thousand retained steps cover 50 ms of simulated time.
+        assert!((MAX_SAMPLES as f64 * 5e-6 - 0.05).abs() < 1e-12);
     }
 
     #[test]

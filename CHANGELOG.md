@@ -57,11 +57,11 @@ sémantique.
 ### Changed
 
 - **Simulation temps réel** : budget de 5 ms de calcul par image au lieu de
-  800 pas fixes, pas live plancheré à 1 ms, un échantillon par milliseconde
-  simulée au lieu d'un par pas d'intégration, et tampon en anneau de
-  10 000 échantillons sans `Vec::drain` par image. Le pas effectif et le badge
-  de retard restent visibles ; les analyses complètes gardent le pas saisi, tous
-  leurs échantillons, les CSV et les spectres.
+  800 pas fixes, pas live réglable de 1 µs à 10 ms (1 ms par défaut), un
+  échantillon par pas d'intégration et tampon en anneau de 10 000 échantillons
+  sans `Vec::drain` par image. Le pas effectif, la fenêtre conservée et le badge
+  de ralentissement restent visibles ; les analyses complètes gardent le pas
+  saisi, tous leurs échantillons, les CSV et les spectres.
 - L'en-tête place désormais menus et commandes sur une même rangée, avec les
   actions centrées ; les fenêtres étroites conservent un retour à la ligne centré.
   L'alignement vertical est harmonisé, la recherche est visible et l'état de

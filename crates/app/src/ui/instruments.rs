@@ -85,6 +85,7 @@ pub struct InstrumentsState {
     scope_signals: BTreeSet<SignalId>,
     realtime: Option<LiveSimulation>,
     realtime_speed: f64,
+    live_step: String,
     animation_speed: f64,
     power_brightness: f32,
     live_error: Option<String>,
@@ -119,6 +120,7 @@ impl InstrumentsState {
             scope_signals: BTreeSet::new(),
             realtime: None,
             realtime_speed: 1.0,
+            live_step: "1m".to_owned(),
             animation_speed: 1.0,
             power_brightness: 0.6,
             live_error: None,
@@ -306,7 +308,24 @@ impl InstrumentsState {
             status.error("Une analyse est déjà en cours.");
             return;
         }
-        match LiveSimulation::start(document, &self.transient, now) {
+        let live_step = match crate::analysis::parse_live_step(&self.live_step) {
+            Ok(step) => step,
+            Err(error) => {
+                let message = error.user_message();
+                self.live_error = Some(message.clone());
+                self.fail(status, error);
+                return;
+            }
+        };
+        if !(crate::simulation::MIN_LIVE_STEP_SECONDS..=crate::simulation::MAX_LIVE_STEP_SECONDS)
+            .contains(&live_step)
+        {
+            self.live_error =
+                Some("Le pas temps réel doit être compris entre 1 µs et 10 ms.".to_owned());
+            status.error("Le pas temps réel doit être compris entre 1 µs et 10 ms.");
+            return;
+        }
+        match LiveSimulation::start_with_step(document, &self.transient, now, live_step) {
             Ok(mut run) => {
                 run.set_speed(self.realtime_speed);
                 run.set_paused(paused);
@@ -564,9 +583,7 @@ impl InstrumentsState {
                             ui.separator();
                             if ui
                                 .button("Ajouter une portée")
-                                .on_hover_text(
-                                    "Ajoute une portée avec le signal par défaut",
-                                )
+                                .on_hover_text("Ajoute une portée avec le signal par défaut")
                                 .clicked()
                             {
                                 if scopes.add_default_scope(catalog) {
@@ -597,7 +614,9 @@ impl InstrumentsState {
                                     .suffix(" s"),
                                 )
                                 .on_hover_text(
-                                    "Durée de temps simulé affichée par les portées (10 s par défaut)",
+                                    "Durée de temps simulé affichée par les portées (10 s par \
+                                     défaut). Le tampon garde 10 000 échantillons : sa durée \
+                                     vaut 10 000 × le pas live.",
                                 )
                                 .changed()
                             {
@@ -605,8 +624,8 @@ impl InstrumentsState {
                             }
                             ui.label(
                                 RichText::new(format!(
-                                    "{:.1} s affichées · 10 s par défaut",
-                                    self.scope_window
+                                    "{} affichées",
+                                    format_si_precision(self.scope_window, Unit::Second, 3)
                                 ))
                                 .small()
                                 .color(crate::ui::muted_text_color(ui)),
@@ -647,7 +666,7 @@ impl InstrumentsState {
         let mut speed = self.realtime_speed;
         if ui
             .add(
-                egui::Slider::new(&mut speed, 0.1..=10.0)
+                egui::Slider::new(&mut speed, 0.05..=10.0)
                     .logarithmic(true)
                     .text("Simulation"),
             )
@@ -656,23 +675,58 @@ impl InstrumentsState {
         {
             self.set_realtime_speed(speed);
         }
+        let effective_step = self
+            .realtime
+            .as_ref()
+            .and_then(LiveSimulation::effective_step);
+        let mut apply_step = false;
+        ui.horizontal(|ui| {
+            ui.label("Pas live");
+            ui.add(
+                egui::TextEdit::singleline(&mut self.live_step)
+                    .desired_width(70.0)
+                    .hint_text("1m"),
+            )
+            .on_hover_text(
+                "Pas d'intégration de la session temps réel (1µ à 10 ms). Un pas plus \
+                 fin montre le détail mais ralentit le temps simulé.",
+            );
+            let pending = crate::analysis::parse_live_step(&self.live_step)
+                .ok()
+                .zip(effective_step)
+                .is_some_and(|(requested, current)| (requested - current).abs() > current * 1e-9);
+            if running
+                && pending
+                && ui
+                    .small_button("Appliquer")
+                    .on_hover_text("Redémarre la session à t = 0 avec ce pas.")
+                    .clicked()
+            {
+                apply_step = true;
+            }
+        });
+        if apply_step {
+            self.reset_realtime(document, now, status);
+        }
         if let Some(step) = self
             .realtime
             .as_ref()
             .and_then(LiveSimulation::effective_step)
         {
+            let span = crate::simulation::MAX_SAMPLES as f64 * step;
             ui.label(
                 RichText::new(format!(
-                    "Pas temps réel : {}",
-                    format_si_precision(step, Unit::Second, 3)
+                    "Pas temps réel : {} · tampon {}",
+                    format_si_precision(step, Unit::Second, 3),
+                    format_si_precision(span, Unit::Second, 3)
                 ))
                 .small()
                 .color(crate::ui::muted_text_color(ui)),
             )
             .on_hover_text(
-                "Pas d'intégration de la session temps réel : au moins 1 ms pour \
-                 suivre l'affichage et la mémoire bornée. Les analyses complètes \
-                 gardent le pas saisi dans l'onglet Spectre.",
+                "Un échantillon est gardé par pas d'intégration : plus le pas est fin, \
+                 plus la fenêtre conservée est courte, mais plus le détail est fin. \
+                 Les analyses complètes gardent le pas saisi dans l'onglet Spectre.",
             );
         }
         let mut animation = self.animation_speed;
@@ -1542,6 +1596,7 @@ fn realtime_controls(
     lagging: bool,
     effective_step: Option<f64>,
 ) -> RealtimeAction {
+    let mut action = RealtimeAction::None;
     ui.heading("Transitoire temps réel");
     ui.horizontal(|ui| {
         let state = if running {
@@ -1556,16 +1611,31 @@ fn realtime_controls(
             "Circuit invalide"
         };
         ui.label(RichText::new(state).strong());
-        if lagging {
+        let fine = effective_step.is_some_and(|step| step < 1e-3);
+        if lagging && fine {
+            let factor = if ratio > 0.005 { 1.0 / ratio } else { 200.0 };
+            ui.label(
+                RichText::new(if factor >= 200.0 {
+                    "ralenti ×200+".to_owned()
+                } else {
+                    format!("ralenti ×{factor:.0}")
+                })
+                .small()
+                .color(crate::ui::muted_text_color(ui)),
+            )
+            .on_hover_text(
+                "Pas fin : le temps simulé avance moins vite que l'horloge, c'est le \
+                 prix du détail. Baissez la vitesse pour revenir à 100 % du temps réel.",
+            );
+        } else if lagging {
             ui.label(
                 RichText::new(format!("trop lent (×{:.1})", ratio))
                     .small()
                     .color(ERROR),
             )
             .on_hover_text(
-                "Chaque image est limitée à 5 ms de calcul et le pas temps réel \
-                 reste au moins égal à 1 ms. Réduisez la vitesse ou simplifiez le \
-                 circuit.",
+                "Chaque image est limitée à 5 ms de calcul. Réduisez la vitesse, \
+                 augmentez le pas ou simplifiez le circuit.",
             );
         } else if running {
             ui.label(
@@ -1586,20 +1656,6 @@ fn realtime_controls(
                     .hint_text("10u"),
             );
             ui.end_row();
-            if let Some(step) = effective_step {
-                ui.label("Live");
-                ui.label(
-                    RichText::new(format_si_precision(step, Unit::Second, 3))
-                        .small()
-                        .color(crate::ui::muted_text_color(ui)),
-                )
-                .on_hover_text(
-                    "Pas d'intégration réellement utilisé par la session temps réel : au \
-                     moins 1 ms pour suivre l'affichage. Les analyses complètes gardent le \
-                     pas saisi ci-dessus.",
-                );
-                ui.end_row();
-            }
         });
     ui.checkbox(&mut settings.step_enabled, "Échelon de source")
         .on_hover_text(
@@ -1666,7 +1722,6 @@ fn realtime_controls(
                 });
         }
     }
-    let mut action = RealtimeAction::None;
     ui.horizontal(|ui| {
         ui.label("Vitesse");
         egui::ComboBox::from_id_salt("realtime_speed")
@@ -2036,10 +2091,20 @@ mod tests {
         assert!((state.scope_window() - 10.0).abs() < f64::EPSILON);
         state.set_scope_window(2.5);
         assert!((state.scope_window() - 2.5).abs() < f64::EPSILON);
+        state.set_scope_window(1e-6);
+        assert!((state.scope_window() - 1e-3).abs() < f64::EPSILON);
         state.set_scope_window(100.0);
         assert!((state.scope_window() - 10.0).abs() < f64::EPSILON);
         state.set_scope_window(f64::NAN);
         assert!((state.scope_window() - 10.0).abs() < f64::EPSILON);
+    }
+
+    #[test]
+    fn live_step_field_accepts_five_microseconds() {
+        assert!((crate::analysis::parse_live_step("5u").unwrap() - 5e-6).abs() < 1e-12);
+        assert!((crate::analysis::parse_live_step("1m").unwrap() - 1e-3).abs() < 1e-12);
+        assert!(crate::analysis::parse_live_step("0").is_err());
+        assert!(crate::analysis::parse_live_step("abc").is_err());
     }
 
     #[test]

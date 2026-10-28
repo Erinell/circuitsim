@@ -1078,6 +1078,21 @@ fn parse_time(field: &'static str, text: &str) -> Result<f64, SimulationError> {
     Ok(value)
 }
 
+/// Parses the integration step of the live session.
+///
+/// Unlike the analysis step it is entered on its own, so the error names the
+/// live field and a non-positive value is rejected instead of silently replaced.
+pub fn parse_live_step(text: &str) -> Result<f64, SimulationError> {
+    let step = parse_time("pas temps réel", text)?;
+    if step <= 0.0 {
+        return Err(SimulationError::InvalidField {
+            field: "pas temps réel",
+            message: "le pas doit être strictement positif".to_owned(),
+        });
+    }
+    Ok(step)
+}
+
 fn parse_frequency(field: &'static str, text: &str) -> Result<f64, SimulationError> {
     parse_time(field, text)
 }
