@@ -123,7 +123,7 @@ pub(crate) fn body_half_extent(kind: &SymbolKind) -> f32 {
         SymbolKind::Capacitor => 0.9,
         SymbolKind::Diode | SymbolKind::Led | SymbolKind::Zener | SymbolKind::Switch => 0.8,
         SymbolKind::ShuntReference => 1.0,
-        SymbolKind::Comparator => 1.3,
+        SymbolKind::Comparator => 1.0,
         SymbolKind::OpAmp => 1.5,
         SymbolKind::Ground => 1.4,
         _ => 1.0,
@@ -747,12 +747,11 @@ fn paint_comparator(painter: &Painter, symbol: &Symbol, center: Pos2, scale: f32
         center,
         scale,
         &[
-            (-2.0, 1.0),
-            (-1.4, 0.6),
-            (-1.4, -1.2),
-            (1.25, 0.0),
-            (-1.4, 1.2),
-            (-1.4, 0.6),
+            (-0.85, -1.0),
+            (0.85, -1.0),
+            (0.85, 1.0),
+            (-0.85, 1.0),
+            (-0.85, -1.0),
         ],
         stroke,
     );
@@ -761,7 +760,7 @@ fn paint_comparator(painter: &Painter, symbol: &Symbol, center: Pos2, scale: f32
         symbol,
         center,
         scale,
-        &[(-2.0, -1.0), (-1.4, -0.6)],
+        &[(-2.0, 1.0), (-0.85, 1.0)],
         stroke,
     );
     line_local(
@@ -769,7 +768,7 @@ fn paint_comparator(painter: &Painter, symbol: &Symbol, center: Pos2, scale: f32
         symbol,
         center,
         scale,
-        &[(1.25, 0.0), (2.0, 0.0)],
+        &[(-2.0, -1.0), (-0.85, -1.0)],
         stroke,
     );
     line_local(
@@ -777,7 +776,7 @@ fn paint_comparator(painter: &Painter, symbol: &Symbol, center: Pos2, scale: f32
         symbol,
         center,
         scale,
-        &[(0.0, -1.2), (0.0, -2.0)],
+        &[(0.85, 0.0), (2.0, 0.0)],
         stroke,
     );
     line_local(
@@ -785,12 +784,20 @@ fn paint_comparator(painter: &Painter, symbol: &Symbol, center: Pos2, scale: f32
         symbol,
         center,
         scale,
-        &[(0.0, 1.2), (0.0, 2.0)],
+        &[(0.0, 1.0), (0.0, 2.0)],
+        stroke,
+    );
+    line_local(
+        painter,
+        symbol,
+        center,
+        scale,
+        &[(0.0, -1.0), (0.0, -2.0)],
         stroke,
     );
     for (text, position) in [
-        ("+", Vec2::new(-0.95, 0.35)),
-        ("−", Vec2::new(-0.95, -0.35)),
+        ("+", Vec2::new(-0.45, 0.55)),
+        ("−", Vec2::new(-0.45, -0.55)),
     ] {
         painter.text(
             paint_position(symbol, center, scale, position),
@@ -803,8 +810,8 @@ fn paint_comparator(painter: &Painter, symbol: &Symbol, center: Pos2, scale: f32
     painter.text(
         paint_position(symbol, center, scale, Vec2::new(0.15, 0.0)),
         Align2::CENTER_CENTER,
-        "OC",
-        FontId::proportional((scale * 0.4).clamp(6.0, 10.0)),
+        "393",
+        FontId::proportional((scale * 0.5).clamp(7.0, 12.0)),
         stroke.color,
     );
 }
@@ -934,5 +941,13 @@ mod tests {
             .params
             .insert("closed".to_owned(), ParamValue::Bool(true));
         assert_eq!(symbol_value(&symbol).as_deref(), Some("fermé"));
+    }
+
+    #[test]
+    fn comparator_body_matches_the_shunt_reference_extent() {
+        assert_eq!(
+            body_half_extent(&SymbolKind::Comparator),
+            body_half_extent(&SymbolKind::ShuntReference)
+        );
     }
 }

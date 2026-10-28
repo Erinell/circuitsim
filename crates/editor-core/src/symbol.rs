@@ -470,8 +470,8 @@ fn comparator_def() -> SymbolDef {
             PinDef::new("in+", GridPos::new(-2, 1)),
             PinDef::new("in-", GridPos::new(-2, -1)),
             PinDef::new("out", GridPos::new(2, 0)),
-            PinDef::new("vcc", GridPos::new(0, -2)),
-            PinDef::new("vss", GridPos::new(0, 2)),
+            PinDef::new("vcc", GridPos::new(0, 2)),
+            PinDef::new("vss", GridPos::new(0, -2)),
         ],
         numeric_params(&[("v_offset", 2e-3), ("r_sink", 20.0), ("imax", 0.02)]),
     )
