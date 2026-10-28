@@ -19,7 +19,6 @@
 | --- | --- |
 | `Ctrl+K` | Palette de commandes |
 | `W`, `J`, `N` | Fil, Jonction, Label |
-| `R`, `C`, `L`, `D`, `V`, `G`, `S` | Placer résistance, condensateur, bobine, diode, source, masse, interrupteur |
 | `R`, `M` | Pivoter ou mettre en miroir la sélection |
 | `R`, `F` | Pivoter ou mettre en miroir l’aperçu de placement |
 | `Maj` + clic | Ajouter ou retirer de la sélection |
@@ -31,6 +30,7 @@
 | `Ctrl+D` | Dupliquer la sélection |
 | `Suppr` / `Retour arrière` | Supprimer |
 | `Ctrl+Z`, `Ctrl+Y` | Annuler, rétablir |
+| `Ctrl+Maj+Z` | Rétablir |
 | `Alt+↑`, `Alt+↓` | Valeur E série suivante ou précédente |
 | `+`, `-`, `0` | Zoom avant, arrière, 100 % |
 | `Ctrl+0` | Origine et zoom par défaut |
@@ -43,8 +43,10 @@
 | `Ctrl+Maj+A` | Préférences d’affichage et accessibilité |
 | `Échap` | Annuler l’outil, le fil, le collage ou la sélection |
 
-Les raccourcis sont ignorés lorsqu’un champ texte a le focus, à l’exception de
+Les raccourcis sont ignorés lorsqu'un champ texte a le focus, à l'exception de
 `Ctrl+K` pour ouvrir ou fermer la palette de commandes.
+Le placement des composants se fait par la palette ou le menu **Dessin** ; les
+lettres seules ne sont pas des raccourcis de placement.
 
 ## 3. Sélection
 
@@ -78,6 +80,10 @@ Les raccourcis sont ignorés lorsqu’un champ texte a le focus, à l’exceptio
 
 ## 5. Navigation et disposition
 
+- Sur une fenêtre assez large, l'en-tête garde identité et menus à gauche et
+  centre la barre de recherche/simulation sur la même rangée. Elle passe sur une
+  seconde rangée centrée lorsque la largeur manque. `Rechercher` complète `Ctrl+K`;
+  l'état de simulation reste visible dans l'en-tête.
 - La molette zoome autour du curseur ; `+` et `-` autour du centre du canevas,
   `0` revient à 100 %, `Ctrl+0` centre l’origine au zoom par défaut.
 - Les flèches déplacent la vue de deux cases, `Maj` de huit cases. Le bouton
@@ -87,7 +93,7 @@ Les raccourcis sont ignorés lorsqu’un champ texte a le focus, à l’exceptio
   schéma. La mini-carte et le zoom molette restent disponibles.
 - La mini-carte montre le contenu, la sélection et la fenêtre visible. Un clic
   recentre la vue sur le point correspondant.
-- Le menu **Vue** masque la palette, l’inspecteur, les instruments ou la
+- Le menu **Affichage** masque la palette, l’inspecteur, les instruments ou la
   mini-carte. Quatre dispositions fiables sont proposées : Tout, Édition,
   Simulation et Canevas. Elles restent des zones fixes redimensionnables ; le
   dockage libre n’est pas proposé tant qu’il ne serait pas fiable.
@@ -171,9 +177,9 @@ Les raccourcis sont ignorés lorsqu’un champ texte a le focus, à l’exceptio
 
 - À l’ouverture d’un circuit valide, la session temps réel démarre seule. Le
   circuit est lisible et animé sans clic préalable.
-- **Marche/Arrêt** dans la barre d’outils et `Espace` figent ou relancent la
-  session. **Reset** et `F5` reviennent à `t = 0`. **Pas** avance d’un pas en
-  pause.
+- **Démarrer / Pause / Reprendre** dans la barre d'outils et `Espace` pilotent la
+  session. **Réinitialiser** et `F5` reviennent à `t = 0`. **Pas suivant** avance
+  d'un pas en pause.
 - Une modification de paramètre (valeur, interrupteur) est appliquée à chaud :
   le temps simulé et les états des éléments sont conservés. Une modification de
   topologie relance la session en conservant la pause et la vitesse. Le recalcul
@@ -287,7 +293,9 @@ Les raccourcis sont ignorés lorsqu’un champ texte a le focus, à l’exceptio
 
 ## 12. Résultats et erreurs
 
-Une opération refusée affiche un message français dans la barre d’état et ne
+Un clic sur un diagnostic ERC sélectionne et cadre son objet dans le canevas
+lorsqu'il existe ; un diagnostic sans objet l'indique dans la barre d'état.
+Une opération refusée affiche un message français dans la barre d'état et ne
 modifie ni le schéma, ni la révision, ni `next_id`. Les erreurs techniques
 restent typées dans les crates. Les fils concernés par un diagnostic ERC non
 informatif sont dessinés en rouge sur le canevas.

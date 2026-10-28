@@ -21,20 +21,23 @@ La distribution web utilise `index.html` et Trunk.
 | `ui/properties.rs`, `ui/erc.rs` | inspecteur, ERC et nets |
 | `ui/instruments.rs`, `ui/scopes.rs` | panneau unifié de simulation, portées et graphiques |
 
-De haut en bas : barre d'outils avec menus **Fichier**, **Édition**, **Dessin**,
-**Affichage**, **Options** et **Aide**, puis uniquement les contrôles
-**Marche/Arrêt**, **Reset** et **Pas** ; palette filtrable à gauche, canevas
-central, inspecteur/ERC à droite, panneau unifié **Instruments et portées** en
-bas (210–620 px, visible par défaut), barre d'état. Les outils, composants,
+De haut en bas : en-tête sur une rangée avec l'identité et les menus **Fichier**,
+**Édition**, **Dessin**, **Affichage**, **Options** et **Aide** à gauche, et le
+groupe recherche/simulation centré. Dans une fenêtre étroite, ce groupe passe sur
+une deuxième rangée centrée. Les commandes sont **Rechercher** (`Ctrl+K`),
+**Démarrer / Pause / Reprendre**, **Réinitialiser** et **Pas suivant** ; palette
+filtrable à gauche, canevas central,
+inspecteur/ERC à droite, panneau unifié **Instruments et portées** en bas
+(210–620 px, visible par défaut), barre d'état. Les outils, composants,
 transformations, alignements, exemples et commandes de vue sont dans les menus et
-la palette. `Ctrl+K` ouvre la palette de commandes. Les onglets **Portées**,
+la palette. Les onglets **Portées**,
 **Spectre** et **Bode** partagent le même panneau. La démonstration présélectionne
 `V1`, `10 V` et `Vc`.
 
 À l'ouverture d'un schéma valide, la session temps réel démarre seule : le
 circuit est déjà en marche et les instruments affichent le signal sans clic.
 
-Le menu **Vue** masque chaque panneau, active la mini-carte et applique une
+Le menu **Affichage** masque chaque panneau, active la mini-carte et applique une
 disposition fiable : **Tout**, **Édition** (palette et inspecteur),
 **Simulation** (instruments et inspecteur) ou **Canevas** seul. Ces dispositions
 sont aussi accessibles par `Ctrl+1` à `Ctrl+4`. Les panneaux restent des zones
@@ -137,16 +140,18 @@ existants.
 
 ## 3. Démarrage et accessibilité
 
-Le bouton **Démarrage** ouvre un guide en quatre étapes (placer, câbler, simuler,
+La commande **Aide → Démarrage** ouvre un guide en quatre étapes (placer, câbler, simuler,
 explorer). Il peut charger l’exemple RC, vider le schéma ou ouvrir l’aide. Le
 guide est affiché au lancement et reste accessible ensuite ; l’état vide du
 canevas renvoie aussi vers ce guide.
 
-Le bouton **Accessibilité** ou `Ctrl+Maj+A` ouvre les préférences d’affichage :
+La commande **Options → Accessibilité et affichage** ou `Ctrl+Maj+A` ouvre les
+préférences d’affichage :
 
 - thème **Sombre**, **Contraste élevé** ou **Clair** ;
 - taille de l’interface 85, 100, 115 ou 130 % ;
 - réduction des animations ;
+- textes secondaires adaptés au thème pour garder un contraste lisible ;
 - limite des fils/nets (10 A par défaut, ambre dès 80 % et rouge au-delà de 100 %) ;
 - rappel de la navigation clavier `Tab`/`Maj+Tab`.
 
@@ -156,7 +161,7 @@ stockage est `localStorage` ; en natif, un fichier `preferences.json` versionné
 est écrit dans le dossier de configuration. Un fichier absent, corrompu ou d’une
 version future est ignoré et remplacé par les valeurs par défaut.
 
-Le bouton **Projet** ouvre un dialogue JSON versionné : **Copier le JSON** pour
+La commande **Fichier → Projet JSON…** ouvre un dialogue JSON versionné : **Copier le JSON** pour
 partager, **Charger ce JSON** après collage, et selon la plateforme **Lire /
 Enregistrer le fichier** ou **Télécharger**. Le chargement revalide le schéma et
 remplace le document, l’historique, les résultats et les portées. Le bouton
@@ -192,9 +197,9 @@ français ; les erreurs techniques restent en anglais. Un fil portant une erreur
 ou un avertissement ERC est dessiné en rouge.
 
 L'extraction est recalculée après chaque commande acceptée. Le panneau ERC
-affiche les compteurs et les diagnostics triés ; un clic sélectionne l'objet
-correspondant s'il existe. L'ERC est un rapport : seule une erreur structurelle
-d'extraction bloque les nets et les analyses. La section **Surintensités** de
+affiche les compteurs et les diagnostics triés ; un clic sélectionne et cadre
+l'objet correspondant s'il existe. L'ERC est un rapport : seule une erreur
+structurelle d'extraction bloque les nets et les analyses. La section **Surintensités** de
 l'inspecteur liste les composants et nets au-dessus de 80 %, avec courant,
 limite, pourcentage et sévérité ; un clic sélectionne et cadre l'objet. La liste
 est vide sans simulation valide et les résultats antérieurs sont masqués.
@@ -204,9 +209,10 @@ est vide sans simulation valide et les résultats antérieurs sont masqués.
 Les contrôles acceptent `5m`, `10u`, etc. Le bouton de lancement est désactivé
 sans extraction valide, pendant une analyse ou si le worker est indisponible.
 Les résultats conservent la révision et les noms du document ; un résultat
-antérieur est signalé mais reste consultable. **Marche/Arrêt** dans la barre
-d’outils et `Espace` pilotent la session continue ; **Reset** et `F5` la
-remettent à `t = 0`, **Pas** avance d’un pas en pause. Le recalcul après
+antérieur est signalé mais reste consultable. **Démarrer / Pause / Reprendre**
+dans la barre d’outils et `Espace` pilotent la session continue ;
+**Réinitialiser** et `F5` la remettent à `t = 0`, **Pas suivant** avance d’un pas
+en pause. Le recalcul après
 modification est actif par défaut ; l’option **Auto** permet de le suspendre.
 Les changements de paramètres restent appliqués à chaud sans remise à zéro.
 L’échelon de source est désactivé par défaut pour ne pas fausser le démarrage
@@ -235,10 +241,12 @@ live.
   simulé** par défaut et se règle de 0,5 à 30 s dans les contrôles. Le bouton
   **Recentrer** réinitialise le zoom et le déplacement X/Y ; **Monter** et
   **Descendre** réordonnent les portées et sont désactivés aux extrémités.
-- **Contrôles live** : état `En marche`, `Pause`, `Arrêtée` ou `Circuit
-  invalide`, rapport temps simulé/réel, badge `trop lent (×0,3)`, vitesse de
-  simulation logarithmique, vitesse des points de courant et luminosité de
-  puissance. Le lien **Voir le diagnostic** ouvre l’inspecteur/ERC.
+- **Contrôles live** : l'état (`En marche`, `En pause`, `Prêt` ou `Circuit
+  invalide`) et un éventuel badge de retard sont affichés dans l'en-tête. Le
+  panneau expose la vitesse de simulation logarithmique, la vitesse des points
+  de courant et la luminosité de puissance. **Démarrer / Pause / Reprendre**,
+  **Réinitialiser** et **Pas suivant** y sont également disponibles. Le lien
+  **Voir le diagnostic** ouvre l'inspecteur/ERC.
 - **Fenêtre glissante** : la portée temps réel affiche les derniers
   échantillons sans plage d’arrêt. Les mesures min/max, crête-à-crête, moyenne,
   RMS et nombre d’échantillons restent disponibles lorsque le signal est

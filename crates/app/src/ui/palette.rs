@@ -74,7 +74,7 @@ pub fn show(
     ui.label(
         egui::RichText::new("Choisissez un outil ou un composant.")
             .small()
-            .color(MUTED),
+            .color(crate::ui::muted_text_color(ui)),
     );
     ui.add_space(6.0);
 
@@ -82,7 +82,7 @@ pub fn show(
         tool_button(ui, tool, canvas, Tool::Select, "Sélection");
         tool_button(ui, tool, canvas, Tool::Wire, "Fil  (W)");
         tool_button(ui, tool, canvas, Tool::Junction, "Jonction  (J)");
-        tool_button(ui, tool, canvas, Tool::Label, "Label  (L)");
+        tool_button(ui, tool, canvas, Tool::Label, "Nom de net  (N)");
     });
     ui.separator();
     ui.horizontal(|ui| {
@@ -103,7 +103,11 @@ pub fn show(
         .show(ui, |ui| {
             let mut shown = 0_u16;
             if needle.is_empty() && !state.favorites.is_empty() {
-                ui.label(egui::RichText::new("Favoris").small().color(MUTED));
+                ui.label(
+                    egui::RichText::new("Favoris")
+                        .small()
+                        .color(crate::ui::muted_text_color(ui)),
+                );
                 for kind in state.favorites.clone() {
                     if show_builtin(ui, registry, state, tool, canvas, &kind) {
                         shown += 1;
@@ -111,7 +115,11 @@ pub fn show(
                 }
             }
             if needle.is_empty() && !state.recent.is_empty() {
-                ui.label(egui::RichText::new("Récents").small().color(MUTED));
+                ui.label(
+                    egui::RichText::new("Récents")
+                        .small()
+                        .color(crate::ui::muted_text_color(ui)),
+                );
                 for kind in state.recent.clone() {
                     if show_builtin(ui, registry, state, tool, canvas, &kind) {
                         shown += 1;
@@ -197,7 +205,7 @@ pub fn show(
                 ui.label(
                     egui::RichText::new("Aucun composant ne correspond.")
                         .italics()
-                        .color(MUTED),
+                        .color(crate::ui::muted_text_color(ui)),
                 );
             }
             ui.add_space(8.0);
@@ -206,7 +214,7 @@ pub fn show(
                     "Clic droit : favori · V sélection, W fil, J jonction, L label, R pivoter, M miroir.",
                 )
                 .small()
-                .color(MUTED),
+                .color(crate::ui::muted_text_color(ui)),
             );
         });
 }

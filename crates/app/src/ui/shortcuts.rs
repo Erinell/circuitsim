@@ -56,7 +56,7 @@ pub const SHORTCUTS: &[ShortcutEntry] = &[
         action: "annuler",
     },
     ShortcutEntry {
-        keys: "Ctrl+Y",
+        keys: "Ctrl+Y / Ctrl+Maj+Z",
         action: "rétablir",
     },
     ShortcutEntry {
@@ -121,7 +121,13 @@ mod tests {
 
     #[test]
     fn essential_shortcuts_are_documented() {
-        for expected in ["R / M", "Espace", "Ctrl+K", "F5 / Ctrl+Entrée"] {
+        for expected in [
+            "R / M",
+            "Espace",
+            "Ctrl+K",
+            "F5 / Ctrl+Entrée",
+            "Ctrl+Y / Ctrl+Maj+Z",
+        ] {
             assert!(
                 SHORTCUTS.iter().any(|entry| entry.keys == expected),
                 "{expected} must be documented"

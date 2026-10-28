@@ -185,6 +185,22 @@ pub const LABEL: Color32 = Color32::from_rgb(245, 210, 128);
 /// Muted value text.
 pub const MUTED: Color32 = Color32::from_rgb(146, 164, 188);
 
+/// Returns a secondary text color with readable contrast in the active theme.
+pub(crate) fn muted_text_color(ui: &egui::Ui) -> Color32 {
+    let visuals = ui.visuals();
+    muted_text_color_for_theme(visuals.dark_mode, visuals.override_text_color.is_some())
+}
+
+fn muted_text_color_for_theme(dark_mode: bool, has_text_override: bool) -> Color32 {
+    if !dark_mode {
+        Color32::from_rgb(82, 96, 114)
+    } else if has_text_override {
+        Color32::WHITE
+    } else {
+        MUTED
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -201,5 +217,45 @@ mod tests {
         assert!(!Tool::Select.is_placement());
         assert!(Tool::Place(SymbolKind::Diode).is_placement());
         assert!(Tool::Junction.is_placement());
+    }
+
+    #[test]
+    fn secondary_text_keeps_contrast_in_each_theme() {
+        let palettes = [
+            (
+                muted_text_color_for_theme(true, false),
+                Color32::from_rgb(20, 27, 39),
+            ),
+            (
+                muted_text_color_for_theme(false, false),
+                Color32::from_rgb(244, 247, 251),
+            ),
+            (muted_text_color_for_theme(true, true), Color32::BLACK),
+        ];
+        for (text, background) in palettes {
+            assert!(
+                contrast_ratio(text, background) >= 4.5,
+                "secondary text contrast is {:.2}",
+                contrast_ratio(text, background)
+            );
+        }
+    }
+
+    fn contrast_ratio(a: Color32, b: Color32) -> f64 {
+        let left = luminance(a);
+        let right = luminance(b);
+        (left.max(right) + 0.05) / (left.min(right) + 0.05)
+    }
+
+    fn luminance(color: Color32) -> f64 {
+        let channel = |value: u8| {
+            let value = f64::from(value) / 255.0;
+            if value <= 0.03928 {
+                value / 12.92
+            } else {
+                ((value + 0.055) / 1.055).powf(2.4)
+            }
+        };
+        0.2126 * channel(color.r()) + 0.7152 * channel(color.g()) + 0.0722 * channel(color.b())
     }
 }

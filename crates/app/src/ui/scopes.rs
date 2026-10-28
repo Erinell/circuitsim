@@ -243,7 +243,7 @@ impl InlineScopes {
                         ui.label(
                             RichText::new(format!("{} : {value}", reading.label))
                                 .small()
-                                .color(MUTED),
+                                .color(crate::ui::muted_text_color(ui)),
                         );
                         if let Some(signal) =
                             reading.signal().filter(|signal| catalog.contains(signal))
@@ -452,7 +452,7 @@ impl Scope {
             ui.label(
                 RichText::new("Aucun signal. Ouvrez Signaux ou lancez une simulation.")
                     .small()
-                    .color(MUTED),
+                    .color(crate::ui::muted_text_color(ui)),
             );
             return action;
         }
@@ -607,7 +607,7 @@ impl Scope {
                     format_si_precision(measurement.rms, measurement_unit, 3)
                 ))
                 .small()
-                .color(MUTED),
+                .color(crate::ui::muted_text_color(ui)),
             );
         }
         if let (Some(a), Some(b)) = (self.cursor_a, self.cursor_b) {
@@ -631,7 +631,7 @@ impl Scope {
                     format_si_precision((b - a).abs(), Unit::Second, 4)
                 ))
                 .small()
-                .color(MUTED),
+                .color(crate::ui::muted_text_color(ui)),
             );
             for trace in traces {
                 if let (Some(va), Some(vb)) =
@@ -711,7 +711,10 @@ impl Scope {
         reset_view: bool,
     ) {
         let Some(step) = nominal_step else {
-            ui.label(RichText::new("FFT indisponible sans pas nominal.").color(MUTED));
+            ui.label(
+                RichText::new("FFT indisponible sans pas nominal.")
+                    .color(crate::ui::muted_text_color(ui)),
+            );
             return;
         };
         let Some(trace) = traces.first() else {
@@ -720,7 +723,9 @@ impl Scope {
         let spectrum = match compute_spectrum(trace, step) {
             Ok(spectrum) => spectrum,
             Err(error) => {
-                ui.label(RichText::new(error.user_message()).color(MUTED));
+                ui.label(
+                    RichText::new(error.user_message()).color(crate::ui::muted_text_color(ui)),
+                );
                 return;
             }
         };
