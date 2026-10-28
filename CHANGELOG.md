@@ -13,8 +13,8 @@ sémantique.
   composants. La couleur de tension est conservée et aucun halo de puissance
   n’est réutilisé. Le survol donne courant, limite, pourcentage et sévérité.
 - Paramètre `imax` étendu aux résistances, condensateurs, bobines, sources,
-  interrupteurs et Zeners, avec une **limite de fil/net** réglable dans
-  **Afficher** (1 A par défaut).
+  interrupteurs et Zeners, avec une **limite de fil/net** réglable dans les
+  **Préférences d’affichage** (10 A par défaut, comme les sources de tension).
 - Portées : ligne de limite ambre, segments rouges au-delà et annotation de pic,
   de pourcentage et de durée.
 - Liste **Surintensités** cliquable dans l’inspecteur pour sélectionner et cadrer
@@ -52,6 +52,8 @@ sémantique.
 
 ### Changed
 
+- Le menu **Afficher** est renommé **Affichage**. La limite des fils/nets est
+  déplacée dans la fenêtre **Préférences d’affichage**.
 - Les raccourcis à une lettre pour placer les composants sont retirés ; le
   placement passe uniquement par la palette et le menu **Dessin**. `R` pivote
   de nouveau la sélection et `M` la met en miroir.
