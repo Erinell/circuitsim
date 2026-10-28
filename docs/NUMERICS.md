@@ -157,6 +157,14 @@ Les étapes intermédiaires ne servent qu'à initialiser. La dernière étape de
 chaque continuation est toujours résolue avec `gmin = 0` et les sources
 nominales, donc une singularité exacte reste une erreur.
 
+Indépendamment de ces continuations, chaque jonction PN (diode, LED, Zener,
+diode de corps du MOSFET) porte en permanence une conductance shunt `gmin`
+de `1e-12 S`, comme le `GMIN` de SPICE. Un îlot relié uniquement par des
+jonctions bloquées — drain d'un MOSFET bloqué derrière une LED — garde ainsi un
+Jacobien non singulier et un point de fonctionnement déterministe. Un nœud sans
+aucune jonction conductrice (condensateur vers un nœud libre) reste singulier et
+est toujours signalé.
+
 ## 6. Résolution linéaire
 
 `nalgebra::DMatrix::lu().solve(..)` avec pivotage partiel détecte les matrices

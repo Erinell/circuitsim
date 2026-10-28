@@ -123,6 +123,10 @@ sémantique.
 - Un interrupteur **ouvert** ne fait plus apparaître de fuite dans les
   graphiques : `roff` passe à `1e18 Ω` par défaut, son courant est rapporté
   exactement à zéro, et les traces sous `1 pV` / `1 fA` sont ramenées à zéro.
+- L'ouverture d'un interrupteur ne provoque plus d'erreur `NoConvergence` quand
+  la charge laisse le drain d'un MOSFET flottant : chaque jonction PN porte un
+  `gmin` permanent de `1e-12 S`, comme SPICE, au lieu de laisser un îlot bloqué
+  avec un Jacobien quasiment singulier.
 - Au démarrage et après **Reset**, les condensateurs du transitoire partent à
   **tension nulle** (charge complètement déchargée) au lieu du point DC à
   condensateur ouvert. Le calcul DC classique reste inchangé.

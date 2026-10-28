@@ -5,7 +5,7 @@ use sim_core::netlist::{
 };
 use sim_core::{
     simulate_transient, solve_ac, solve_dc, AcExcitation, AcOptions, AcSweep, DcOptions,
-    NewtonStrategy, TransientAction, TransientEvent, TransientOptions,
+    NewtonStrategy, TransientAction, TransientEvent, TransientOptions, TransientSession,
 };
 
 const VTH: f64 = 1.6;
@@ -247,13 +247,16 @@ fn mosfet_swap_ds_flips_the_body_diode_direction() {
 
 #[test]
 fn mosfet_body_diode_matches_the_existing_diode_model() {
+    // Every PN junction carries the same permanent shunt as `mna.rs`.
+    const JUNCTION_GMIN: f64 = 1e-12;
     for channel in ["n", "p"] {
         let polarity = if channel == "n" { 1.0 } else { -1.0 };
         let vd = -polarity * 0.6;
         let bench = bias_bench(channel, vd, 0.0, 0.0, false);
         let current = drain_current(&bench);
         let diode_voltage = polarity * (0.0 - vd);
-        let expected_current = -polarity * 1e-14 * ((diode_voltage / THERMAL_VOLTAGE).exp() - 1.0);
+        let shockley = -polarity * 1e-14 * ((diode_voltage / THERMAL_VOLTAGE).exp() - 1.0);
+        let expected_current = shockley - polarity * JUNCTION_GMIN * diode_voltage;
         assert!(
             relative_error(current, expected_current) < 1e-9,
             "{channel} body diode: solved {current:e} A, analytic {expected_current:e} A"
@@ -505,6 +508,147 @@ fn mosfet_gate_step_converges_at_the_minimal_live_step() {
     assert!(result.steps > 1_000);
     let last = result.samples.last().unwrap();
     assert!((last.node_voltage(sim_node("g")).unwrap() - 5.0).abs() < 1e-9);
+}
+
+/// Low-side driver with an LED load, mirroring the documented example.
+struct LedSwitchBench {
+    netlist: Netlist,
+    switch: ComponentId,
+    gate: NodeId,
+    out: NodeId,
+    drain: NodeId,
+}
+
+fn led_switch_bench() -> LedSwitchBench {
+    let mut builder = NetlistBuilder::new();
+    let ground = builder.add_node("0", NodeKind::Ground).unwrap();
+    let supply = builder.add_node("vdd", NodeKind::Electrical).unwrap();
+    let out = builder.add_node("out", NodeKind::Electrical).unwrap();
+    let drain = builder.add_node("d", NodeKind::Electrical).unwrap();
+    let gate = builder.add_node("g", NodeKind::Electrical).unwrap();
+    let drive = builder.add_node("drive", NodeKind::Electrical).unwrap();
+    builder
+        .add_component(
+            ComponentKind::VoltageSource,
+            "V1",
+            voltage(10.0),
+            vec![supply, ground],
+        )
+        .unwrap();
+    builder
+        .add_component(
+            ComponentKind::Resistor,
+            "R1",
+            params(&[("resistance", ParamValue::Number(1_000.0))]),
+            vec![supply, out],
+        )
+        .unwrap();
+    builder
+        .add_component(
+            ComponentKind::Led,
+            "LED1",
+            params(&[
+                ("vf", ParamValue::Number(2.0)),
+                ("if", ParamValue::Number(0.02)),
+                ("imax", ParamValue::Number(0.03)),
+            ]),
+            vec![out, drain],
+        )
+        .unwrap();
+    let mut mosfet = mosfet_params("n", false);
+    mosfet.insert("rd".to_owned(), ParamValue::Number(1.0));
+    mosfet.insert("rs".to_owned(), ParamValue::Number(2.0));
+    builder
+        .add_component(
+            ComponentKind::Mosfet,
+            "M1",
+            mosfet,
+            vec![drain, gate, ground],
+        )
+        .unwrap();
+    builder
+        .add_component(
+            ComponentKind::VoltageSource,
+            "V2",
+            voltage(5.0),
+            vec![drive, ground],
+        )
+        .unwrap();
+    let switch = builder
+        .add_component(
+            ComponentKind::Switch,
+            "SW1",
+            params(&[
+                ("ron", ParamValue::Number(1e-3)),
+                ("roff", ParamValue::Number(1e18)),
+                ("closed", ParamValue::Bool(true)),
+            ]),
+            vec![drive, gate],
+        )
+        .unwrap();
+    builder
+        .add_component(
+            ComponentKind::Resistor,
+            "R2",
+            params(&[("resistance", ParamValue::Number(100_000.0))]),
+            vec![gate, ground],
+        )
+        .unwrap();
+    LedSwitchBench {
+        netlist: builder.build().unwrap(),
+        switch,
+        gate,
+        out,
+        drain,
+    }
+}
+
+#[test]
+fn opening_the_gate_switch_keeps_the_floating_drain_solvable() {
+    let bench = led_switch_bench();
+    let options = TransientOptions {
+        step: 1e-6,
+        stop_time: 1.0,
+        solver: DcOptions::default(),
+        ..TransientOptions::default()
+    };
+    let mut session = TransientSession::new(&bench.netlist, &options).unwrap();
+    for _ in 0..1_000 {
+        session.advance().expect("closed switch advances");
+    }
+
+    let mut open = bench.netlist.clone();
+    open.components[usize::try_from(bench.switch.0).unwrap()]
+        .params
+        .insert("closed".to_owned(), ParamValue::Bool(false));
+    session
+        .update_netlist(&open)
+        .expect("switch parameter updates");
+
+    // The drain island now only touches reverse-biased junctions, so the hot
+    // update must still converge instead of stalling on a near-singular Jacobian.
+    for step in 0..5 {
+        session
+            .advance()
+            .unwrap_or_else(|error| panic!("hot step {step} failed: {error}"));
+    }
+
+    let sample = session.snapshot();
+    assert!(
+        sample.node_voltage(bench.gate).unwrap().abs() < 1e-6,
+        "gate must fall to 0 V, got {:?}",
+        sample.node_voltage(bench.gate)
+    );
+    assert!(
+        sample.node_voltage(bench.out).unwrap() > 9.9,
+        "the load must see nearly the full rail, got {:?}",
+        sample.node_voltage(bench.out)
+    );
+    let drain = sample.node_voltage(bench.drain).unwrap();
+    assert!(
+        drain > 0.0 && drain < 10.0,
+        "the floating drain must stay bounded, got {drain} V"
+    );
 }
 
 fn sim_node(name: &str) -> NodeId {

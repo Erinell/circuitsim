@@ -16,6 +16,14 @@ const THERMAL_VOLTAGE: f64 = BOLTZMANN * NOMINAL_TEMPERATURE / ELEMENTARY_CHARGE
 const MAX_EXPONENT: f64 = 80.0;
 /// Large conductance used only for the discharged-capacitor initial state.
 const INITIAL_CAPACITOR_CONDUCTANCE: f64 = 1e9;
+/// Shunt conductance placed across every PN junction, like SPICE's GMIN.
+///
+/// Reverse-biased junctions otherwise carry a constant saturation current with
+/// no differential conductance, which leaves islands such as an open-drain load
+/// with a numerically singular Jacobian. Keeping the shunt permanently makes
+/// those nodes solvable without hiding genuinely floating nodes (which have no
+/// junction at all and are still reported).
+const JUNCTION_GMIN: f64 = 1e-12;
 
 /// Error raised while compiling a validated netlist into MNA equations.
 #[derive(Clone, Debug, Error, PartialEq)]
@@ -980,7 +988,7 @@ impl NonlinearDevice {
                 let voltage = state.first().copied().unwrap_or(0.0);
                 let (current, slope) = device.current_and_conductance(voltage);
                 let equivalent = current - slope * voltage;
-                stamp_conductance(conductance, device.a, device.b, slope);
+                stamp_conductance(conductance, device.a, device.b, slope + JUNCTION_GMIN);
                 stamp_current_source(sources, device.a, device.b, equivalent);
             }
             Self::ShuntReference(device) => {
@@ -1038,7 +1046,10 @@ impl NonlinearDevice {
                     conductance,
                     device.a,
                     device.b,
-                    Complex::new(device.current_and_conductance(voltage).1, 0.0),
+                    Complex::new(
+                        device.current_and_conductance(voltage).1 + JUNCTION_GMIN,
+                        0.0,
+                    ),
                 );
             }
             Self::ShuntReference(device) => {
@@ -1384,7 +1395,12 @@ impl MosfetDevice {
         );
         stamp_current_source(sources, self.drain, self.source, equivalent);
 
-        stamp_conductance(conductance, self.source, self.drain, body_slope);
+        stamp_conductance(
+            conductance,
+            self.source,
+            self.drain,
+            body_slope + JUNCTION_GMIN,
+        );
         stamp_current_source(
             sources,
             self.source,
@@ -1464,7 +1480,7 @@ impl MosfetDevice {
             conductance,
             self.source,
             self.drain,
-            Complex::new(body_slope, 0.0),
+            Complex::new(body_slope + JUNCTION_GMIN, 0.0),
         );
 
         if self.model.drain_resistance > 0.0 {

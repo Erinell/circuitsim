@@ -75,10 +75,17 @@ interprété.
 | `imax` | `0.2` A | `0.03` A | courant maximal |
 
 ```text
-I(v) = is * (exp(v / (n * Vt)) - 1)
+I(v) = is * (exp(v / (n * Vt)) - 1) + gmin * v
 Vt = kT/q ≈ 25.85 mV à 300.15 K
 is = if / (exp(vf / (n * Vt)) - 1)
+gmin = 1e-12 S
 ```
+
+Chaque jonction PN porte en permanence cette conductance shunt `gmin`, comme le
+`GMIN` de SPICE. Elle fixe le point de fonctionnement des îlots reliés uniquement
+par des jonctions bloquées — par exemple le drain d'un MOSFET bloqué derrière une
+LED — sans créer de fuite visible (9,4 pA sous 9,4 V) et sans masquer un nœud
+réellement flottant, qui n'a aucune jonction et reste signalé comme singulier.
 
 Le type **Schottky** applique le préréglage `vf = 0.35 V`, `n = 1.05`,
 `if = 0.01 A`, `imax = 0.2 A` et `is ≈ 2.5e-8 A` (dérivé). Le type standard
@@ -88,8 +95,8 @@ L'exponentielle est plafonnée à `exp(80)` pendant Newton ; ce n'est pas une
 résistance série. La LED n'émet aucun flux lumineux modélisé ; sa longueur
 d'onde colore uniquement le halo de l'interface. `imax` est une limite de
 datasheet éditable, non utilisée par le solveur. La diode n'a ni capacité de
-jonction ni température paramétrable ; en AC, seule la conductance `dI/dV` au
-point DC intervient.
+jonction ni température paramétrable ; en AC, seule la conductance `dI/dV + gmin`
+au point DC intervient.
 
 Le Zener ajoute, pour `v < -bv` :
 
@@ -166,8 +173,9 @@ composant `Diode`, orientée source → drain pour le canal N (cathode au drain)
 inversée pour le canal P :
 
 ```text
-I_bd = is * (exp(-Vds' / (n*Vt)) - 1)
+I_bd = is * (exp(-Vds' / (n*Vt)) - 1) + gmin * (-Vds')
 Vt ≈ 25.85 mV à 300.15 K
+gmin = 1e-12 S
 ```
 
 Elle conduit donc en polarisation inverse du canal (`Vds' < 0`), comme la diode
@@ -176,7 +184,8 @@ parasite réelle. L'exponentielle est plafonnée à `exp(80)`.
 ### AC
 
 Au point DC, l'AC linéarise `gm = ∂Id'/∂Vgs'` et `gds = ∂Id'/∂Vds'`, ainsi que la
-pente de la diode de corps, puis ajoute `jωcgs`, `jωcgd` et `jωcds`. En régime
+pente de la diode de corps (augmentée du `gmin` de jonction), puis ajoute
+`jωcgs`, `jωcgd` et `jωcds`. En régime
 saturé, `gm = 2*k*Vov*(1 + lambda*Vds')` et `gds = k*Vov^2*lambda` ; en triode,
 `gm = 2*k*Vds'*(1 + lambda*Vds')` et `gds = k*(2*Vov - 2*Vds')*(1 + lambda*Vds')
 + k*(2*Vov*Vds' - Vds'^2)*lambda`. La capacité grille-drain crée le couplage

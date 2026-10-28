@@ -55,7 +55,10 @@ vérifie mise à jour + résidu.
 `Auto` tente Newton simple, puis une continuation `gmin` décroissante, puis un
 source stepping. La dernière solution de chaque continuation est recalculée avec
 `gmin = 0` et les sources nominales ; une singularité exacte n'est pas masquée.
-`Plain` désactive les reprises ; `Gmin` et `SourceStepping` les imposent.
+`Plain` désactive les reprises ; `Gmin` et `SourceStepping` les imposent. En
+dehors de ces reprises, chaque jonction PN conserve un shunt permanent de
+`1e-12 S` (voir [NUMERICS.md](NUMERICS.md)), qui rend solubles les îlots reliés
+uniquement par des jonctions bloquées.
 
 ## 3. Conventions de signe
 
