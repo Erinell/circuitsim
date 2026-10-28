@@ -203,3 +203,9 @@ erreurs ; [TESTING.md](TESTING.md) en donne la synthèse.
 
 Limites : pas adaptatif, excitations continues non paramétrées, AC sans capacité
 de jonction, opamp sans alimentation/slew rate/pôle, solveur dense.
+
+## 9. Référence shunt programmable
+
+`ComponentKind::ShuntReference` utilise les broches ordonnées `REF`, `K`, `A` et les cinq paramètres `vref`, `iref`, `ik_min`, `imax`, `z_ka`. DC et chaque pas transitoire résolvent la même loi algébrique bornée ; `I_KA` est positif de K vers A et `iref` va de REF vers A. La tension principale du composant est `V(K)-V(A)`. `branch_currents` ne contient pas ce courant non linéaire ; les tensions suffisent à le recalculer avec le modèle.
+
+L'AC petits signaux inclut les dérivées réelles de la loi au point DC sur les broches K, A et REF. Le modèle est instantané : il n'ajoute aucun pôle, capacité, bruit ni comportement de démarrage. Voir [COMPONENTS.md](COMPONENTS.md) pour les valeurs et limites.

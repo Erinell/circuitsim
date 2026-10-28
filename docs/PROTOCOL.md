@@ -132,7 +132,8 @@ branchement SAB/worker dédié reste à faire.
 - Aucun historique de résultats ni file de jobs ; seuls le job en attente et la
   dernière révision persistent.
 - Une réponse volumineuse reste une trame complète ; pas de streaming.
-- `PROTOCOL_VERSION = 1`. Toute modification incompatible de l'en-tête, des
+- `PROTOCOL_VERSION = 2`. L'ajout du type `ShuntReference` à la netlist transportée
+  impose cette version ; toute modification incompatible de l'en-tête, des
   messages/champs, de la netlist sur fil, des types Serde transportés ou de la
   sémantique de révision exige une nouvelle version.
 - Le décodeur refuse une autre version avant de lire le payload.

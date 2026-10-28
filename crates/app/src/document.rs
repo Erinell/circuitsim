@@ -2128,6 +2128,7 @@ fn label_prefix(kind: &SymbolKind) -> &'static str {
         SymbolKind::Diode => "D",
         SymbolKind::Led => "LED",
         SymbolKind::Zener => "DZ",
+        SymbolKind::ShuntReference => "U",
         SymbolKind::OpAmp => "U",
         SymbolKind::Voltmeter => "VM",
         SymbolKind::Ammeter => "AM",
@@ -2147,14 +2148,17 @@ pub fn parameter_unit(kind: &SymbolKind, key: &str) -> Option<sim_core::units::U
         (SymbolKind::Capacitor, "capacitance") => Some(Unit::Farad),
         (SymbolKind::Inductor, "inductance") => Some(Unit::Henry),
         (SymbolKind::Inductor, "resistance") => Some(Unit::Ohm),
+        (SymbolKind::ShuntReference, "z_ka") => Some(Unit::Ohm),
         (SymbolKind::Led, "wavelength") => None,
         (SymbolKind::Led | SymbolKind::Diode, "vf") => Some(Unit::Volt),
         (SymbolKind::Led | SymbolKind::Diode, "if") => Some(Unit::Ampere),
         (_, "imax") => Some(Unit::Ampere),
         (SymbolKind::VoltageSource, "dc")
+        | (SymbolKind::ShuntReference, "vref")
         | (SymbolKind::Zener, "bv")
         | (SymbolKind::OpAmp, "v_sat_pos" | "v_sat_neg") => Some(Unit::Volt),
         (SymbolKind::CurrentSource, "dc")
+        | (SymbolKind::ShuntReference, "iref" | "ik_min")
         | (SymbolKind::Diode | SymbolKind::Led | SymbolKind::Zener, "is" | "ibv") => {
             Some(Unit::Ampere)
         }
@@ -2223,6 +2227,10 @@ pub fn parameter_label(key: &str) -> &str {
         "bv" => "Tension de claquage",
         "ibv" => "Courant de claquage",
         "nbv" => "Coefficient de claquage",
+        "vref" => "Consigne de référence VREF",
+        "iref" => "Courant de la broche REF",
+        "ik_min" => "Courant cathode minimal",
+        "z_ka" => "Impédance dynamique ZKA",
         "gain" => "Gain",
         "v_sat_pos" => "Saturation positive",
         "v_sat_neg" => "Saturation négative",

@@ -808,6 +808,7 @@ fn accumulate_interval(
                 | ComponentKind::Diode
                 | ComponentKind::Led
                 | ComponentKind::Zener
+                | ComponentKind::ShuntReference
                 | ComponentKind::OpAmp
         ) {
             continue;
@@ -818,8 +819,28 @@ fn accumulate_interval(
         let current = circuit
             .component_current(component.id, solution, AssemblyMode::Dc)
             .unwrap_or(0.0);
+        let reference_power = if component.kind == ComponentKind::ShuntReference {
+            let reference = component
+                .pins
+                .first()
+                .and_then(|node| circuit.node_voltage(solution, *node))
+                .unwrap_or(0.0);
+            let anode = component
+                .pins
+                .get(2)
+                .and_then(|node| circuit.node_voltage(solution, *node))
+                .unwrap_or(0.0);
+            let reference_current = component
+                .params
+                .get("iref")
+                .and_then(ParamValue::as_number)
+                .unwrap_or(0.0);
+            (reference - anode) * reference_current
+        } else {
+            0.0
+        };
         let entry = absorbed.entry(component.id).or_insert(0.0);
-        *entry += voltage * current * step;
+        *entry += (voltage * current + reference_power) * step;
     }
 }
 
@@ -851,7 +872,8 @@ fn build_energy_audit(
             | ComponentKind::Switch
             | ComponentKind::Diode
             | ComponentKind::Led
-            | ComponentKind::Zener => {
+            | ComponentKind::Zener
+            | ComponentKind::ShuntReference => {
                 dissipated += interval_absorbed;
                 ComponentEnergy {
                     absorbed: interval_absorbed,

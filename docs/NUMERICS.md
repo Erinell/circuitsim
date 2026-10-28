@@ -223,3 +223,11 @@ traitements de présentation détaillés dans [INSTRUMENTS.md](INSTRUMENTS.md).
 - Opamp sans alimentation, limite de courant ni pôle AC ; pente `gain` ou `0`.
 - Résidu DC en unités mixtes A/V ; heuristiques de convergence non globales.
 - Solveur dense ; grands schémas à factoriser autrement.
+
+## 10. Référence shunt programmable
+
+Le composant `ShuntReference` est un élément non linéaire à trois terminaux. On pose `e = V(REF)-V(A)-vref`, `u = clamp(ik_min + e/z_ka, 0, imax)` et `h = smoothstep(clamp((V(K)-V(A))/vref, 0, 1))`, avec `smoothstep(x)=x^2(3-2x)`. Le courant shunt est `I_KA=u*h` de K vers A ; `iref` est une source indépendante de REF vers A. Le `smoothstep` limite le courant en sous-tension et évite le courant inverse.
+
+En régime actif, l'assemblage utilise `gREF = h/z_ka` si `0<u<imax`, et `gKA = u*dh/dVKA`. Ces pentes occupent les lignes KCL de K et A et les colonnes des tensions REF, K et A. La source équivalente vaut `I_KA - gREF*(e+vref) - gKA*VKA`. Le limiteur de Newton porte sur `e`, à l'échelle `z_ka*imax`. L'AC réutilise les mêmes dérivées réelles au point DC, sans dynamique fréquentielle. En transitoire, l'audit d'énergie inclut `VKA*I_KA + VREF,A*iref` dans la puissance absorbée.
+
+Cette loi est un modèle comportemental statique, pas un sous-circuit transistor ni une reproduction de la compensation du TL431. Ses approximations et plages de régulation sont décrites dans [COMPONENTS.md](COMPONENTS.md).

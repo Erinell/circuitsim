@@ -10,7 +10,7 @@ use crate::ui::glyph::{paint_symbol, GlyphColors, SymbolText};
 use crate::ui::theme::ResistorStyle;
 use crate::ui::{Tool, ACCENT, HOVER, LABEL, MUTED, PIN, SYMBOL};
 
-pub(crate) const BUILTINS: [(SymbolKind, &str, &str); 12] = [
+pub(crate) const BUILTINS: [(SymbolKind, &str, &str); 13] = [
     (SymbolKind::Resistor, "Résistance", "R"),
     (SymbolKind::Capacitor, "Condensateur", "C"),
     (SymbolKind::Inductor, "Bobine", "L"),
@@ -21,6 +21,11 @@ pub(crate) const BUILTINS: [(SymbolKind, &str, &str); 12] = [
     (SymbolKind::Diode, "Diode", "D"),
     (SymbolKind::Led, "LED", "LED"),
     (SymbolKind::Zener, "Diode Zener", "DZ"),
+    (
+        SymbolKind::ShuntReference,
+        "Référence shunt programmable",
+        "U",
+    ),
     (SymbolKind::OpAmp, "Ampli. opérationnel", "U"),
     (SymbolKind::Ohmmeter, "Ohmmètre", "OH"),
 ];
@@ -138,6 +143,7 @@ pub fn show(
                     SymbolKind::Diode,
                     SymbolKind::Led,
                     SymbolKind::Zener,
+                    SymbolKind::ShuntReference,
                     SymbolKind::OpAmp,
                 ];
                 let probes = [SymbolKind::Ohmmeter];
@@ -362,9 +368,9 @@ mod tests {
 
     #[test]
     fn builtin_palette_is_complete_and_deterministic() {
-        assert_eq!(BUILTINS.len(), 12);
+        assert_eq!(BUILTINS.len(), 13);
         assert_eq!(BUILTINS[0].2, "R");
-        assert_eq!(BUILTINS[11].2, "OH");
+        assert_eq!(BUILTINS[12].2, "OH");
         assert!(!BUILTINS
             .iter()
             .any(|(kind, _, _)| matches!(kind, SymbolKind::Voltmeter | SymbolKind::Ammeter)));

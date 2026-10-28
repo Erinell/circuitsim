@@ -77,7 +77,7 @@ pub(crate) struct MnaCircuit {
     resistors: Vec<ResistorElement>,
     capacitors: Vec<CapacitorElement>,
     current_sources: Vec<CurrentSourceElement>,
-    nonlinear: Vec<DiodeDevice>,
+    nonlinear: Vec<NonlinearDevice>,
     grounds: Vec<ComponentId>,
 }
 
@@ -300,7 +300,7 @@ impl MnaCircuit {
         }
 
         for (device, voltage) in self.nonlinear.iter().zip(junction_voltages) {
-            device.stamp_at(*voltage, &mut conductance, &mut sources);
+            device.stamp_at(solution, *voltage, &mut conductance, &mut sources);
         }
 
         if gmin != 0.0 {
@@ -413,13 +413,7 @@ impl MnaCircuit {
         }
 
         for device in &self.nonlinear {
-            let voltage = device.junction_voltage(dc_solution);
-            stamp_complex_conductance(
-                &mut conductance,
-                device.a,
-                device.b,
-                Complex::new(device.conductance_at(voltage), 0.0),
-            );
+            device.stamp_ac(dc_solution, &mut conductance);
         }
 
         (conductance, sources)
@@ -471,9 +465,9 @@ impl MnaCircuit {
         if let Some(device) = self
             .nonlinear
             .iter()
-            .find(|element| element.component == component)
+            .find(|element| element.component() == component)
         {
-            return Some(device.junction_voltage(solution));
+            return Some(device.primary_voltage(solution));
         }
         if let Some(branch) = self
             .branches
@@ -529,9 +523,9 @@ impl MnaCircuit {
         if let Some(device) = self
             .nonlinear
             .iter()
-            .find(|element| element.component == component)
+            .find(|element| element.component() == component)
         {
-            return Some(device.current_at(device.junction_voltage(solution)));
+            return Some(device.current_at(solution));
         }
         if let Some(branch) = self
             .branches
@@ -615,31 +609,31 @@ impl MnaCircuit {
             }
             ComponentKind::Diode => {
                 let (saturation_current, emission_coefficient) = diode_model(component)?;
-                self.nonlinear.push(DiodeDevice {
+                self.nonlinear.push(NonlinearDevice::Diode(DiodeDevice {
                     component: component.id,
                     a,
                     b,
                     saturation_current,
                     emission_coefficient,
                     breakdown: None,
-                });
+                }));
             }
             ComponentKind::Led => {
                 let (saturation_current, emission_coefficient) = led_model(component)?;
-                self.nonlinear.push(DiodeDevice {
+                self.nonlinear.push(NonlinearDevice::Diode(DiodeDevice {
                     component: component.id,
                     a,
                     b,
                     saturation_current,
                     emission_coefficient,
                     breakdown: None,
-                });
+                }));
             }
             ComponentKind::Zener => {
                 let breakdown_voltage = positive_parameter(component, "bv")?;
                 let breakdown_saturation = positive_parameter(component, "ibv")?;
                 let breakdown_emission = positive_parameter(component, "nbv")?;
-                self.nonlinear.push(DiodeDevice {
+                self.nonlinear.push(NonlinearDevice::Diode(DiodeDevice {
                     component: component.id,
                     a,
                     b,
@@ -650,7 +644,34 @@ impl MnaCircuit {
                         saturation_current: breakdown_saturation,
                         emission_coefficient: breakdown_emission,
                     }),
-                });
+                }));
+            }
+            ComponentKind::ShuntReference => {
+                let reference_voltage = positive_parameter(component, "vref")?;
+                let reference_current = non_negative_parameter(component, "iref")?;
+                let minimum_current = positive_parameter(component, "ik_min")?;
+                let maximum_current = positive_parameter(component, "imax")?;
+                if maximum_current < minimum_current {
+                    return Err(MnaError::InvalidParameterValue {
+                        component: component.id,
+                        key: "imax",
+                        value: maximum_current,
+                        requirement: "greater than or equal to ik_min",
+                    });
+                }
+                let dynamic_impedance = positive_parameter(component, "z_ka")?;
+                self.nonlinear
+                    .push(NonlinearDevice::ShuntReference(ShuntReferenceDevice {
+                        component: component.id,
+                        reference: self.pin_unknown(component, 0),
+                        cathode: self.pin_unknown(component, 1),
+                        anode: self.pin_unknown(component, 2),
+                        reference_voltage,
+                        reference_current,
+                        minimum_current,
+                        maximum_current,
+                        dynamic_impedance,
+                    }));
             }
             ComponentKind::OpAmp => {
                 let output = self.pin_unknown(component, 2);
@@ -785,6 +806,122 @@ struct CurrentSourceElement {
     current: f64,
 }
 
+enum NonlinearDevice {
+    Diode(DiodeDevice),
+    ShuntReference(ShuntReferenceDevice),
+}
+
+impl NonlinearDevice {
+    fn component(&self) -> ComponentId {
+        match self {
+            Self::Diode(device) => device.component,
+            Self::ShuntReference(device) => device.component,
+        }
+    }
+
+    fn junction_voltage(&self, solution: &DVector<f64>) -> f64 {
+        match self {
+            Self::Diode(device) => device.junction_voltage(solution),
+            Self::ShuntReference(device) => device.reference_error_at(solution),
+        }
+    }
+
+    fn limiting_voltage(&self) -> f64 {
+        match self {
+            Self::Diode(device) => device.limiting_voltage(),
+            Self::ShuntReference(device) => device.dynamic_impedance * device.maximum_current,
+        }
+    }
+
+    fn stamp_at(
+        &self,
+        solution: &DVector<f64>,
+        voltage: f64,
+        conductance: &mut DMatrix<f64>,
+        sources: &mut DVector<f64>,
+    ) {
+        match self {
+            Self::Diode(device) => {
+                let (current, slope) = device.current_and_conductance(voltage);
+                let equivalent = current - slope * voltage;
+                stamp_conductance(conductance, device.a, device.b, slope);
+                stamp_current_source(sources, device.a, device.b, equivalent);
+            }
+            Self::ShuntReference(device) => {
+                let cathode_voltage = device.cathode_voltage_at(solution);
+                let (current, reference_slope, cathode_slope) =
+                    device.current_and_slopes(voltage, cathode_voltage);
+                let equivalent = current
+                    - reference_slope * (voltage + device.reference_voltage)
+                    - cathode_slope * cathode_voltage;
+                stamp_three_terminal_jacobian(
+                    conductance,
+                    device.cathode,
+                    device.anode,
+                    device.reference,
+                    reference_slope,
+                    cathode_slope,
+                );
+                stamp_current_source(sources, device.cathode, device.anode, equivalent);
+                stamp_current_source(
+                    sources,
+                    device.reference,
+                    device.anode,
+                    device.reference_current,
+                );
+            }
+        }
+    }
+
+    fn stamp_ac(&self, solution: &DVector<f64>, conductance: &mut DMatrix<Complex<f64>>) {
+        match self {
+            Self::Diode(device) => {
+                let voltage = device.junction_voltage(solution);
+                stamp_complex_conductance(
+                    conductance,
+                    device.a,
+                    device.b,
+                    Complex::new(device.current_and_conductance(voltage).1, 0.0),
+                );
+            }
+            Self::ShuntReference(device) => {
+                let reference_voltage = device.reference_error_at(solution);
+                let cathode_voltage = device.cathode_voltage_at(solution);
+                let (_, reference_slope, cathode_slope) =
+                    device.current_and_slopes(reference_voltage, cathode_voltage);
+                stamp_three_terminal_complex_jacobian(
+                    conductance,
+                    device.cathode,
+                    device.anode,
+                    device.reference,
+                    reference_slope,
+                    cathode_slope,
+                );
+            }
+        }
+    }
+
+    fn primary_voltage(&self, solution: &DVector<f64>) -> f64 {
+        match self {
+            Self::Diode(device) => device.junction_voltage(solution),
+            Self::ShuntReference(device) => device.cathode_voltage_at(solution),
+        }
+    }
+
+    fn current_at(&self, solution: &DVector<f64>) -> f64 {
+        match self {
+            Self::Diode(device) => device.current_at(device.junction_voltage(solution)),
+            Self::ShuntReference(device) => {
+                let reference_voltage = device.reference_error_at(solution);
+                let cathode_voltage = device.cathode_voltage_at(solution);
+                device
+                    .current_and_slopes(reference_voltage, cathode_voltage)
+                    .0
+            }
+        }
+    }
+}
+
 struct DiodeDevice {
     component: ComponentId,
     a: Option<usize>,
@@ -810,19 +947,8 @@ impl DiodeDevice {
         emission * THERMAL_VOLTAGE
     }
 
-    fn stamp_at(&self, voltage: f64, conductance: &mut DMatrix<f64>, sources: &mut DVector<f64>) {
-        let (current, slope) = self.current_and_conductance(voltage);
-        let equivalent = current - slope * voltage;
-        stamp_conductance(conductance, self.a, self.b, slope);
-        stamp_current_source(sources, self.a, self.b, equivalent);
-    }
-
     fn current_at(&self, voltage: f64) -> f64 {
         self.current_and_conductance(voltage).0
-    }
-
-    fn conductance_at(&self, voltage: f64) -> f64 {
-        self.current_and_conductance(voltage).1
     }
 
     fn current_and_conductance(&self, voltage: f64) -> (f64, f64) {
@@ -846,6 +972,102 @@ impl DiodeDevice {
         }
 
         (current, slope)
+    }
+}
+
+struct ShuntReferenceDevice {
+    component: ComponentId,
+    reference: Option<usize>,
+    cathode: Option<usize>,
+    anode: Option<usize>,
+    reference_voltage: f64,
+    reference_current: f64,
+    minimum_current: f64,
+    maximum_current: f64,
+    dynamic_impedance: f64,
+}
+
+impl ShuntReferenceDevice {
+    fn reference_error_at(&self, solution: &DVector<f64>) -> f64 {
+        node_voltage(solution, self.reference)
+            - node_voltage(solution, self.anode)
+            - self.reference_voltage
+    }
+
+    fn cathode_voltage_at(&self, solution: &DVector<f64>) -> f64 {
+        node_voltage(solution, self.cathode) - node_voltage(solution, self.anode)
+    }
+
+    fn current_and_slopes(&self, reference_voltage: f64, cathode_voltage: f64) -> (f64, f64, f64) {
+        let commanded = self.minimum_current + reference_voltage / self.dynamic_impedance;
+        let (commanded, command_slope) = if commanded <= 0.0 {
+            (0.0, 0.0)
+        } else if commanded >= self.maximum_current {
+            (self.maximum_current, 0.0)
+        } else {
+            (commanded, 1.0 / self.dynamic_impedance)
+        };
+        let normalized_headroom = (cathode_voltage / self.reference_voltage).clamp(0.0, 1.0);
+        let headroom =
+            normalized_headroom * normalized_headroom * (3.0 - 2.0 * normalized_headroom);
+        let headroom_slope = if normalized_headroom > 0.0 && normalized_headroom < 1.0 {
+            6.0 * normalized_headroom * (1.0 - normalized_headroom) / self.reference_voltage
+        } else {
+            0.0
+        };
+        (
+            commanded * headroom,
+            command_slope * headroom,
+            commanded * headroom_slope,
+        )
+    }
+}
+
+fn stamp_three_terminal_jacobian(
+    matrix: &mut DMatrix<f64>,
+    cathode: Option<usize>,
+    anode: Option<usize>,
+    reference: Option<usize>,
+    reference_slope: f64,
+    cathode_slope: f64,
+) {
+    let inputs = [
+        (reference, reference_slope),
+        (cathode, cathode_slope),
+        (anode, -reference_slope - cathode_slope),
+    ];
+    for (row, sign) in [(cathode, 1.0), (anode, -1.0)] {
+        if let Some(row) = row {
+            for (column, slope) in inputs {
+                if let Some(column) = column {
+                    matrix[(row, column)] += sign * slope;
+                }
+            }
+        }
+    }
+}
+
+fn stamp_three_terminal_complex_jacobian(
+    matrix: &mut DMatrix<Complex<f64>>,
+    cathode: Option<usize>,
+    anode: Option<usize>,
+    reference: Option<usize>,
+    reference_slope: f64,
+    cathode_slope: f64,
+) {
+    let inputs = [
+        (reference, reference_slope),
+        (cathode, cathode_slope),
+        (anode, -reference_slope - cathode_slope),
+    ];
+    for (row, sign) in [(cathode, 1.0), (anode, -1.0)] {
+        if let Some(row) = row {
+            for (column, slope) in inputs {
+                if let Some(column) = column {
+                    matrix[(row, column)] += Complex::new(sign * slope, 0.0);
+                }
+            }
+        }
     }
 }
 
@@ -1099,6 +1321,79 @@ fn bool_parameter(component: &ComponentSpec, key: &'static str) -> Result<bool, 
             component: component.id,
             key,
         }),
+    }
+}
+
+#[cfg(test)]
+mod shunt_reference_tests {
+    use super::*;
+    use crate::dc::{solve_dc_internal, DcOptions};
+    use crate::netlist::{NetlistBuilder, NodeKind};
+
+    #[test]
+    fn shunt_reference_current_is_reported_from_cathode_to_anode() {
+        let mut builder = NetlistBuilder::new();
+        let ground = builder.add_node("0", NodeKind::Ground).unwrap();
+        let supply = builder.add_node("supply", NodeKind::Electrical).unwrap();
+        let cathode = builder.add_node("k", NodeKind::Electrical).unwrap();
+        builder
+            .add_component(
+                ComponentKind::VoltageSource,
+                "V1",
+                [("dc".to_owned(), ParamValue::Number(5.0))].into(),
+                vec![supply, ground],
+            )
+            .unwrap();
+        builder
+            .add_component(
+                ComponentKind::Resistor,
+                "R1",
+                [("resistance".to_owned(), ParamValue::Number(100.0))].into(),
+                vec![supply, cathode],
+            )
+            .unwrap();
+        builder
+            .add_component(
+                ComponentKind::Resistor,
+                "RL",
+                [("resistance".to_owned(), ParamValue::Number(1_000.0))].into(),
+                vec![cathode, ground],
+            )
+            .unwrap();
+        let reference = builder
+            .add_component(
+                ComponentKind::ShuntReference,
+                "U1",
+                [
+                    ("vref".to_owned(), ParamValue::Number(2.495)),
+                    ("iref".to_owned(), ParamValue::Number(2e-6)),
+                    ("ik_min".to_owned(), ParamValue::Number(1e-3)),
+                    ("imax".to_owned(), ParamValue::Number(0.1)),
+                    ("z_ka".to_owned(), ParamValue::Number(0.2)),
+                ]
+                .into(),
+                vec![cathode, cathode, ground],
+            )
+            .unwrap();
+        let netlist = builder.build().unwrap();
+        let solved = solve_dc_internal(&netlist, DcOptions::default()).unwrap();
+        let voltage = solved
+            .circuit
+            .component_voltage(reference, &solved.solution)
+            .unwrap();
+        let current = solved
+            .circuit
+            .component_current(reference, &solved.solution, AssemblyMode::Dc)
+            .unwrap();
+
+        assert!(voltage > 0.0);
+        assert!(current > 0.0);
+        let output = solved
+            .circuit
+            .node_voltage(&solved.solution, cathode)
+            .unwrap();
+        let expected = (5.0 - output) / 100.0 - output / 1_000.0 - 2e-6;
+        assert!((current - expected).abs() < 1e-8);
     }
 }
 

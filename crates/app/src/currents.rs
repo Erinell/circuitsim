@@ -28,7 +28,7 @@ pub(crate) fn net_flows(document: &Document, live: &LiveValues) -> BTreeMap<Stri
         let Some(definition) = document.registry().get(&symbol.kind) else {
             continue;
         };
-        if definition.pins.len() != 2 {
+        if definition.pins.len() > 3 {
             continue;
         }
         if symbol.kind == SymbolKind::Switch && !switch_closed(symbol) {
@@ -39,7 +39,13 @@ pub(crate) fn net_flows(document: &Document, live: &LiveValues) -> BTreeMap<Stri
         let Some(current) = current else {
             continue;
         };
-        for (index, injection) in [-current, current].into_iter().enumerate() {
+        let injections = crate::analysis::symbol_terminal_injections(symbol, current);
+        for (index, injection) in injections
+            .iter()
+            .copied()
+            .enumerate()
+            .take(definition.pins.len())
+        {
             if !injection.is_finite() {
                 continue;
             }
@@ -181,11 +187,13 @@ fn net_wire_currents(
         let Some(definition) = document.registry().get(&symbol.kind) else {
             continue;
         };
-        if definition.pins.len() != 2 {
+        if definition.pins.len() > 3 {
             continue;
         }
         let observed = live.symbol(document, symbol);
         let current = observed.current.or_else(|| current_source_dc(symbol));
+        let terminal_injections =
+            current.map(|current| crate::analysis::symbol_terminal_injections(symbol, current));
         for (index, pin) in definition.pins.iter().enumerate() {
             let Some(position) = symbol.pin_position_of(pin) else {
                 continue;
@@ -199,9 +207,9 @@ fn net_wire_currents(
             if pin_net != net.name.as_str() {
                 continue;
             }
-            match current {
-                Some(current) if current.is_finite() => {
-                    injections[node] += if index == 0 { -current } else { current };
+            match terminal_injections {
+                Some(terminal_currents) if terminal_currents[index].is_finite() => {
+                    injections[node] += terminal_currents[index];
                 }
                 _ => unknown[node] += 1,
             }

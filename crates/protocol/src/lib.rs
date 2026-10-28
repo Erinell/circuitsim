@@ -9,7 +9,7 @@ use thiserror::Error;
 mod netlist_wire;
 
 /// Current wire-format version. Any incompatible layout change must increment it.
-pub const PROTOCOL_VERSION: u16 = 1;
+pub const PROTOCOL_VERSION: u16 = 2;
 
 /// Four-byte marker at the beginning of every frame.
 pub const FRAME_MAGIC: [u8; 4] = *b"CSIM";

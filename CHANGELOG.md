@@ -8,6 +8,8 @@ sémantique.
 
 ### Added
 
+- Référence shunt programmable TL431/LM431 à trois broches (REF, K, A), avec
+  paramètres éditables et modèle non linéaire DC, transitoire et petits signaux AC.
 - **Surintensités** sur le canevas : liseré ambre de 80 à 100 % et rouge au-delà
   de 100 %, badge `I / Imax` sur les fils, contour et triangle `!` sur les
   composants. La couleur de tension est conservée et aucun halo de puissance

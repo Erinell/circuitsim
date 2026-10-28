@@ -125,6 +125,7 @@ pub enum ComponentKind {
     Zener,
     OpAmp,
     Custom(String),
+    ShuntReference,
 }
 
 impl ComponentKind {
@@ -141,6 +142,7 @@ impl ComponentKind {
             Self::Diode => "diode",
             Self::Led => "led",
             Self::Zener => "zener",
+            Self::ShuntReference => "shunt_reference",
             Self::OpAmp => "opamp",
             Self::Custom(name) => name,
         }
@@ -151,6 +153,7 @@ impl ComponentKind {
         match self {
             Self::Ground => Some(1),
             Self::OpAmp => Some(5),
+            Self::ShuntReference => Some(3),
             Self::Resistor
             | Self::Capacitor
             | Self::Inductor
@@ -177,6 +180,7 @@ impl ComponentKind {
             "diode" => Some(Self::Diode),
             "led" => Some(Self::Led),
             "zener" => Some(Self::Zener),
+            "shunt_reference" => Some(Self::ShuntReference),
             "opamp" => Some(Self::OpAmp),
             _ => None,
         }

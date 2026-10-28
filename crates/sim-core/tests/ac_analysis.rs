@@ -31,6 +31,16 @@ fn opamp_params() -> ParamMap {
     ])
 }
 
+fn shunt_reference_params() -> ParamMap {
+    params(&[
+        ("vref", ParamValue::Number(2.495)),
+        ("iref", ParamValue::Number(2e-6)),
+        ("ik_min", ParamValue::Number(1e-3)),
+        ("imax", ParamValue::Number(0.1)),
+        ("z_ka", ParamValue::Number(0.2)),
+    ])
+}
+
 fn excitation(component: ComponentId, magnitude: f64, phase: f64) -> AcExcitation {
     AcExcitation {
         component,
@@ -57,6 +67,61 @@ fn assert_close(actual: f64, expected: f64, tolerance: f64) {
 fn assert_phasor_close(actual: Phasor, expected: Phasor, tolerance: f64) {
     assert_close(actual.re, expected.re, tolerance);
     assert_close(actual.im, expected.im, tolerance);
+}
+
+#[test]
+fn shunt_reference_ac_uses_the_dc_control_slope() {
+    let mut builder = NetlistBuilder::new();
+    let ground = builder.add_node("0", NodeKind::Ground).unwrap();
+    let source_node = builder.add_node("source", NodeKind::Electrical).unwrap();
+    let output = builder.add_node("out", NodeKind::Electrical).unwrap();
+    let source = builder
+        .add_component(
+            ComponentKind::VoltageSource,
+            "V1",
+            number("dc", 5.0),
+            vec![source_node, ground],
+        )
+        .unwrap();
+    builder
+        .add_component(
+            ComponentKind::Resistor,
+            "Rseries",
+            number("resistance", 100.0),
+            vec![source_node, output],
+        )
+        .unwrap();
+    builder
+        .add_component(
+            ComponentKind::Resistor,
+            "Rload",
+            number("resistance", 1_000.0),
+            vec![output, ground],
+        )
+        .unwrap();
+    builder
+        .add_component(
+            ComponentKind::ShuntReference,
+            "U1",
+            shunt_reference_params(),
+            vec![output, output, ground],
+        )
+        .unwrap();
+    let netlist = builder.build().unwrap();
+
+    let result = solve_ac(
+        &netlist,
+        explicit_options(1_000.0, vec![excitation(source, 1.0, 0.0)]),
+    )
+    .unwrap();
+
+    let dc_voltage = result.operating_point.node_voltage(output).unwrap();
+    let response = result.samples[0].node_voltage(output).unwrap().magnitude();
+    assert!((2.49..2.53).contains(&dc_voltage));
+    assert!(
+        (0.0018..0.0022).contains(&response),
+        "AC magnitude was {response}"
+    );
 }
 
 fn rc_low_pass_netlist() -> (Netlist, ComponentId, NodeId, NodeId) {

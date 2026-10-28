@@ -613,6 +613,7 @@ fn component_kind(kind: &SymbolKind) -> ComponentKind {
         SymbolKind::Diode => ComponentKind::Diode,
         SymbolKind::Led => ComponentKind::Led,
         SymbolKind::Zener => ComponentKind::Zener,
+        SymbolKind::ShuntReference => ComponentKind::ShuntReference,
         SymbolKind::OpAmp => ComponentKind::OpAmp,
         SymbolKind::Voltmeter | SymbolKind::Ammeter | SymbolKind::Ohmmeter => {
             ComponentKind::Custom(kind.key().to_owned())
@@ -675,6 +676,49 @@ mod tests {
 
     fn registry() -> SymbolRegistry {
         SymbolRegistry::builtin()
+    }
+
+    #[test]
+    fn shunt_reference_extraction_preserves_ref_k_a_pin_order() {
+        let mut schematic = Schematic::new();
+        let mut history = UndoStack::new();
+        let ground = add_symbol(
+            &mut schematic,
+            &mut history,
+            SymbolKind::Ground,
+            GridPos::new(-10, -10),
+            "GND1",
+        );
+        let reference = add_symbol(
+            &mut schematic,
+            &mut history,
+            SymbolKind::ShuntReference,
+            GridPos::new(0, 0),
+            "U1",
+        );
+
+        let extraction = extract_netlist(&schematic, &registry()).unwrap();
+        let component = extraction.netlist.component_by_label("U1").unwrap();
+
+        assert_eq!(component.kind, ComponentKind::ShuntReference);
+        assert_eq!(component.pins.len(), 3);
+        assert_eq!(
+            component.pins,
+            [0_u16, 1, 2]
+                .map(|pin| {
+                    extraction.net_of_pin[&PinKey {
+                        symbol: reference.id,
+                        pin,
+                    }]
+                })
+                .to_vec()
+        );
+        assert_ne!(component.pins[0], component.pins[1]);
+        assert_ne!(component.pins[1], component.pins[2]);
+        assert!(extraction.net_of_pin.contains_key(&PinKey {
+            symbol: ground.id,
+            pin: 0,
+        }));
     }
 
     fn add_symbol(

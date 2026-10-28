@@ -330,3 +330,7 @@ fil sans embout, les fils en erreur, le basculement d'interrupteur et le
 propriétés par double-clic, le mapping tension→couleur, les calques et les
 palettes. Détails dans
 [TESTING.md](TESTING.md) ; recette web dans [DELIVERY.md](DELIVERY.md).
+
+## Référence shunt programmable
+
+La palette **Semi-conducteurs** inclut la référence shunt programmable TL431/LM431. Son inspecteur édite `VREF`, `IREF`, `IKmin`, `Imax` et `ZKA` avec unités SI et validation de domaine. Les valeurs live affichent les broches, la tension K-A, le courant cathode K vers A et la puissance comprenant le port REF. `Imax` borne le courant du modèle et sert aussi de limite de surintensité.

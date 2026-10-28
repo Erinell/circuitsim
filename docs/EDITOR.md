@@ -212,3 +212,7 @@ objets courants, traite `EditError` sans modifier l'état, affiche l'ERC sans
 supprimer et redemande une extraction après chaque modification acceptée. Elle ne
 modifie jamais directement les `BTreeMap` internes. Une action refusée ne change
 ni contenu, ni révision, ni compteur d'identifiants.
+
+## Broches de la référence shunt
+
+Le symbole `ShuntReference` conserve l'ordre `REF`, `K`, `A` lors de l'extraction et de la sérialisation. REF est la broche de mesure, K la cathode de sortie et A l'anode commune ; la tension et le courant principaux affichés sont `V(K)-V(A)` et `I(K vers A)`. Les paramètres sont modifiables dans l'inspecteur.

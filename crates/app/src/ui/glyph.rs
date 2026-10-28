@@ -122,6 +122,7 @@ pub(crate) fn body_half_extent(kind: &SymbolKind) -> f32 {
         SymbolKind::Resistor | SymbolKind::Inductor => 0.65,
         SymbolKind::Capacitor => 0.9,
         SymbolKind::Diode | SymbolKind::Led | SymbolKind::Zener | SymbolKind::Switch => 0.8,
+        SymbolKind::ShuntReference => 1.0,
         SymbolKind::OpAmp => 1.5,
         SymbolKind::Ground => 1.4,
         _ => 1.0,
@@ -434,6 +435,7 @@ fn paint_body(
         SymbolKind::Diode => paint_diode(painter, symbol, center, scale, stroke, false),
         SymbolKind::Led => paint_diode(painter, symbol, center, scale, stroke, true),
         SymbolKind::Zener => paint_zener(painter, symbol, center, scale, stroke),
+        SymbolKind::ShuntReference => paint_shunt_reference(painter, symbol, center, scale, stroke),
         SymbolKind::OpAmp => {
             line_local(
                 painter,
@@ -688,6 +690,54 @@ fn paint_zener(painter: &Painter, symbol: &Symbol, center: Pos2, scale: f32, str
     );
 }
 
+fn paint_shunt_reference(
+    painter: &Painter,
+    symbol: &Symbol,
+    center: Pos2,
+    scale: f32,
+    stroke: Stroke,
+) {
+    line_local(
+        painter,
+        symbol,
+        center,
+        scale,
+        &[
+            (-2.0, 0.0),
+            (-0.85, 0.0),
+            (-0.85, -0.72),
+            (0.85, -0.72),
+            (0.85, 0.72),
+            (-0.85, 0.72),
+            (-0.85, 0.0),
+        ],
+        stroke,
+    );
+    line_local(
+        painter,
+        symbol,
+        center,
+        scale,
+        &[(0.85, 0.0), (2.0, 0.0)],
+        stroke,
+    );
+    line_local(
+        painter,
+        symbol,
+        center,
+        scale,
+        &[(0.0, 0.72), (0.0, 2.0)],
+        stroke,
+    );
+    painter.text(
+        center,
+        Align2::CENTER_CENTER,
+        "431",
+        FontId::proportional((scale * 0.55).clamp(7.0, 12.0)),
+        stroke.color,
+    );
+}
+
 fn line_local(
     painter: &Painter,
     symbol: &Symbol,
@@ -730,6 +780,7 @@ fn symbol_value(symbol: &Symbol) -> Option<String> {
         SymbolKind::Led => Some("vf"),
         SymbolKind::Diode => Some("vf"),
         SymbolKind::Zener => Some("bv"),
+        SymbolKind::ShuntReference => Some("vref"),
         SymbolKind::OpAmp => Some("gain"),
         _ => None,
     }

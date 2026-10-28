@@ -40,11 +40,81 @@ fn opamp_params() -> ParamMap {
     ])
 }
 
+fn shunt_reference_params() -> ParamMap {
+    params(&[
+        ("vref", ParamValue::Number(2.495)),
+        ("iref", ParamValue::Number(2e-6)),
+        ("ik_min", ParamValue::Number(1e-3)),
+        ("imax", ParamValue::Number(0.1)),
+        ("z_ka", ParamValue::Number(0.2)),
+    ])
+}
+
 fn source_event(time: f64, component: ComponentId, value: f64) -> TransientEvent {
     TransientEvent {
         time,
         action: TransientAction::SetSourceValue { component, value },
     }
+}
+
+#[test]
+fn shunt_reference_tracks_a_source_step_in_transient_analysis() {
+    let mut builder = NetlistBuilder::new();
+    let ground = builder.add_node("0", NodeKind::Ground).unwrap();
+    let source_node = builder.add_node("source", NodeKind::Electrical).unwrap();
+    let output = builder.add_node("out", NodeKind::Electrical).unwrap();
+    let source = builder
+        .add_component(
+            ComponentKind::VoltageSource,
+            "V1",
+            number("dc", 0.0),
+            vec![source_node, ground],
+        )
+        .unwrap();
+    builder
+        .add_component(
+            ComponentKind::Resistor,
+            "Rseries",
+            number("resistance", 100.0),
+            vec![source_node, output],
+        )
+        .unwrap();
+    builder
+        .add_component(
+            ComponentKind::Resistor,
+            "Rload",
+            number("resistance", 1_000.0),
+            vec![output, ground],
+        )
+        .unwrap();
+    builder
+        .add_component(
+            ComponentKind::ShuntReference,
+            "U1",
+            shunt_reference_params(),
+            vec![output, output, ground],
+        )
+        .unwrap();
+    let netlist = builder.build().unwrap();
+
+    let result = simulate_transient(
+        &netlist,
+        TransientOptions {
+            start_time: 0.0,
+            stop_time: 1e-3,
+            step: 1e-4,
+            events: vec![source_event(0.0, source, 5.0)],
+            ..TransientOptions::default()
+        },
+    )
+    .unwrap();
+
+    let final_voltage = result.samples.last().unwrap().node_voltage(output).unwrap();
+    assert!(
+        (2.49..2.53).contains(&final_voltage),
+        "output was {final_voltage}"
+    );
+    assert!(result.energy.dissipated.is_finite());
 }
 
 fn rc_netlist() -> (Netlist, ComponentId, NodeId, ComponentId, NodeId) {
