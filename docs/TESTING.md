@@ -34,7 +34,7 @@ l'installe séparément.
 
 ## 3. Suite et couverture
 
-Au 28 octobre 2026, `cargo test --workspace` exécute **355 tests** :
+Au 28 octobre 2026, `cargo test --workspace` exécute **356 tests** :
 
 | Groupe | Tests | Points clés |
 | --- | ---: | --- |
@@ -44,7 +44,7 @@ Au 28 octobre 2026, `cargo test --workspace` exécute **355 tests** :
 | `sim-core` AC | 17 | RC/RL/RLC, phase, diode, opamp, balayages, erreurs |
 | `sim-core` MOSFET | 12 | cutoff, triode/saturation analytiques, continuité au seuil, miroir N/P, `swap_ds`, diode de corps, `gm`/`gds` et capacités AC, échelons de grille 10 µs et 1 µs |
 | `editor-core` | 59 | grille, symboles, schéma, historique, ERC, extraction, masses communes, paramètres LED/bobine/MOSFET, JSON, séries E, snap/routage |
-| `circuitsim-app` | 172 | document, projet JSON, vue, navigation, mini-carte, UI, petits textes à 10 px, inspecteur avec sélecteur de diode et de canal, historique, presse-papiers, simulation continue, mise à jour à chaud, calques, palettes, survol avec tension, intensité de fil et limite, interrupteur ouvert sans fuite affichée, surintensités et diagnostics cliquables, placement aligné sur broche, câblage direct, raccourcis, aide générée, contrastes, panneau unifié et portées, tensions de condensateurs et courants de nets/composants dérivés, ajout de portée depuis les contrôles, valeurs à droite, fenêtre réglable 0,5–30 s, 10 s par défaut et décimation, réordonnancement et recentrage, sondes intégrées, FFT et curseurs A/B, curseurs de réglage, exemples dont le RC de démonstration, diviseur, RLC et polarité, préférences persistées et migration, À propos, onboarding, accessibilité, ohmmètre, instruments, worker, FFT, Bode, CSV |
+| `circuitsim-app` | 173 | document, projet JSON, vue, navigation, mini-carte, UI, petits textes à 10 px, inspecteur avec sélecteur de diode et de canal, historique, presse-papiers, simulation continue, mise à jour à chaud, calques, palettes, survol avec tension, intensité de fil et limite, interrupteur ouvert sans fuite affichée, surintensités et diagnostics cliquables, placement aligné sur broche, câblage direct, raccourcis, aide générée, contrastes, panneau unifié et portées, tensions de condensateurs et courants de nets/composants dérivés, ajout de portée depuis les contrôles, valeurs à droite, fenêtre réglable 0,5–30 s, 10 s par défaut et décimation, réordonnancement et recentrage, sondes intégrées, FFT et curseurs A/B, curseurs de réglage, exemples dont le RC de démonstration, diviseur, MOSFET, RLC et polarité, préférences persistées et migration, À propos, onboarding, accessibilité, ohmmètre, instruments, worker, FFT, Bode, CSV |
 | `worker-protocol` | 12 | trames, version v4, netlist MOSFET, erreurs, transports |
 | `worker` | 13 | coalescence, cadence, révisions, DC/transitoire/AC |
 | `editor_invariants` | 2 | proptest undo/redo et extraction |

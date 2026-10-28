@@ -471,6 +471,7 @@ impl CircuitApp {
                 ("Diviseur", Document::divider_example),
                 ("LED", Document::led_example),
                 ("Interrupteur", Document::switch_example),
+                ("MOSFET", Document::mosfet_example),
                 ("RLC", Document::rlc_example),
                 ("RLC parallèle", Document::parallel_rlc_example),
             ] {

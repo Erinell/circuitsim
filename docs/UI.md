@@ -83,7 +83,7 @@ le style de résistance **européen** ou **américain** complètent les thèmes
 Sombre et Contraste élevé.
 
 Le menu **Fichier → Exemples** charge des circuits originaux : RC, diviseur, LED,
-interrupteur, RLC série et RLC parallèle commuté. Un clic droit sur un composant propose **Ajouter un
+interrupteur, MOSFET, RLC série et RLC parallèle commuté. Un clic droit sur un composant propose **Ajouter un
 curseur** : le curseur apparaît sous le symbole, se règle par glisser ou molette
 et applique la valeur à chaud en une seule étape annulable.
 

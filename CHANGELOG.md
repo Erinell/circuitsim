@@ -17,6 +17,8 @@ sémantique.
   symbole dessine la diode de corps et met en miroir vertical les liaisons
   drain/source, le bulk et cette diode quand `swap_ds` est actif, sans déplacer
   les points de connexion.
+- Exemple **MOSFET** dans **Fichier → Exemples** : interrupteur bas côté à canal N
+  (rail 10 V, charge 1 kΩ, grille 5 V) avec les nœuds `OUT` et `GATE`.
 - Référence shunt programmable TL431/LM431 à trois broches (REF, K, A), avec
   paramètres éditables et modèle non linéaire DC, transitoire et petits signaux AC.
 - Comparateur LM393 à collecteur ouvert avec broches d'alimentation, paramètres

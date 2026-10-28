@@ -169,7 +169,7 @@ lettres seules ne sont pas des raccourcis de placement.
   règle au glisser ou à la molette, affiche la valeur SI et applique la
   modification à chaud en une seule étape annulable.
 - Le menu **Fichier → Exemples** propose des circuits originaux : RC, diviseur,
-  LED, interrupteur, RLC série et RLC parallèle commuté.
+  LED, interrupteur, MOSFET, RLC série et RLC parallèle commuté.
 - Un clic sur une broche ou un fil met en évidence le net complet. `Alt` + clic
   sélectionne tous ses objets.
 

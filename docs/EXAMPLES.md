@@ -63,9 +63,11 @@ cargo xtask web-serve
 
 L'application ouvre le circuit RC de démonstration (`V1 = 10 V`, `R1 = 1 kΩ`,
 `C1 = 100 µF`, `SW1` fermé, sortie `Vc`) et le panneau Instruments.
-La galerie **Fichier → Exemples** contient RC, diviseur, LED, interrupteur, RLC
-série et RLC parallèle commuté.
-`web-build` produit `dist/`, `web-serve` écoute sur `http://127.0.0.1:8080`.
+La galerie **Fichier → Exemples** contient RC, diviseur, LED, interrupteur,
+MOSFET, RLC série et RLC parallèle commuté. L'exemple **MOSFET** est un
+interrupteur bas côté : rail de 10 V, charge `R1 = 1 kΩ` et grille pilotée à 5 V,
+soit `V(OUT) ≈ 59 mV` et environ `9,9 mA` dans la charge. `web-build` produit
+`dist/`, `web-serve` écoute sur `http://127.0.0.1:8080`.
 Utilisation : [UI.md](UI.md), [INSTRUMENTS.md](INSTRUMENTS.md) ; déploiement :
 [DELIVERY.md](DELIVERY.md).
 

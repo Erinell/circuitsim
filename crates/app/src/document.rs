@@ -355,6 +355,37 @@ impl Document {
         finish_example(document)
     }
 
+    /// Creates a low-side N-MOSFET switch example.
+    pub fn mosfet_example() -> Result<Self, ActionError> {
+        let mut document = Self::new();
+        let rail = document.add_symbol(SymbolKind::VoltageSource, GridPos::new(4, -2))?;
+        set_orientation(&mut document, rail, Orientation::R90)?;
+        set_number(&mut document, rail, "dc", 10.0)?;
+        let gate = document.add_symbol(SymbolKind::VoltageSource, GridPos::new(4, 4))?;
+        set_orientation(&mut document, gate, Orientation::R180)?;
+        set_number(&mut document, gate, "dc", 5.0)?;
+        let load = document.add_symbol(SymbolKind::Resistor, GridPos::new(12, -2))?;
+        set_orientation(&mut document, load, Orientation::R90)?;
+        set_number(&mut document, load, "resistance", 1_000.0)?;
+        document.add_symbol(SymbolKind::Mosfet, GridPos::new(10, 4))?;
+        document.add_symbol(SymbolKind::Ground, GridPos::new(0, 8))?;
+
+        document.add_wire(GridPos::new(4, -4), GridPos::new(4, -6))?;
+        document.add_wire(GridPos::new(4, -6), GridPos::new(12, -6))?;
+        document.add_wire(GridPos::new(12, -6), GridPos::new(12, -4))?;
+        document.add_wire(GridPos::new(12, 0), GridPos::new(12, 2))?;
+        document.add_wire(GridPos::new(12, 6), GridPos::new(12, 8))?;
+        document.add_wire(GridPos::new(0, 8), GridPos::new(2, 8))?;
+        document.add_wire(GridPos::new(2, 8), GridPos::new(12, 8))?;
+        document.add_wire(GridPos::new(4, 0), GridPos::new(0, 0))?;
+        document.add_wire(GridPos::new(0, 0), GridPos::new(0, 8))?;
+        document.add_wire(GridPos::new(6, 4), GridPos::new(8, 4))?;
+        document.add_wire(GridPos::new(2, 4), GridPos::new(2, 8))?;
+        document.add_label(GridPos::new(12, 0), "OUT")?;
+        document.add_label(GridPos::new(8, 4), "GATE")?;
+        finish_example(document)
+    }
+
     /// Creates a series RLC example.
     pub fn rlc_example() -> Result<Self, ActionError> {
         let mut document = Self::new();
@@ -2287,6 +2318,7 @@ mod tests {
             ("divider", Document::divider_example().unwrap()),
             ("led", Document::led_example().unwrap()),
             ("switch", Document::switch_example().unwrap()),
+            ("mosfet", Document::mosfet_example().unwrap()),
             ("rlc", Document::rlc_example().unwrap()),
             ("parallel-rlc", Document::parallel_rlc_example().unwrap()),
         ] {
@@ -2308,6 +2340,7 @@ mod tests {
             ("divider", Document::divider_example().unwrap()),
             ("led", Document::led_example().unwrap()),
             ("switch", Document::switch_example().unwrap()),
+            ("mosfet", Document::mosfet_example().unwrap()),
             ("rlc", Document::rlc_example().unwrap()),
         ] {
             let extraction = document.extraction().expect("example extracts");
@@ -2325,6 +2358,41 @@ mod tests {
                 "{name} must drive OUT positive, got {voltage}"
             );
         }
+    }
+
+    #[test]
+    fn mosfet_example_switches_the_load_on() {
+        let document = Document::mosfet_example().unwrap();
+        let mosfet = document
+            .schematic()
+            .symbols()
+            .find(|symbol| symbol.kind == SymbolKind::Mosfet)
+            .expect("example places the N-MOSFET");
+        assert_eq!(mosfet.at, GridPos::new(10, 4));
+        assert_eq!(
+            mosfet.params.get("channel").and_then(ParamValue::as_text),
+            Some("n")
+        );
+
+        let extraction = document.extraction().expect("example extracts");
+        let result = sim_core::solve_dc(&extraction.netlist, sim_core::DcOptions::default())
+            .expect("example has a DC operating point");
+        let out = extraction
+            .netlist
+            .nodes
+            .iter()
+            .find(|node| node.name.as_str() == "OUT")
+            .expect("example defines OUT");
+        let voltage = result.node_voltage(out.id).expect("OUT is solved");
+        assert!(
+            voltage < 0.2,
+            "a 5 V gate must pull the drain near ground, got {voltage} V"
+        );
+        let current_ma = (10.0 - voltage) / 1_000.0 * 1e3;
+        assert!(
+            (9.8..10.0).contains(&current_ma),
+            "the 1 kOhm load must carry about 10 mA, got {current_ma} mA"
+        );
     }
 
     #[test]
