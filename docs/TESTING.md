@@ -34,17 +34,18 @@ l'installe séparément.
 
 ## 3. Suite et couverture
 
-Au 27 octobre 2026, `cargo test --workspace` exécute **304 tests** :
+Au 28 octobre 2026, `cargo test --workspace` exécute **355 tests** :
 
 | Groupe | Tests | Points clés |
 | --- | ---: | --- |
-| `sim-core` unités | 17 | SI, parsing, formatage, netlist, erreurs |
-| `sim-core` DC | 21 | diviseur, sources, R/C/L, résistance série de bobine, switch, diodes, Schottky, LED Vf/If, opamp, erreurs |
-| `sim-core` transitoire | 20 | RC/RL, condensateurs initialement déchargés, événements, diode, opamp, énergie, session incrémentale, mise à jour à chaud |
-| `sim-core` AC | 15 | RC/RL/RLC, phase, diode, opamp, balayages, erreurs |
-| `editor-core` | 49 | grille, symboles, schéma, historique, ERC, extraction, masses communes, paramètres LED/bobine, JSON, séries E, snap/routage |
-| `circuitsim-app` | 156 | document, projet JSON, vue, navigation, mini-carte, UI, petits textes à 10 px, inspecteur avec sélecteur de diode, historique, presse-papiers, simulation continue, mise à jour à chaud, calques, palettes, survol avec tension, intensité de fil et limite, interrupteur ouvert sans fuite affichée, surintensités et diagnostics cliquables, placement aligné sur broche, câblage direct, raccourcis, aide générée, contrastes, panneau unifié et portées, tensions de condensateurs et courants de nets/composants dérivés, ajout de portée depuis les contrôles, valeurs à droite, fenêtre réglable 0,5–30 s, 10 s par défaut et décimation, réordonnancement et recentrage, sondes intégrées, FFT et curseurs A/B, curseurs de réglage, exemples dont le RC de démonstration, diviseur, RLC et polarité, préférences persistées et migration, À propos, onboarding, accessibilité, ohmmètre, instruments, worker, FFT, Bode, CSV |
-| `worker-protocol` | 11 | trames, version, netlist, erreurs, transports |
+| `sim-core` unités | 19 | SI, parsing, formatage, netlist, erreurs |
+| `sim-core` DC | 26 | diviseur, sources, R/C/L, résistance série de bobine, switch, diodes, Schottky, LED Vf/If, opamp, erreurs |
+| `sim-core` transitoire | 23 | RC/RL, condensateurs initialement déchargés, événements, diode, opamp, énergie, session incrémentale, mise à jour à chaud |
+| `sim-core` AC | 17 | RC/RL/RLC, phase, diode, opamp, balayages, erreurs |
+| `sim-core` MOSFET | 12 | cutoff, triode/saturation analytiques, continuité au seuil, miroir N/P, `swap_ds`, diode de corps, `gm`/`gds` et capacités AC, échelons de grille 10 µs et 1 µs |
+| `editor-core` | 59 | grille, symboles, schéma, historique, ERC, extraction, masses communes, paramètres LED/bobine/MOSFET, JSON, séries E, snap/routage |
+| `circuitsim-app` | 172 | document, projet JSON, vue, navigation, mini-carte, UI, petits textes à 10 px, inspecteur avec sélecteur de diode et de canal, historique, presse-papiers, simulation continue, mise à jour à chaud, calques, palettes, survol avec tension, intensité de fil et limite, interrupteur ouvert sans fuite affichée, surintensités et diagnostics cliquables, placement aligné sur broche, câblage direct, raccourcis, aide générée, contrastes, panneau unifié et portées, tensions de condensateurs et courants de nets/composants dérivés, ajout de portée depuis les contrôles, valeurs à droite, fenêtre réglable 0,5–30 s, 10 s par défaut et décimation, réordonnancement et recentrage, sondes intégrées, FFT et curseurs A/B, curseurs de réglage, exemples dont le RC de démonstration, diviseur, RLC et polarité, préférences persistées et migration, À propos, onboarding, accessibilité, ohmmètre, instruments, worker, FFT, Bode, CSV |
+| `worker-protocol` | 12 | trames, version v4, netlist MOSFET, erreurs, transports |
 | `worker` | 13 | coalescence, cadence, révisions, DC/transitoire/AC |
 | `editor_invariants` | 2 | proptest undo/redo et extraction |
 
@@ -56,7 +57,10 @@ d’historique nommé, séries E12/E24/E96 ; conventions de signe, composants no
 linéaires, saturation, singularités, non-convergence, événements alignés ou non,
 continuité condensateur/inductance, condensateurs initialement déchargés,
 diode standard/Schottky, LED Vf/If, résistance série de bobine, énergie ; réponses analytiques RC/RL/RLC,
-phases, conductance dynamique, balayages ; frames tronquées/direction/version,
+phases, conductance dynamique, balayages ; MOSFET niveau 1 en cutoff, triode et
+saturation, continuité au seuil, miroir N/P, permutation `swap_ds`, diode de corps,
+`gm`/`gds` comparés aux différences finies et capacités AC, convergence des
+échelons de grille en 10 µs et 1 µs ; frames tronquées/direction/version,
 révisions obsolètes, rafale bornée, horloge non monotone ; catalogue, échelon,
 limites UI, mesures, pic FFT, trois CSV et export UTF-8 ; insertion en série,
 déplacement de segment, alignement/distribution, sélection de net et rectangle,

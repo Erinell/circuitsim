@@ -280,6 +280,54 @@ impl SymbolDraft {
                         .to_owned(),
                 );
             }
+        } else if self.kind == SymbolKind::Mosfet {
+            let number = |key: &str| {
+                symbol
+                    .params
+                    .get(key)
+                    .and_then(ParamValue::as_number)
+                    .filter(|value| value.is_finite())
+            };
+            let channel = symbol
+                .params
+                .get("channel")
+                .and_then(ParamValue::as_text)
+                .unwrap_or("")
+                .trim()
+                .to_ascii_lowercase();
+            if channel != "n" && channel != "p" {
+                return Err("Le canal doit être « n » ou « p ».".to_owned());
+            }
+            let Some(vth) = number("vth") else {
+                return Err("La tension de seuil doit être un nombre fini.".to_owned());
+            };
+            let Some(k) = number("k") else {
+                return Err("La transconductance doit être un nombre fini.".to_owned());
+            };
+            let Some(saturation_current) = number("is") else {
+                return Err("Le courant de saturation doit être un nombre fini.".to_owned());
+            };
+            let Some(emission) = number("n") else {
+                return Err("Le coefficient d'émission doit être un nombre fini.".to_owned());
+            };
+            let Some(maximum_current) = number("imax") else {
+                return Err("Le courant maximal doit être un nombre fini.".to_owned());
+            };
+            let non_negative = ["lambda", "rd", "rs", "cgs", "cgd", "cds"]
+                .iter()
+                .all(|key| number(key).is_some_and(|value| value >= 0.0));
+            if vth <= 0.0
+                || k <= 0.0
+                || saturation_current <= 0.0
+                || emission <= 0.0
+                || maximum_current <= 0.0
+                || !non_negative
+            {
+                return Err(
+                    "Vth, k, Is, n et Imax doivent être strictement positifs, et λ, rd, rs, cgs, cgd, cds non négatifs."
+                        .to_owned(),
+                );
+            }
         }
         Ok(symbol)
     }
@@ -686,6 +734,29 @@ fn show_symbol(
                                         if schottky { "schottky" } else { "standard" }.to_owned();
                                     diode_type = Some(schottky);
                                 }
+                            } else if kind == SymbolKind::Mosfet && param.key == "channel" {
+                                let mut n_channel = !text.eq_ignore_ascii_case("p");
+                                let mut changed = false;
+                                egui::ComboBox::from_id_salt("mosfet_channel")
+                                    .selected_text(if n_channel { "Canal N" } else { "Canal P" })
+                                    .show_ui(ui, |ui| {
+                                        if ui
+                                            .selectable_value(&mut n_channel, true, "Canal N")
+                                            .clicked()
+                                        {
+                                            changed = true;
+                                        }
+                                        if ui
+                                            .selectable_value(&mut n_channel, false, "Canal P")
+                                            .clicked()
+                                        {
+                                            changed = true;
+                                        }
+                                    });
+                                if changed {
+                                    *text = if n_channel { "n" } else { "p" }.to_owned();
+                                    commit = true;
+                                }
                             } else {
                                 ui.add(
                                     TextEdit::singleline(text)
@@ -1023,6 +1094,59 @@ mod tests {
             parameter.value = ParamDraftValue::Number(value.to_owned());
             assert!(draft.to_symbol(&symbol).is_err(), "accepted {key}={value}");
         }
+    }
+
+    fn mosfet() -> Symbol {
+        let registry = SymbolRegistry::builtin();
+        Symbol::from_def(
+            SymbolId(4),
+            registry.get(&SymbolKind::Mosfet).unwrap(),
+            GridPos::new(0, 0),
+            "M1",
+            Orientation::R0,
+            false,
+        )
+    }
+
+    #[test]
+    fn mosfet_rejects_invalid_parameter_domains_in_the_inspector() {
+        let symbol = mosfet();
+        assert_eq!(
+            SymbolDraft::from_symbol(&symbol)
+                .to_symbol(&symbol)
+                .unwrap()
+                .params,
+            symbol.params
+        );
+        for (key, value) in [
+            ("vth", "0"),
+            ("k", "-1m"),
+            ("is", "0"),
+            ("n", "0"),
+            ("imax", "0"),
+            ("lambda", "-0.1"),
+            ("rd", "-1"),
+            ("rs", "-1"),
+            ("cgs", "-1n"),
+        ] {
+            let mut draft = SymbolDraft::from_symbol(&symbol);
+            let parameter = draft
+                .params
+                .iter_mut()
+                .find(|param| param.key == key)
+                .unwrap();
+            parameter.value = ParamDraftValue::Number(value.to_owned());
+            assert!(draft.to_symbol(&symbol).is_err(), "accepted {key}={value}");
+        }
+        // The channel must be one of the two documented choices.
+        let mut draft = SymbolDraft::from_symbol(&symbol);
+        let channel = draft
+            .params
+            .iter_mut()
+            .find(|param| param.key == "channel")
+            .unwrap();
+        channel.value = ParamDraftValue::Text("x".to_owned());
+        assert!(draft.to_symbol(&symbol).is_err());
     }
 
     #[test]

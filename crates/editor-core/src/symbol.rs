@@ -29,6 +29,7 @@ pub enum SymbolKind {
     Custom(String),
     ShuntReference,
     Comparator,
+    Mosfet,
 }
 
 impl SymbolKind {
@@ -47,6 +48,7 @@ impl SymbolKind {
             Self::Zener => "zener",
             Self::ShuntReference => "shunt_reference",
             Self::Comparator => "comparator",
+            Self::Mosfet => "mosfet",
             Self::OpAmp => "opamp",
             Self::Voltmeter => "voltmeter",
             Self::Ammeter => "ammeter",
@@ -70,6 +72,7 @@ impl SymbolKind {
             "zener" => Some(Self::Zener),
             "shunt_reference" => Some(Self::ShuntReference),
             "comparator" => Some(Self::Comparator),
+            "mosfet" => Some(Self::Mosfet),
             "opamp" => Some(Self::OpAmp),
             "voltmeter" => Some(Self::Voltmeter),
             "ammeter" => Some(Self::Ammeter),
@@ -406,6 +409,7 @@ fn builtin_defs() -> Vec<SymbolDef> {
             numeric_params(&[("gain", 1e5), ("v_sat_pos", 15.0), ("v_sat_neg", -15.0)]),
         )
         .expect("op-amp definition is valid"),
+        mosfet_def(),
     ]
     .into_iter()
     .chain(probe_defs())
@@ -478,6 +482,36 @@ fn comparator_def() -> SymbolDef {
     .expect("comparator definition is valid")
 }
 
+/// Square-law N-channel MOSFET with the gate on the left and the drain and
+/// source on the right. The bulk is tied to the source.
+fn mosfet_def() -> SymbolDef {
+    let mut defaults = numeric_params(&[
+        ("vth", 1.6),
+        ("k", 0.05),
+        ("lambda", 0.02),
+        ("rd", 1.0),
+        ("rs", 2.0),
+        ("is", 1e-14),
+        ("n", 1.0),
+        ("cgs", 0.0),
+        ("cgd", 0.0),
+        ("cds", 0.0),
+        ("imax", 0.3),
+    ]);
+    defaults.insert("channel".to_owned(), ParamValue::Text("n".to_owned()));
+    defaults.insert("swap_ds".to_owned(), ParamValue::Bool(false));
+    SymbolDef::new(
+        SymbolKind::Mosfet,
+        vec![
+            PinDef::new("d", GridPos::new(2, -2)),
+            PinDef::new("g", GridPos::new(-2, 0)),
+            PinDef::new("s", GridPos::new(2, 2)),
+        ],
+        defaults,
+    )
+    .expect("MOSFET definition is valid")
+}
+
 fn two_terminal(kind: SymbolKind, defaults: &[(&str, f64)]) -> SymbolDef {
     SymbolDef::new(
         kind,
@@ -518,7 +552,7 @@ mod tests {
     #[test]
     fn builtin_registry_contains_expected_symbols() {
         let registry = SymbolRegistry::builtin();
-        assert_eq!(registry.len(), 16);
+        assert_eq!(registry.len(), 17);
         assert_eq!(
             registry
                 .get(&SymbolKind::Resistor)
@@ -538,6 +572,49 @@ mod tests {
                 .get(&SymbolKind::ShuntReference)
                 .map(SymbolDef::pin_count),
             Some(3)
+        );
+        assert_eq!(
+            registry.get(&SymbolKind::Mosfet).map(SymbolDef::pin_count),
+            Some(3)
+        );
+    }
+
+    #[test]
+    fn mosfet_symbol_exposes_terminal_order_and_defaults() {
+        let registry = SymbolRegistry::builtin();
+        let mosfet = registry.get(&SymbolKind::Mosfet).unwrap();
+        assert_eq!(
+            mosfet
+                .pins
+                .iter()
+                .map(|pin| pin.name.as_str())
+                .collect::<Vec<_>>(),
+            ["d", "g", "s"]
+        );
+        for key in [
+            "channel", "vth", "k", "lambda", "rd", "rs", "is", "n", "cgs", "cgd", "cds", "imax",
+            "swap_ds",
+        ] {
+            assert!(
+                mosfet.defaults.contains_key(key),
+                "missing MOSFET parameter {key}"
+            );
+        }
+        assert_eq!(
+            mosfet.defaults.get("channel").and_then(ParamValue::as_text),
+            Some("n")
+        );
+        assert_eq!(
+            mosfet.defaults.get("swap_ds").and_then(ParamValue::as_bool),
+            Some(false)
+        );
+        assert_eq!(
+            mosfet.defaults.get("vth").and_then(ParamValue::as_number),
+            Some(1.6)
+        );
+        assert_eq!(
+            mosfet.defaults.get("k").and_then(ParamValue::as_number),
+            Some(0.05)
         );
     }
 

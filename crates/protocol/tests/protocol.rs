@@ -145,6 +145,57 @@ fn netlist_wire_roundtrips_parameter_variants_and_custom_kinds() {
 }
 
 #[test]
+fn mosfet_component_roundtrips_through_the_version_four_frame() {
+    assert_eq!(PROTOCOL_VERSION, 4);
+
+    let mut builder = NetlistBuilder::new();
+    let ground = builder.add_node("0", NodeKind::Ground).unwrap();
+    let drain = builder.add_node("d", NodeKind::Electrical).unwrap();
+    let gate = builder.add_node("g", NodeKind::Electrical).unwrap();
+    let source = builder.add_node("s", NodeKind::Electrical).unwrap();
+    let mut params = ParamMap::new();
+    params.insert("channel".to_owned(), ParamValue::Text("n".to_owned()));
+    params.insert("vth".to_owned(), ParamValue::Number(1.6));
+    params.insert("k".to_owned(), ParamValue::Number(0.05));
+    params.insert("swap_ds".to_owned(), ParamValue::Bool(false));
+    builder
+        .add_component(
+            ComponentKind::Resistor,
+            "RD",
+            number("resistance", 1_000.0),
+            vec![drain, ground],
+        )
+        .unwrap();
+    builder
+        .add_component(
+            ComponentKind::Mosfet,
+            "M1",
+            params,
+            vec![drain, gate, source],
+        )
+        .unwrap();
+    let message = ClientMessage::Submit {
+        job: Job {
+            revision: 3,
+            netlist: builder.build().unwrap(),
+            analysis: Analysis::Dc(DcOptions::default()),
+        },
+    };
+
+    let frame = encode_request(&message).unwrap();
+    assert_eq!(u16::from_le_bytes([frame[4], frame[5]]), 4);
+    assert_eq!(decode_request(&frame).unwrap(), message);
+    let ClientMessage::Submit { job } = decode_request(&frame).unwrap() else {
+        panic!("expected a submit message");
+    };
+    assert!(job
+        .netlist
+        .components
+        .iter()
+        .any(|component| component.kind == ComponentKind::Mosfet));
+}
+
+#[test]
 fn ping_and_response_messages_roundtrip() {
     let ping = ClientMessage::Ping { nonce: 42 };
     assert_eq!(

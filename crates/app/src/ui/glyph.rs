@@ -123,7 +123,7 @@ pub(crate) fn body_half_extent(kind: &SymbolKind) -> f32 {
         SymbolKind::Capacitor => 0.9,
         SymbolKind::Diode | SymbolKind::Led | SymbolKind::Zener | SymbolKind::Switch => 0.8,
         SymbolKind::ShuntReference => 1.0,
-        SymbolKind::Comparator | SymbolKind::OpAmp => 1.5,
+        SymbolKind::Comparator | SymbolKind::OpAmp | SymbolKind::Mosfet => 1.5,
         SymbolKind::Ground => 1.4,
         _ => 1.0,
     }
@@ -439,6 +439,7 @@ fn paint_body(
         SymbolKind::Comparator | SymbolKind::OpAmp => {
             paint_opamp(painter, symbol, center, scale, stroke)
         }
+        SymbolKind::Mosfet => paint_mosfet(painter, symbol, center, scale, stroke),
         SymbolKind::Voltmeter | SymbolKind::Ammeter | SymbolKind::Ohmmeter => {
             painter.circle_stroke(center, scale * 0.9, stroke);
             let (letter, color) = match symbol.kind {
@@ -619,6 +620,109 @@ fn paint_zener(painter: &Painter, symbol: &Symbol, center: Pos2, scale: f32, str
     );
 }
 
+fn paint_mosfet(painter: &Painter, symbol: &Symbol, center: Pos2, scale: f32, stroke: Stroke) {
+    let p_channel = symbol
+        .params
+        .get("channel")
+        .and_then(ParamValue::as_text)
+        .is_some_and(|channel| channel.eq_ignore_ascii_case("p"));
+    let swapped = symbol
+        .params
+        .get("swap_ds")
+        .and_then(ParamValue::as_bool)
+        .unwrap_or(false);
+
+    // Gate lead and gate plate.
+    line_local(
+        painter,
+        symbol,
+        center,
+        scale,
+        &[(-2.0, 0.0), (-1.25, 0.0)],
+        stroke,
+    );
+    line_local(
+        painter,
+        symbol,
+        center,
+        scale,
+        &[(-1.25, -1.4), (-1.25, 1.4)],
+        stroke,
+    );
+    // Three-segment channel bar.
+    for (top, bottom) in [(-1.5, -0.75), (-0.4, 0.4), (0.75, 1.5)] {
+        line_local(
+            painter,
+            symbol,
+            center,
+            scale,
+            &[(-0.85, top), (-0.85, bottom)],
+            stroke,
+        );
+    }
+    // Drain (top) and source (bottom) leads.
+    line_local(
+        painter,
+        symbol,
+        center,
+        scale,
+        &[(-0.85, -1.1), (1.2, -1.1), (1.2, -2.0), (2.0, -2.0)],
+        stroke,
+    );
+    line_local(
+        painter,
+        symbol,
+        center,
+        scale,
+        &[(-0.85, 1.1), (1.2, 1.1), (1.2, 2.0), (2.0, 2.0)],
+        stroke,
+    );
+    // Bulk tied to the source.
+    line_local(
+        painter,
+        symbol,
+        center,
+        scale,
+        &[(-0.85, 0.0), (0.6, 0.0), (0.6, 1.1)],
+        stroke,
+    );
+    // Channel arrow: N points at the channel, P points away from it.
+    let arrow = if p_channel {
+        [(0.45, 0.0), (0.1, -0.2), (0.45, 0.0), (0.1, 0.2)]
+    } else {
+        [(-0.8, 0.0), (-0.45, -0.2), (-0.8, 0.0), (-0.45, 0.2)]
+    };
+    line_local(painter, symbol, center, scale, &arrow, stroke);
+
+    if swapped {
+        let marker = Stroke::new((stroke.width * 0.8).max(1.0), stroke.color);
+        line_local(
+            painter,
+            symbol,
+            center,
+            scale,
+            &[(1.6, -0.45), (1.6, 0.45)],
+            marker,
+        );
+        line_local(
+            painter,
+            symbol,
+            center,
+            scale,
+            &[(1.42, -0.22), (1.6, -0.45), (1.78, -0.22)],
+            marker,
+        );
+        line_local(
+            painter,
+            symbol,
+            center,
+            scale,
+            &[(1.42, 0.22), (1.6, 0.45), (1.78, 0.22)],
+            marker,
+        );
+    }
+}
+
 fn paint_shunt_reference(
     painter: &Painter,
     symbol: &Symbol,
@@ -787,6 +891,7 @@ fn symbol_value(symbol: &Symbol) -> Option<String> {
         SymbolKind::ShuntReference => Some("vref"),
         SymbolKind::Comparator => Some("r_sink"),
         SymbolKind::OpAmp => Some("gain"),
+        SymbolKind::Mosfet => Some("vth"),
         _ => None,
     }
     .and_then(|key| symbol.params.get_key_value(key));
@@ -875,5 +980,21 @@ mod tests {
             body_half_extent(&SymbolKind::Comparator),
             body_half_extent(&SymbolKind::OpAmp)
         );
+    }
+
+    #[test]
+    fn mosfet_preview_shows_the_threshold_voltage() {
+        let registry = SymbolRegistry::builtin();
+        let definition = registry.get(&SymbolKind::Mosfet).unwrap();
+        let symbol = Symbol::from_def(
+            SymbolId(1),
+            definition,
+            GridPos::new(0, 0),
+            "M1",
+            Orientation::R0,
+            false,
+        );
+        assert_eq!(symbol_value(&symbol).as_deref(), Some("1.6 V"));
+        assert_eq!(body_half_extent(&SymbolKind::Mosfet), 1.5);
     }
 }

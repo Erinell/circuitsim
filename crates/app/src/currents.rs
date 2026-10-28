@@ -31,7 +31,7 @@ pub(crate) fn net_flows(document: &Document, live: &LiveValues) -> BTreeMap<Stri
         if definition.pins.len() != 2
             && !matches!(
                 symbol.kind,
-                SymbolKind::ShuntReference | SymbolKind::Comparator
+                SymbolKind::ShuntReference | SymbolKind::Comparator | SymbolKind::Mosfet
             )
         {
             continue;
@@ -195,7 +195,7 @@ fn net_wire_currents(
         if definition.pins.len() != 2
             && !matches!(
                 symbol.kind,
-                SymbolKind::ShuntReference | SymbolKind::Comparator
+                SymbolKind::ShuntReference | SymbolKind::Comparator | SymbolKind::Mosfet
             )
         {
             continue;

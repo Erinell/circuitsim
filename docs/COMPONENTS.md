@@ -14,6 +14,8 @@ Les composants à deux broches utilisent `a`, `b`. L'opamp utilise `in+`, `in-`,
 - Courant de branche : de `a` vers `b`.
 - Source de courant : `dc` de `a` vers `b` à travers la source.
 - Diode : anode `a` vers cathode `b`.
+- MOSFET : courant de drain `d` vers `s`, tension principale `v(d)-v(s)`, grille
+  sans courant continu.
 - Opamp : sortie référencée à la masse, courant `out -> masse`.
 - Condensateur : `i = C dv/dt` de `a` vers `b` ; inductance :
   `v = L di/dt`, courant `a -> b`.
@@ -102,7 +104,114 @@ positifs. Le terme est nul au seuil et devient négatif au-delà. La pente AC
 inclut le claquage ; résistance dynamique indépendante, bruit, capacité et
 température ne sont pas modélisés.
 
-## 5. Référence shunt programmable TL431/LM431
+## 5. Transistor MOSFET à enrichissement
+
+Broches ordonnées : `d` (drain), `g` (grille), `s` (source). Le bulk est relié
+à la source à l'intérieur du composant : aucun effet de corps, aucune quatrième
+broche. Le modèle est un **niveau 1 carré** (Shichman-Hodges) avec résistances
+d'accès et diode de corps.
+
+| Paramètre | Type | Défaut N | Défaut P | Rôle |
+| --- | --- | ---: | ---: | --- |
+| `channel` | texte | `n` | `p` | canal N ou P |
+| `vth` | nombre | `1.6` V | `1.8` V | seuil, strictement positif |
+| `k` | nombre | `0.05` A/V² | `0.02` A/V² | gain carré, strictement positif |
+| `lambda` | nombre | `0.02` V⁻¹ | `0.02` V⁻¹ | modulation de longueur de canal, ≥ 0 |
+| `rd` | nombre | `1.0` Ω | `1.0` Ω | résistance d'accès au drain, ≥ 0 |
+| `rs` | nombre | `2.0` Ω | `2.0` Ω | résistance d'accès à la source, ≥ 0 |
+| `is` | nombre | `1e-14` A | `1e-14` A | saturation de la diode de corps |
+| `n` | nombre | `1.0` | `1.0` | coefficient d'émission de la diode |
+| `cgs`, `cgd`, `cds` | nombre | `0` F | `0` F | capacités parasites, ≥ 0 |
+| `imax` | nombre | `0.3` A | `0.13` A | courant maximal de datasheet |
+| `swap_ds` | booléen | `false` | `false` | permute électriquement D et S |
+
+Les valeurs P sont les valeurs par défaut documentées ; le registre de symboles
+ne stocke qu'un seul jeu de défauts (canal N). Pour un canal P, l'inspecteur
+change `channel` et l'utilisateur ajuste `vth`/`k`/`imax` selon la fiche.
+
+### Équations
+
+Le modèle travaille en coordonnées de canal. Soit `σ = +1` (N) ou `−1` (P) :
+
+```text
+Vgs' = σ * (V(g) - V(s_in))     Vds' = σ * (V(d_in) - V(s_in))
+Id'  = σ * Id
+Vov  = Vgs' - vth
+```
+
+Si `Vov <= 0`, le canal est coupé (`Id' = 0`). Sinon :
+
+```text
+régime triode (Vds' < Vov) :
+  Id' = k * (2*Vov*Vds' - Vds'^2) * (1 + lambda*Vds')
+saturation (Vds' >= Vov) :
+  Id' = k * Vov^2 * (1 + lambda*Vds')
+```
+
+Pour `Vds' < 0`, le même calcul est appliqué par symétrie en échangeant drain et
+source : `Id'(Vgs', Vds') = -Id'(Vgs' - Vds', -Vds')`. La transition à
+`Vds' = Vov` est continue (les deux formes coïncident), seule la dérivée change.
+
+Les résistances d'accès sont des inconnues internes : les broches externes sont
+reliées aux nœuds internes `d_in` et `s_in` par `rd` et `rs`. Une valeur nulle
+supprime le nœud interne correspondant. `swap_ds` est une **permutation
+électrique** appliquée avant l'assemblage : le drain du symbole devient la source
+interne, et inversement ; le bulk suit la source permutée. Le modèle n'est jamais
+dupliqué.
+
+### Diode de corps
+
+La jonction source/bulk vers drain est une diode de la même forme que le
+composant `Diode`, orientée source → drain pour le canal N (cathode au drain) et
+inversée pour le canal P :
+
+```text
+I_bd = is * (exp(-Vds' / (n*Vt)) - 1)
+Vt ≈ 25.85 mV à 300.15 K
+```
+
+Elle conduit donc en polarisation inverse du canal (`Vds' < 0`), comme la diode
+parasite réelle. L'exponentielle est plafonnée à `exp(80)`.
+
+### AC
+
+Au point DC, l'AC linéarise `gm = ∂Id'/∂Vgs'` et `gds = ∂Id'/∂Vds'`, ainsi que la
+pente de la diode de corps, puis ajoute `jωcgs`, `jωcgd` et `jωcds`. En régime
+saturé, `gm = 2*k*Vov*(1 + lambda*Vds')` et `gds = k*Vov^2*lambda` ; en triode,
+`gm = 2*k*Vds'*(1 + lambda*Vds')` et `gds = k*(2*Vov - 2*Vds')*(1 + lambda*Vds')
++ k*(2*Vov*Vds' - Vds'^2)*lambda`. La capacité grille-drain crée le couplage
+Miller ; aucune capacité n'est ajoutée si elle vaut zéro.
+
+### Limites
+
+- Pas de tension de seuil dépendante de la température, de la longueur de canal
+  ni du bulk (pas d'effet de corps, pas de `vds` de breakdown).
+- Pas de régime sous-seuil exponentiel : le courant est exactement nul sous
+  `vth`, ce qui rend le « off » idéal.
+- `imax` est une limite de datasheet éditable, **non appliquée par le solveur** ;
+  elle alimente seulement les alertes de surintensité.
+- `rd`/`rs` sont ohmiques, sans dépendance à `Vgs` ; ils ne reproduisent pas la
+  courbe `RDS(on)` réelle.
+- La diode de corps n'a ni capacité, ni tension de claquage, ni résistance série
+  propre.
+- La capacité `cds` est linéaire ; il n'y a pas de capacité de recouvrement ni de
+  charge de grille.
+
+### Ancrage datasheet
+
+Les défauts N reprennent l'ordre de grandeur du **2N7002** (Nexperia) :
+`VGS(th) = 1.0…2.5 V`, `ID = 300 mA`, `RDS(on) ≈ 1…1.6 Ω` à `VGS = 10 V`. Le
+`vth = 1.6 V` est la valeur typique des variantes 2N7002BK/HW, `imax = 0.3 A` le
+courant continu, et `k = 0.05 A/V²` redonne `1/(2*k*Vov) ≈ 1.2 Ω` au point de
+mesure `VGS = 10 V`. Source : [Nexperia, fiche 2N7002](https://assets.nexperia.com/documents/data-sheet/2N7002.pdf)
+et [2N7002BK](https://assets.nexperia.com/documents/data-sheet/2N7002BK.pdf).
+
+Les défauts P reprennent le **BSS84** (onsemi) : `VGS(th) = −0.8…−2.0 V`,
+`ID = −0.13 A`, `RDS(on) ≤ 10 Ω` à `VGS = −5 V`. `vth = 1.8 V` et
+`imax = 0.13 A` viennent de la fiche ; `k = 0.02 A/V²` redonne `≈ 7.8 Ω` à
+`VGS = −5 V`. Source : [onsemi, fiche BSS84](https://www.onsemi.com/pdf/datasheet/bss84-d.pdf).
+
+## 6. Référence shunt programmable TL431/LM431
 
 Le composant possède trois broches, dans l'ordre stable du symbole, de la netlist et du protocole : `REF`, `K` (cathode), `A` (anode). Son courant principal `I_KA` est orienté de `K` vers `A` et sa tension principale vaut `V(K)-V(A)`. Le courant d'entrée `I_REF` est orienté de `REF` vers `A`. La broche REF reçoit le réseau externe de programmation ; avec un diviseur `Rhaut` de K à REF et `Rbas` de REF à A, la consigne idéale vaut `V_KA ≈ VREF * (1 + Rhaut/Rbas) + IREF * Rhaut`.
 
@@ -131,7 +240,7 @@ Les valeurs par défaut reprennent les valeurs usuelles de la fiche **TI TL431, 
 
 Modèle volontairement simplifié : commande instantanée sans pôle ni compensation, capacité, bruit, tolérance, température, protection thermique ou dynamique de démarrage. `IREF` est constant et la transition de conformité est une interpolation numérique, non une caractéristique transistor précise. DC et transitoire utilisent la même loi algébrique ; l'AC linéarise ses dérivées au point DC, sans introduire de pôle.
 
-## 6. Comparateur à collecteur ouvert LM393
+## 7. Comparateur à collecteur ouvert LM393
 
 Broches ordonnées : `in+`, `in-`, `out`, `vcc`, `vss`. Le courant de sortie positif est orienté `out -> vss`, et la tension observée est `V(out)-V(vss)`. Le LM393 a une sortie collecteur ouvert : **le pull-up est externe et obligatoire** pour obtenir un niveau haut. Sans pull-up, un état relâché laisse le nœud de sortie flottant et la résolution DC peut être singulière. `vss` sert de référence à l'étage de sortie ; `vcc` autorise la comparaison si `2 V <= V(vcc)-V(vss) <= 36 V`.
 
@@ -154,7 +263,7 @@ Le défaut `v_offset = 2 mV` reprend l'ordre de grandeur typique de la fiche LM3
 
 Modèle volontairement simplifié : entrée sans courant, courant d'alimentation nul, limites de mode commun non modélisées, commutation instantanée, sans délai ni hystérésis. L'AC fige l'état logique au point DC et linéarise seulement la résistance de sink active ; le gain de comparaison petit-signal est nul. La résistance de pull-up et sa source restent des composants externes.
 
-## 7. Amplificateur opérationnel
+## 8. Amplificateur opérationnel
 
 | Paramètre | Défaut | Rôle |
 | --- | ---: | --- |
@@ -173,7 +282,7 @@ le système singulier. Newton utilise `gain` en régime actif et `0` en saturati
 l'AC réutilise cette pente. `v_sat_pos > v_sat_neg`, sinon
 `InvalidSaturation`.
 
-## 8. Sources et excitations
+## 9. Sources et excitations
 
 Une source de tension ou de courant est décrite au repos par `dc`. En
 transitoire :
@@ -200,7 +309,7 @@ En AC, l'excitation est portée par
 court-circuit petits signaux ; une source de courant AC nulle est un circuit
 ouvert. L'orientation AC reste `a -> b`.
 
-## 9. Composants personnalisés
+## 10. Composants personnalisés
 
 `ComponentKind::Custom(String)` et `SymbolKind::Custom(String)` représentent une
 extension. Le registre valide nom, broches et paramètres. Les solveurs refusent
@@ -208,7 +317,7 @@ explicitement le type avec `MnaError::UnsupportedComponent` tant qu'aucun modèl
 n'est implémenté. L'exemple `examples/custom_mosfet.rs` montre la représentation,
 l'extraction et le JSON ; il ne s'agit pas d'un transistor simulé.
 
-## 10. Énergie
+## 11. Énergie
 
 L'audit transitoire évalue la puissance à la fin de chaque pas et calcule :
 

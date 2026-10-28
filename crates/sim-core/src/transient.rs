@@ -710,7 +710,7 @@ fn solve_initial(
         });
     }
     let initial = DVector::zeros(size);
-    let junction_voltages = vec![0.0; circuit.nonlinear_count()];
+    let junction_voltages = vec![0.0; circuit.nonlinear_state_len()];
     solve_robust(
         circuit,
         config,
@@ -807,6 +807,43 @@ fn stored_energies(
                     .unwrap_or(0.0);
                 0.5 * inductance * current * current
             }
+            ComponentKind::Mosfet => {
+                let gate = component
+                    .pins
+                    .get(1)
+                    .and_then(|node| circuit.node_voltage(solution, *node))
+                    .unwrap_or(0.0);
+                let swapped = component
+                    .params
+                    .get("swap_ds")
+                    .and_then(ParamValue::as_bool)
+                    .unwrap_or(false);
+                // With permuted terminals the symbol drain is the internal source.
+                let (drain_pin, source_pin) = if swapped { (2, 0) } else { (0, 2) };
+                let drain = component
+                    .pins
+                    .get(drain_pin)
+                    .and_then(|node| circuit.node_voltage(solution, *node))
+                    .unwrap_or(0.0);
+                let source = component
+                    .pins
+                    .get(source_pin)
+                    .and_then(|node| circuit.node_voltage(solution, *node))
+                    .unwrap_or(0.0);
+                let parameter = |key: &str| {
+                    component
+                        .params
+                        .get(key)
+                        .and_then(ParamValue::as_number)
+                        .unwrap_or(0.0)
+                };
+                let gate_source = gate - source;
+                let gate_drain = gate - drain;
+                let drain_source = drain - source;
+                0.5 * (parameter("cgs") * gate_source * gate_source
+                    + parameter("cgd") * gate_drain * gate_drain
+                    + parameter("cds") * drain_source * drain_source)
+            }
             _ => 0.0,
         };
         energies.insert(component.id, energy);
@@ -833,6 +870,7 @@ fn accumulate_interval(
                 | ComponentKind::Zener
                 | ComponentKind::ShuntReference
                 | ComponentKind::Comparator
+                | ComponentKind::Mosfet
                 | ComponentKind::OpAmp
         ) {
             continue;
@@ -898,7 +936,8 @@ fn build_energy_audit(
             | ComponentKind::Led
             | ComponentKind::Zener
             | ComponentKind::ShuntReference
-            | ComponentKind::Comparator => {
+            | ComponentKind::Comparator
+            | ComponentKind::Mosfet => {
                 dissipated += interval_absorbed;
                 ComponentEnergy {
                     absorbed: interval_absorbed,

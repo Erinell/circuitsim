@@ -8,6 +8,12 @@ sémantique.
 
 ### Added
 
+- **Transistor MOSFET** à enrichissement, trois broches `D`/`G`/`S`, bulk relié à
+  la source : loi carrée niveau 1 (triode, saturation, `lambda`), résistances
+  d'accès `rd`/`rs`, diode de corps, capacités `cgs`/`cgd`/`cds` et permutation
+  électrique `swap_ds`. Modèle DC, transitoire et AC (`gm`/`gds`) dans
+  `sim-core`, symbole et inspecteur avec choix du canal N/P, extraction, valeurs
+  live et animation des fils. Défauts ancrés sur les fiches 2N7002 et BSS84.
 - Référence shunt programmable TL431/LM431 à trois broches (REF, K, A), avec
   paramètres éditables et modèle non linéaire DC, transitoire et petits signaux AC.
 - Comparateur LM393 à collecteur ouvert avec broches d'alimentation, paramètres

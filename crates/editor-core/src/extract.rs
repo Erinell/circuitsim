@@ -615,6 +615,7 @@ fn component_kind(kind: &SymbolKind) -> ComponentKind {
         SymbolKind::Zener => ComponentKind::Zener,
         SymbolKind::ShuntReference => ComponentKind::ShuntReference,
         SymbolKind::Comparator => ComponentKind::Comparator,
+        SymbolKind::Mosfet => ComponentKind::Mosfet,
         SymbolKind::OpAmp => ComponentKind::OpAmp,
         SymbolKind::Voltmeter | SymbolKind::Ammeter | SymbolKind::Ohmmeter => {
             ComponentKind::Custom(kind.key().to_owned())
@@ -674,6 +675,7 @@ mod tests {
     use crate::schematic::{Junction, JunctionId, NetLabel};
     use crate::symbol::Symbol;
     use crate::undo::UndoStack;
+    use sim_core::netlist::ParamValue;
 
     fn registry() -> SymbolRegistry {
         SymbolRegistry::builtin()
@@ -758,6 +760,139 @@ mod tests {
                 .collect::<Vec<_>>()
         );
         assert!(component.pins.windows(2).all(|pins| pins[0] != pins[1]));
+    }
+
+    #[test]
+    fn mosfet_extraction_preserves_drain_gate_source_order_and_solves() {
+        let mut schematic = Schematic::new();
+        let mut history = UndoStack::new();
+        let mosfet = add_symbol(
+            &mut schematic,
+            &mut history,
+            SymbolKind::Mosfet,
+            GridPos::new(0, 0),
+            "M1",
+        );
+        add_symbol(
+            &mut schematic,
+            &mut history,
+            SymbolKind::Ground,
+            GridPos::new(2, 6),
+            "GND1",
+        );
+        add_symbol_oriented(
+            &mut schematic,
+            &mut history,
+            SymbolKind::VoltageSource,
+            GridPos::new(0, -6),
+            "VDD",
+            Orientation::R180,
+        );
+        add_symbol_oriented(
+            &mut schematic,
+            &mut history,
+            SymbolKind::VoltageSource,
+            GridPos::new(-8, 4),
+            "VG",
+            Orientation::R180,
+        );
+        // Supply: - to the ground bus, + to the drain.
+        add_wire(
+            &mut schematic,
+            &mut history,
+            GridPos::new(-4, -6),
+            GridPos::new(-4, 6),
+        );
+        add_wire(
+            &mut schematic,
+            &mut history,
+            GridPos::new(-2, -6),
+            GridPos::new(-4, -6),
+        );
+        add_wire(
+            &mut schematic,
+            &mut history,
+            GridPos::new(2, -6),
+            GridPos::new(2, -2),
+        );
+        // Ground bus: source, supply return, and gate return all reach it.
+        add_wire(
+            &mut schematic,
+            &mut history,
+            GridPos::new(-10, 6),
+            GridPos::new(2, 6),
+        );
+        add_wire(
+            &mut schematic,
+            &mut history,
+            GridPos::new(2, 2),
+            GridPos::new(2, 6),
+        );
+        add_wire(
+            &mut schematic,
+            &mut history,
+            GridPos::new(-10, 4),
+            GridPos::new(-10, 6),
+        );
+        // Gate drive.
+        add_wire(
+            &mut schematic,
+            &mut history,
+            GridPos::new(-6, 4),
+            GridPos::new(-6, 0),
+        );
+        add_wire(
+            &mut schematic,
+            &mut history,
+            GridPos::new(-6, 0),
+            GridPos::new(-2, 0),
+        );
+
+        let extraction = extract_netlist(&schematic, &registry()).unwrap();
+        assert!(
+            extraction.erc.issues().is_empty(),
+            "unexpected ERC issues: {:?}",
+            extraction.erc.issues()
+        );
+        let component = extraction.netlist.component_by_label("M1").unwrap();
+        assert_eq!(component.kind, ComponentKind::Mosfet);
+        assert_eq!(component.pins.len(), 3);
+        assert_eq!(
+            component.pins,
+            (0_u16..3)
+                .map(|pin| {
+                    extraction.net_of_pin[&PinKey {
+                        symbol: mosfet.id,
+                        pin,
+                    }]
+                })
+                .collect::<Vec<_>>()
+        );
+        assert!(component.pins.windows(2).all(|pins| pins[0] != pins[1]));
+        assert_eq!(
+            component
+                .params
+                .get("channel")
+                .and_then(ParamValue::as_text),
+            Some("n")
+        );
+        // The extracted netlist is directly solvable by the simulator.
+        let solved = sim_core::solve_dc(&extraction.netlist, sim_core::DcOptions::default())
+            .expect("MOSFET netlist must solve");
+        let drain_net = extraction.net_of_pin[&PinKey {
+            symbol: mosfet.id,
+            pin: 0,
+        }];
+        let gate_net = extraction.net_of_pin[&PinKey {
+            symbol: mosfet.id,
+            pin: 1,
+        }];
+        assert!(
+            (solved.node_voltage(drain_net).unwrap() - 5.0).abs() < 1e-9,
+            "drain voltage {:?}",
+            solved.node_voltage(drain_net)
+        );
+        assert!((solved.node_voltage(gate_net).unwrap() - 5.0).abs() < 1e-9);
     }
 
     fn add_symbol(

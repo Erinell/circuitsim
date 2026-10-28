@@ -215,3 +215,23 @@ L'AC petits signaux inclut les dérivées réelles de la loi au point DC sur les
 `ComponentKind::Comparator` utilise l'ordre `in+`, `in-`, `out`, `vcc`, `vss`. La sortie est un sink référencé à `vss` ; il faut ajouter un pull-up externe pour obtenir l'état haut. Le modèle ne compare que si `2 V <= V(vcc)-V(vss) <= 36 V`. Le seuil bascule lorsque `V(in+)-V(in-)` passe sous `v_offset`. L'état commute sans délai ni hystérésis, au point DC comme à l'échantillon transitoire suivant.
 
 L'AC conserve l'état logique du point DC et ne transfère pas l'excitation d'entrée à la sortie ; dans l'état sink, il linéarise `r_sink` tant que `imax` n'est pas atteint. Le courant non linéaire `out -> vss` est recalculé depuis les tensions, et n'est pas un courant de branche retourné par le solveur. Sans pull-up ni autre chemin dans l'état relâché, la matrice peut être singulière. Limites et défauts LM393 : [COMPONENTS.md](COMPONENTS.md).
+
+## 11. Transistor MOSFET
+
+`ComponentKind::Mosfet` utilise les broches ordonnées `d`, `g`, `s` et un bulk
+interne relié à la source. Les paramètres obligatoires sont `channel`, `vth` et
+`k` ; `lambda`, `rd`, `rs`, `is`, `n`, `cgs`, `cgd`, `cds`, `imax` et `swap_ds`
+ont des défauts. Un `channel` inconnu produit
+`MnaError::InvalidParameterChoice` ; un `vth` ou `k` non positif produit
+`InvalidParameterValue`.
+
+Le modèle résout la même loi carrée en DC et à chaque pas transitoire, avec les
+résistances d'accès comme inconnues internes. Le courant de drain rapporté suit
+la convention du symbole `D -> S`, y compris quand `swap_ds` est vrai ; il n'est
+pas un courant de branche du solveur. Les capacités sont optionnelles : à zéro,
+elles n'ajoutent rien ; en transitoire elles suivent Euler arrière ; en AC elles
+ajoutent `jωC` entre les nœuds internes.
+
+L'AC linéarise `gm`, `gds` et la diode de corps au point DC. Il n'y a ni
+sous-seuil, ni effet de corps, ni claquage, ni température. Voir
+[COMPONENTS.md](COMPONENTS.md) pour les équations et les valeurs par défaut.

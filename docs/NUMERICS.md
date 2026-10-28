@@ -100,10 +100,12 @@ G[b,a] -= g    G[b,b] += g
 b[a] -= I_eq   b[b] += I_eq
 ```
 
-Les expressions de `I` et `g` des diodes, LED, Zener et de l'opamp sont dans
-[COMPONENTS.md](COMPONENTS.md). L'opamp est un VCVS saturé : sa branche de sortie
-impose `v(out) - f(d) = 0`, linéarisée avec `f'(d) = gain` en actif et `0` en
-saturation. `v+` et `v-` ne participent pas aux équations.
+Les expressions de `I` et `g` des diodes, LED, Zener, MOSFET et de l'opamp sont
+dans [COMPONENTS.md](COMPONENTS.md). L'opamp est un VCVS saturé : sa branche de
+sortie impose `v(out) - f(d) = 0`, linéarisée avec `f'(d) = gain` en actif et `0`
+en saturation. `v+` et `v-` ne participent pas aux équations. Le MOSFET est un
+élément à trois terminaux : sa transconductance couple la ligne KCL du drain à la
+colonne de `Vgs`, et sa pente de sortie relie drain et source.
 
 ## 5. Newton et robustesse
 
@@ -128,7 +130,9 @@ si cible < précédent :
 ```
 
 `Vt_eff = n*Vt` pour une diode et `max(n, nbv)*Vt` pour un Zener. Elle évite
-qu'une jonction à `0 V` soit évaluée directement à `5 V`.
+qu'une jonction à `0 V` soit évaluée directement à `5 V`. Le MOSFET utilise une
+limitation linéaire de `0.5 V` par itération sur `Vgs'` et `Vds'`, et le limiteur
+logarithmique de la diode pour la jonction de corps.
 
 Acceptation :
 
@@ -181,6 +185,8 @@ Contributions :
 - source de tension : phasor sur sa branche ;
 - source de courant : injection du phasor de `a` vers `b` ;
 - diode/LED/Zener : conductance `dI/dV` au DC, sans capacité ;
+- MOSFET : `gm`, `gds` et pente de la diode de corps au DC, plus `jωcgs`,
+  `jωcgd`, `jωcds` ;
 - opamp : pente `gain` en actif, `0` en saturation ;
 - masse : `0 V`.
 
@@ -220,6 +226,8 @@ traitements de présentation détaillés dans [INSTRUMENTS.md](INSTRUMENTS.md).
 - Excitations continues représentées par des événements discrets.
 - AC petits signaux sans capacité de jonction, résistance série de diode ni
   température paramétrable.
+- MOSFET carré sans régime sous-seuil, sans effet de corps ni claquage ; `imax`
+  n'est pas appliqué par le solveur.
 - Opamp sans alimentation, limite de courant ni pôle AC ; pente `gain` ou `0`.
 - Résidu DC en unités mixtes A/V ; heuristiques de convergence non globales.
 - Solveur dense ; grands schémas à factoriser autrement.
@@ -237,3 +245,38 @@ Cette loi est un modèle comportemental statique, pas un sous-circuit transistor
 Le comparateur choisit l'état sink si `e = V(in+)-V(in-)-v_offset < 0` et si `2 V <= V(vcc)-V(vss) <= 36 V`. Dans cet état, `Iout = min(V(out,vss)/r_sink, imax)` orienté de OUT vers VSS ; sinon `Iout = 0`. L'assemblage est équivalent à une conductance `1/r_sink` entre OUT et VSS tant que le courant est inférieur à `imax`, sinon à une source de courant plafonnée. Le Jacobien ne comporte pas de dérivée par rapport aux entrées : le comparateur est un commutateur algébrique, pas un gain analogique élevé.
 
 En AC, l'état du comparateur est figé par le point DC ; seule la pente de sortie active participe à la matrice complexe. La source de pull-up est un composant externe et conserve son excitation AC. Le modèle ne représente ni délai/hystérésis, ni courant d'entrée, ni limites de mode commun, ni courant d'alimentation VCC. Pour éviter les oscillations de Newton, la résistance active est extrapolée sous VSS pendant les itérations ; cette extrapolation n'est pas une caractéristique physique de la puce.
+
+## 12. MOSFET niveau 1
+
+Le transistor est un élément non linéaire à trois bornes. Le drain et la source
+externes sont d'abord permutés si `swap_ds` est vrai, puis chaque accès `rd`/`rs`
+non nul introduit un nœud interne. Le canal est évalué entre ces nœuds internes
+avec `Vgs' = σ(V(g)-V(s))` et `Vds' = σ(V(d)-V(s))`.
+
+Le courant de canal linéarisé s'écrit `Id = Id(vgs0,vds0) + gm(Vgs'-vgs0) +
+gds(Vds'-vds0)`. Comme `Vgs'` et `Vds'` sont des combinaisons de tensions de
+nœuds, l'assemblage revient à ajouter les pentes aux colonnes `g`, `d` et `s` :
+
+```text
+ligne KCL drain  : +gm en g  +gds en d  -(gm+gds) en s
+ligne KCL source : -gm en g  -gds en d  +(gm+gds) en s
+source équivalente : Id0 - gm*Vgs0' - gds*Vds0'
+```
+
+La diode de corps est traitée comme une diode entre source et drain, avec une
+conductance `g_bd` et une source équivalente `σ*I_bd - g_bd*σ*V_bd`. Les
+résistances d'accès ajoutent `1/rd` et `1/rs` entre broche externe et nœud interne.
+Les capacités `cgs`, `cgd`, `cds` suivent le même traitement que le condensateur
+(`C/h` en transitoire, `jωC` en AC, court-circuit de valeur initiale) et sont
+reliées aux nœuds internes.
+
+Le vecteur de continuation du MOSFET contient trois valeurs : `Vgs'`, `Vds'` et
+la tension de la jonction de corps `-Vds'`. Les deux premières sont limitées à
+`0.5 V` de variation par itération, la troisième par le limiteur logarithmique.
+Les valeurs de continuation sont donc de longueur variable selon les composants
+non linéaires présents, et l'état précédent est réutilisé tel quel au pas suivant
+d'un transitoire.
+
+L'AC fige `gm`, `gds` et `g_bd` au point DC. Il n'y a pas de capacité de jonction
+non linéaire, pas de bruit et pas de dépendance à la température. Les équations
+physiques et les plages de paramètres sont dans [COMPONENTS.md](COMPONENTS.md).

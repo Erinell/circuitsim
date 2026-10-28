@@ -53,6 +53,13 @@ pub enum MnaError {
         positive: f64,
         negative: f64,
     },
+    #[error("component {component:?} parameter '{key}' must be {expected}, got '{value}'")]
+    InvalidParameterChoice {
+        component: ComponentId,
+        key: &'static str,
+        value: String,
+        expected: &'static str,
+    },
 }
 
 /// Time mode used while assembling the MNA system.
@@ -72,6 +79,7 @@ pub(crate) enum AssemblyMode<'a> {
 pub(crate) struct MnaCircuit {
     node_map: Vec<Option<usize>>,
     node_count: usize,
+    next_internal: usize,
     branch_components: Vec<ComponentId>,
     branches: Vec<BranchElement>,
     resistors: Vec<ResistorElement>,
@@ -85,6 +93,20 @@ impl MnaCircuit {
     pub(crate) fn from_netlist(netlist: &Netlist) -> Result<Self, MnaError> {
         netlist.validate_for_simulation()?;
 
+        let external_nodes = netlist
+            .nodes
+            .iter()
+            .filter(|node| !node.kind.is_ground())
+            .count();
+        let mut internal_nodes = 0;
+        for component in &netlist.components {
+            if component.kind == ComponentKind::Mosfet {
+                let model = mosfet_model(component)?;
+                internal_nodes += usize::from(model.drain_resistance > 0.0)
+                    + usize::from(model.source_resistance > 0.0);
+            }
+        }
+
         let mut node_map = Vec::with_capacity(netlist.nodes.len());
         let mut node_count = 0;
         for node in &netlist.nodes {
@@ -95,10 +117,12 @@ impl MnaCircuit {
                 node_count += 1;
             }
         }
+        let node_count = node_count + internal_nodes;
 
         let mut circuit = Self {
             node_map,
             node_count,
+            next_internal: external_nodes,
             branch_components: Vec::new(),
             branches: Vec::new(),
             resistors: Vec::new(),
@@ -111,6 +135,7 @@ impl MnaCircuit {
         for component in &netlist.components {
             circuit.add_component(component)?;
         }
+        debug_assert_eq!(circuit.next_internal, circuit.node_count);
         Ok(circuit)
     }
 
@@ -134,8 +159,12 @@ impl MnaCircuit {
                 .any(|branch| matches!(branch.kind, BranchKind::OpAmp { .. }))
     }
 
-    pub(crate) fn nonlinear_count(&self) -> usize {
-        self.nonlinear.len()
+    /// Number of continuation variables stored for the nonlinear devices.
+    ///
+    /// Diodes and controlled switches need one limited junction voltage; a
+    /// MOSFET keeps its gate-source, drain-source, and body-diode voltages.
+    pub(crate) fn nonlinear_state_len(&self) -> usize {
+        self.nonlinear.iter().map(NonlinearDevice::state_len).sum()
     }
 
     pub(crate) fn node_voltage(&self, solution: &DVector<f64>, node: NodeId) -> Option<f64> {
@@ -155,10 +184,11 @@ impl MnaCircuit {
     }
 
     pub(crate) fn junction_voltages(&self, solution: &DVector<f64>) -> Vec<f64> {
-        self.nonlinear
-            .iter()
-            .map(|device| device.junction_voltage(solution))
-            .collect()
+        let mut states = Vec::with_capacity(self.nonlinear_state_len());
+        for device in &self.nonlinear {
+            states.extend(device.state_at(solution));
+        }
+        states
     }
 
     pub(crate) fn limit_junction_voltages(
@@ -166,9 +196,13 @@ impl MnaCircuit {
         solution: &DVector<f64>,
         junction_voltages: &mut [f64],
     ) {
-        for (device, state) in self.nonlinear.iter().zip(junction_voltages.iter_mut()) {
-            let target = device.junction_voltage(solution);
-            *state = limit_junction(*state, target, device.limiting_voltage());
+        let mut offset = 0;
+        for device in &self.nonlinear {
+            let length = device.state_len();
+            if let Some(state) = junction_voltages.get_mut(offset..offset + length) {
+                device.limit_state(solution, state);
+            }
+            offset += length;
         }
     }
 
@@ -299,8 +333,13 @@ impl MnaCircuit {
             }
         }
 
-        for (device, voltage) in self.nonlinear.iter().zip(junction_voltages) {
-            device.stamp_at(solution, *voltage, &mut conductance, &mut sources);
+        let mut offset = 0;
+        for device in &self.nonlinear {
+            let length = device.state_len();
+            if let Some(state) = junction_voltages.get(offset..offset + length) {
+                device.stamp_at(solution, state, mode, &mut conductance, &mut sources);
+            }
+            offset += length;
         }
 
         if gmin != 0.0 {
@@ -413,7 +452,7 @@ impl MnaCircuit {
         }
 
         for device in &self.nonlinear {
-            device.stamp_ac(dc_solution, &mut conductance);
+            device.stamp_ac(dc_solution, omega, &mut conductance);
         }
 
         (conductance, sources)
@@ -706,6 +745,32 @@ impl MnaCircuit {
                         maximum_current,
                     }));
             }
+            ComponentKind::Mosfet => {
+                let model = mosfet_model(component)?;
+                let gate = self.pin_unknown(component, 1);
+                let (drain_pin, source_pin) = if model.swap_ds { (2, 0) } else { (0, 2) };
+                let drain_external = self.pin_unknown(component, drain_pin);
+                let source_external = self.pin_unknown(component, source_pin);
+                let drain = if model.drain_resistance > 0.0 {
+                    Some(self.allocate_internal())
+                } else {
+                    drain_external
+                };
+                let source = if model.source_resistance > 0.0 {
+                    Some(self.allocate_internal())
+                } else {
+                    source_external
+                };
+                self.nonlinear.push(NonlinearDevice::Mosfet(MosfetDevice {
+                    component: component.id,
+                    drain,
+                    drain_external,
+                    gate,
+                    source,
+                    source_external,
+                    model,
+                }));
+            }
             ComponentKind::OpAmp => {
                 let output = self.pin_unknown(component, 2);
                 let in_plus = self.pin_unknown(component, 0);
@@ -775,6 +840,12 @@ impl MnaCircuit {
             .copied()
             .flatten()
     }
+
+    fn allocate_internal(&mut self) -> usize {
+        let index = self.next_internal;
+        self.next_internal += 1;
+        index
+    }
 }
 
 fn opamp_operating_point(
@@ -843,6 +914,7 @@ enum NonlinearDevice {
     Diode(DiodeDevice),
     ShuntReference(ShuntReferenceDevice),
     Comparator(ComparatorDevice),
+    Mosfet(MosfetDevice),
 }
 
 impl NonlinearDevice {
@@ -851,40 +923,68 @@ impl NonlinearDevice {
             Self::Diode(device) => device.component,
             Self::ShuntReference(device) => device.component,
             Self::Comparator(device) => device.component,
+            Self::Mosfet(device) => device.component,
         }
     }
 
-    fn junction_voltage(&self, solution: &DVector<f64>) -> f64 {
+    /// Number of limited voltages stored for this device.
+    fn state_len(&self) -> usize {
         match self {
-            Self::Diode(device) => device.junction_voltage(solution),
-            Self::ShuntReference(device) => device.reference_error_at(solution),
-            Self::Comparator(device) => device.input_error_at(solution),
+            Self::Mosfet(_) => 3,
+            Self::Diode(_) | Self::ShuntReference(_) | Self::Comparator(_) => 1,
         }
     }
 
-    fn limiting_voltage(&self) -> f64 {
+    fn state_at(&self, solution: &DVector<f64>) -> Vec<f64> {
         match self {
-            Self::Diode(device) => device.limiting_voltage(),
-            Self::ShuntReference(device) => device.dynamic_impedance * device.maximum_current,
-            Self::Comparator(_) => 1.0,
+            Self::Diode(device) => vec![device.junction_voltage(solution)],
+            Self::ShuntReference(device) => vec![device.reference_error_at(solution)],
+            Self::Comparator(device) => vec![device.input_error_at(solution)],
+            Self::Mosfet(device) => device.state_at(solution),
+        }
+    }
+
+    fn limit_state(&self, solution: &DVector<f64>, state: &mut [f64]) {
+        match self {
+            Self::Diode(device) => {
+                state[0] = limit_junction(
+                    state[0],
+                    device.junction_voltage(solution),
+                    device.limiting_voltage(),
+                );
+            }
+            Self::ShuntReference(device) => {
+                state[0] = limit_junction(
+                    state[0],
+                    device.reference_error_at(solution),
+                    device.dynamic_impedance * device.maximum_current,
+                );
+            }
+            Self::Comparator(device) => {
+                state[0] = limit_junction(state[0], device.input_error_at(solution), 1.0);
+            }
+            Self::Mosfet(device) => device.limit_state(solution, state),
         }
     }
 
     fn stamp_at(
         &self,
         solution: &DVector<f64>,
-        voltage: f64,
+        state: &[f64],
+        mode: AssemblyMode<'_>,
         conductance: &mut DMatrix<f64>,
         sources: &mut DVector<f64>,
     ) {
         match self {
             Self::Diode(device) => {
+                let voltage = state.first().copied().unwrap_or(0.0);
                 let (current, slope) = device.current_and_conductance(voltage);
                 let equivalent = current - slope * voltage;
                 stamp_conductance(conductance, device.a, device.b, slope);
                 stamp_current_source(sources, device.a, device.b, equivalent);
             }
             Self::ShuntReference(device) => {
+                let voltage = state.first().copied().unwrap_or(0.0);
                 let cathode_voltage = device.cathode_voltage_at(solution);
                 let (current, reference_slope, cathode_slope) =
                     device.current_and_slopes(voltage, cathode_voltage);
@@ -908,8 +1008,9 @@ impl NonlinearDevice {
                 );
             }
             Self::Comparator(device) => {
+                let input_error = state.first().copied().unwrap_or(0.0);
                 let output_voltage = device.output_voltage_at(solution);
-                let (current, slope) = device.current_and_conductance(voltage, output_voltage);
+                let (current, slope) = device.current_and_conductance(input_error, output_voltage);
                 stamp_conductance(conductance, device.output, device.negative_supply, slope);
                 stamp_current_source(
                     sources,
@@ -918,10 +1019,18 @@ impl NonlinearDevice {
                     current - slope * output_voltage,
                 );
             }
+            Self::Mosfet(device) => {
+                device.stamp_at(state, mode, conductance, sources);
+            }
         }
     }
 
-    fn stamp_ac(&self, solution: &DVector<f64>, conductance: &mut DMatrix<Complex<f64>>) {
+    fn stamp_ac(
+        &self,
+        solution: &DVector<f64>,
+        omega: f64,
+        conductance: &mut DMatrix<Complex<f64>>,
+    ) {
         match self {
             Self::Diode(device) => {
                 let voltage = device.junction_voltage(solution);
@@ -959,6 +1068,7 @@ impl NonlinearDevice {
                     Complex::new(slope, 0.0),
                 );
             }
+            Self::Mosfet(device) => device.stamp_ac(solution, omega, conductance),
         }
     }
 
@@ -967,6 +1077,7 @@ impl NonlinearDevice {
             Self::Diode(device) => device.junction_voltage(solution),
             Self::ShuntReference(device) => device.cathode_voltage_at(solution),
             Self::Comparator(device) => device.output_voltage_at(solution),
+            Self::Mosfet(device) => device.primary_voltage(solution),
         }
     }
 
@@ -988,6 +1099,7 @@ impl NonlinearDevice {
                     )
                     .0
             }
+            Self::Mosfet(device) => device.drain_current(solution),
         }
     }
 }
@@ -1133,6 +1245,367 @@ impl ComparatorDevice {
             (raw_current, 1.0 / self.sink_resistance)
         }
     }
+}
+
+/// Parameters of the square-law level-1 MOSFET model.
+///
+/// All voltages and currents are expressed in channel coordinates: with
+/// `polarity = +1` for an N-channel device and `-1` for a P-channel device,
+/// `vgs' = polarity * vgs`, `vds' = polarity * vds`, and `id' = polarity * id`.
+#[derive(Clone, Copy, Debug)]
+struct MosfetModel {
+    polarity: f64,
+    threshold: f64,
+    gain: f64,
+    lambda: f64,
+    drain_resistance: f64,
+    source_resistance: f64,
+    body_saturation_current: f64,
+    body_emission_coefficient: f64,
+    gate_source_capacitance: f64,
+    gate_drain_capacitance: f64,
+    drain_source_capacitance: f64,
+    swap_ds: bool,
+}
+
+const MOSFET_GATE_SOURCE_STATE: usize = 0;
+const MOSFET_DRAIN_SOURCE_STATE: usize = 1;
+const MOSFET_BODY_DIODE_STATE: usize = 2;
+/// Maximum gate-source and drain-source excursion applied per Newton step.
+const MOSFET_VOLTAGE_STEP: f64 = 0.5;
+const DEFAULT_BODY_SATURATION_CURRENT: f64 = 1e-14;
+const DEFAULT_BODY_EMISSION_COEFFICIENT: f64 = 1.0;
+
+struct MosfetDevice {
+    component: ComponentId,
+    /// Internal drain node, or the external drain when `rd` is zero.
+    drain: Option<usize>,
+    drain_external: Option<usize>,
+    gate: Option<usize>,
+    /// Internal source node, or the external source when `rs` is zero.
+    source: Option<usize>,
+    source_external: Option<usize>,
+    model: MosfetModel,
+}
+
+impl MosfetDevice {
+    fn vgs_primed(&self, solution: &DVector<f64>) -> f64 {
+        self.model.polarity
+            * (node_voltage(solution, self.gate) - node_voltage(solution, self.source))
+    }
+
+    fn vds_primed(&self, solution: &DVector<f64>) -> f64 {
+        self.model.polarity
+            * (node_voltage(solution, self.drain) - node_voltage(solution, self.source))
+    }
+
+    fn state_at(&self, solution: &DVector<f64>) -> Vec<f64> {
+        let vds = self.vds_primed(solution);
+        vec![self.vgs_primed(solution), vds, -vds]
+    }
+
+    fn limit_state(&self, solution: &DVector<f64>, state: &mut [f64]) {
+        let vds = self.vds_primed(solution);
+        state[MOSFET_GATE_SOURCE_STATE] = limit_step(
+            state[MOSFET_GATE_SOURCE_STATE],
+            self.vgs_primed(solution),
+            MOSFET_VOLTAGE_STEP,
+        );
+        state[MOSFET_DRAIN_SOURCE_STATE] =
+            limit_step(state[MOSFET_DRAIN_SOURCE_STATE], vds, MOSFET_VOLTAGE_STEP);
+        state[MOSFET_BODY_DIODE_STATE] = limit_junction(
+            state[MOSFET_BODY_DIODE_STATE],
+            -vds,
+            self.model.body_emission_coefficient * THERMAL_VOLTAGE,
+        );
+    }
+
+    /// Channel current and its derivatives at a channel-coordinate bias point.
+    ///
+    /// Returns `(id', d id'/d vgs', d id'/d vds')`. Negative `vds'` mirrors the
+    /// device so that drain and source exchange their roles.
+    fn channel_at(&self, vgs: f64, vds: f64) -> (f64, f64, f64) {
+        if vds >= 0.0 {
+            channel_forward(
+                vgs,
+                vds,
+                self.model.threshold,
+                self.model.gain,
+                self.model.lambda,
+            )
+        } else {
+            let (current, transconductance, conductance) = channel_forward(
+                vgs - vds,
+                -vds,
+                self.model.threshold,
+                self.model.gain,
+                self.model.lambda,
+            );
+            (-current, -transconductance, transconductance + conductance)
+        }
+    }
+
+    /// Body-diode current and conductance for a channel-coordinate voltage.
+    fn body_current(&self, voltage: f64) -> (f64, f64) {
+        let thermal = self.model.body_emission_coefficient * THERMAL_VOLTAGE;
+        let exponent = (voltage / thermal).min(MAX_EXPONENT);
+        let exponential = exponent.exp();
+        (
+            self.model.body_saturation_current * (exponential - 1.0),
+            self.model.body_saturation_current / thermal * exponential,
+        )
+    }
+
+    fn stamp_at(
+        &self,
+        state: &[f64],
+        mode: AssemblyMode<'_>,
+        conductance: &mut DMatrix<f64>,
+        sources: &mut DVector<f64>,
+    ) {
+        let vgs = read_state(state, MOSFET_GATE_SOURCE_STATE);
+        let vds = read_state(state, MOSFET_DRAIN_SOURCE_STATE);
+        let body_voltage = read_state(state, MOSFET_BODY_DIODE_STATE);
+
+        let (channel_current, transconductance, output_conductance) = self.channel_at(vgs, vds);
+        let current = self.model.polarity * channel_current;
+        let gate_source = self.model.polarity * vgs;
+        let drain_source = self.model.polarity * vds;
+        let equivalent =
+            current - transconductance * gate_source - output_conductance * drain_source;
+        let (body_current, body_slope) = self.body_current(body_voltage);
+        stamp_mosfet_jacobian(
+            conductance,
+            self.drain,
+            self.gate,
+            self.source,
+            transconductance,
+            output_conductance,
+        );
+        stamp_current_source(sources, self.drain, self.source, equivalent);
+
+        stamp_conductance(conductance, self.source, self.drain, body_slope);
+        stamp_current_source(
+            sources,
+            self.source,
+            self.drain,
+            self.model.polarity * body_current - body_slope * self.model.polarity * body_voltage,
+        );
+
+        if self.model.drain_resistance > 0.0 {
+            stamp_conductance(
+                conductance,
+                self.drain,
+                self.drain_external,
+                1.0 / self.model.drain_resistance,
+            );
+        }
+        if self.model.source_resistance > 0.0 {
+            stamp_conductance(
+                conductance,
+                self.source,
+                self.source_external,
+                1.0 / self.model.source_resistance,
+            );
+        }
+
+        self.stamp_capacitors(mode, conductance, sources);
+    }
+
+    fn stamp_capacitors(
+        &self,
+        mode: AssemblyMode<'_>,
+        conductance: &mut DMatrix<f64>,
+        sources: &mut DVector<f64>,
+    ) {
+        for (a, b, capacitance) in [
+            (self.gate, self.source, self.model.gate_source_capacitance),
+            (self.gate, self.drain, self.model.gate_drain_capacitance),
+            (self.drain, self.source, self.model.drain_source_capacitance),
+        ] {
+            if capacitance <= 0.0 {
+                continue;
+            }
+            match mode {
+                AssemblyMode::Dc => {}
+                AssemblyMode::Initial => {
+                    stamp_conductance(conductance, a, b, INITIAL_CAPACITOR_CONDUCTANCE)
+                }
+                AssemblyMode::Transient { previous, step } => {
+                    let value = capacitance / step;
+                    let previous_voltage = node_voltage(previous, a) - node_voltage(previous, b);
+                    stamp_conductance(conductance, a, b, value);
+                    stamp_current_source(sources, a, b, -value * previous_voltage);
+                }
+            }
+        }
+    }
+
+    fn stamp_ac(
+        &self,
+        solution: &DVector<f64>,
+        omega: f64,
+        conductance: &mut DMatrix<Complex<f64>>,
+    ) {
+        let vgs = self.vgs_primed(solution);
+        let vds = self.vds_primed(solution);
+        let (_, transconductance, output_conductance) = self.channel_at(vgs, vds);
+        stamp_mosfet_complex_jacobian(
+            conductance,
+            self.drain,
+            self.gate,
+            self.source,
+            transconductance,
+            output_conductance,
+        );
+
+        let (_, body_slope) = self.body_current(-vds);
+        stamp_complex_conductance(
+            conductance,
+            self.source,
+            self.drain,
+            Complex::new(body_slope, 0.0),
+        );
+
+        if self.model.drain_resistance > 0.0 {
+            stamp_complex_conductance(
+                conductance,
+                self.drain,
+                self.drain_external,
+                Complex::new(1.0 / self.model.drain_resistance, 0.0),
+            );
+        }
+        if self.model.source_resistance > 0.0 {
+            stamp_complex_conductance(
+                conductance,
+                self.source,
+                self.source_external,
+                Complex::new(1.0 / self.model.source_resistance, 0.0),
+            );
+        }
+
+        for (a, b, capacitance) in [
+            (self.gate, self.source, self.model.gate_source_capacitance),
+            (self.gate, self.drain, self.model.gate_drain_capacitance),
+            (self.drain, self.source, self.model.drain_source_capacitance),
+        ] {
+            if capacitance > 0.0 {
+                stamp_complex_conductance(
+                    conductance,
+                    a,
+                    b,
+                    Complex::new(0.0, omega * capacitance),
+                );
+            }
+        }
+    }
+
+    fn primary_voltage(&self, solution: &DVector<f64>) -> f64 {
+        node_voltage(solution, self.drain_external) - node_voltage(solution, self.source_external)
+    }
+
+    /// Drain current using the symbol's `D -> S` convention.
+    fn drain_current(&self, solution: &DVector<f64>) -> f64 {
+        let internal = if self.model.drain_resistance > 0.0 {
+            (node_voltage(solution, self.drain_external) - node_voltage(solution, self.drain))
+                / self.model.drain_resistance
+        } else {
+            let vgs = self.vgs_primed(solution);
+            let vds = self.vds_primed(solution);
+            let (channel, _, _) = self.channel_at(vgs, vds);
+            let (body, _) = self.body_current(-vds);
+            self.model.polarity * (channel - body)
+        };
+        // With permuted terminals the symbol's drain is the internal source,
+        // so the reported current changes sign.
+        if self.model.swap_ds {
+            -internal
+        } else {
+            internal
+        }
+    }
+}
+
+/// Forward square-law evaluation in channel coordinates, for `vds' >= 0`.
+fn channel_forward(vgs: f64, vds: f64, threshold: f64, gain: f64, lambda: f64) -> (f64, f64, f64) {
+    let overdrive = vgs - threshold;
+    if overdrive <= 0.0 {
+        return (0.0, 0.0, 0.0);
+    }
+    let modulation = 1.0 + lambda * vds;
+    if vds < overdrive {
+        let current = gain * (2.0 * overdrive * vds - vds * vds) * modulation;
+        let transconductance = 2.0 * gain * vds * modulation;
+        let conductance = gain
+            * (2.0 * (overdrive - vds) * modulation + (2.0 * overdrive * vds - vds * vds) * lambda);
+        (current, transconductance, conductance)
+    } else {
+        let current = gain * overdrive * overdrive * modulation;
+        (
+            current,
+            2.0 * gain * overdrive * modulation,
+            gain * overdrive * overdrive * lambda,
+        )
+    }
+}
+
+fn stamp_mosfet_jacobian(
+    matrix: &mut DMatrix<f64>,
+    drain: Option<usize>,
+    gate: Option<usize>,
+    source: Option<usize>,
+    transconductance: f64,
+    output_conductance: f64,
+) {
+    let columns = [
+        (gate, transconductance),
+        (drain, output_conductance),
+        (source, -transconductance - output_conductance),
+    ];
+    for (row, sign) in [(drain, 1.0), (source, -1.0)] {
+        if let Some(row) = row {
+            for (column, slope) in columns {
+                if let Some(column) = column {
+                    matrix[(row, column)] += sign * slope;
+                }
+            }
+        }
+    }
+}
+
+fn stamp_mosfet_complex_jacobian(
+    matrix: &mut DMatrix<Complex<f64>>,
+    drain: Option<usize>,
+    gate: Option<usize>,
+    source: Option<usize>,
+    transconductance: f64,
+    output_conductance: f64,
+) {
+    let columns = [
+        (gate, transconductance),
+        (drain, output_conductance),
+        (source, -transconductance - output_conductance),
+    ];
+    for (row, sign) in [(drain, 1.0), (source, -1.0)] {
+        if let Some(row) = row {
+            for (column, slope) in columns {
+                if let Some(column) = column {
+                    matrix[(row, column)] += Complex::new(sign * slope, 0.0);
+                }
+            }
+        }
+    }
+}
+
+fn read_state(state: &[f64], index: usize) -> f64 {
+    state.get(index).copied().unwrap_or(0.0)
+}
+
+fn limit_step(previous: f64, target: f64, maximum_step: f64) -> f64 {
+    if !target.is_finite() {
+        return previous;
+    }
+    previous + (target - previous).clamp(-maximum_step, maximum_step)
 }
 
 fn stamp_three_terminal_jacobian(
@@ -1345,6 +1818,115 @@ fn optional_number(component: &ComponentSpec, key: &'static str) -> Result<Optio
         }),
         None => Ok(None),
     }
+}
+
+fn optional_non_negative_parameter(
+    component: &ComponentSpec,
+    key: &'static str,
+) -> Result<Option<f64>, MnaError> {
+    match optional_number(component, key)? {
+        Some(value) if value < 0.0 => Err(MnaError::InvalidParameterValue {
+            component: component.id,
+            key,
+            value,
+            requirement: "non-negative",
+        }),
+        other => Ok(other),
+    }
+}
+
+fn text_parameter<'a>(
+    component: &'a ComponentSpec,
+    key: &'static str,
+) -> Result<&'a str, MnaError> {
+    match component.params.get(key) {
+        Some(ParamValue::Text(value)) => Ok(value),
+        Some(ParamValue::Number(_) | ParamValue::Bool(_)) => Err(MnaError::InvalidParameterType {
+            component: component.id,
+            key,
+            expected: "a text",
+        }),
+        None => Err(MnaError::MissingParameter {
+            component: component.id,
+            key,
+        }),
+    }
+}
+
+fn optional_bool_parameter(
+    component: &ComponentSpec,
+    key: &'static str,
+) -> Result<Option<bool>, MnaError> {
+    match component.params.get(key) {
+        Some(ParamValue::Bool(value)) => Ok(Some(*value)),
+        Some(ParamValue::Number(_) | ParamValue::Text(_)) => Err(MnaError::InvalidParameterType {
+            component: component.id,
+            key,
+            expected: "a boolean",
+        }),
+        None => Ok(None),
+    }
+}
+
+fn mosfet_model(component: &ComponentSpec) -> Result<MosfetModel, MnaError> {
+    let channel = text_parameter(component, "channel")?
+        .trim()
+        .to_ascii_lowercase();
+    let polarity = match channel.as_str() {
+        "n" => 1.0,
+        "p" => -1.0,
+        _ => {
+            return Err(MnaError::InvalidParameterChoice {
+                component: component.id,
+                key: "channel",
+                value: channel,
+                expected: "'n' or 'p'",
+            });
+        }
+    };
+    let threshold = positive_parameter(component, "vth")?;
+    let gain = positive_parameter(component, "k")?;
+    let lambda = optional_non_negative_parameter(component, "lambda")?.unwrap_or(0.0);
+    let drain_resistance = optional_non_negative_parameter(component, "rd")?.unwrap_or(0.0);
+    let source_resistance = optional_non_negative_parameter(component, "rs")?.unwrap_or(0.0);
+    let body_saturation_current = match optional_number(component, "is")? {
+        Some(value) if value > 0.0 => value,
+        Some(value) => {
+            return Err(MnaError::InvalidParameterValue {
+                component: component.id,
+                key: "is",
+                value,
+                requirement: "strictly positive",
+            });
+        }
+        None => DEFAULT_BODY_SATURATION_CURRENT,
+    };
+    let body_emission_coefficient = match optional_number(component, "n")? {
+        Some(value) if value > 0.0 => value,
+        Some(value) => {
+            return Err(MnaError::InvalidParameterValue {
+                component: component.id,
+                key: "n",
+                value,
+                requirement: "strictly positive",
+            });
+        }
+        None => DEFAULT_BODY_EMISSION_COEFFICIENT,
+    };
+    Ok(MosfetModel {
+        polarity,
+        threshold,
+        gain,
+        lambda,
+        drain_resistance,
+        source_resistance,
+        body_saturation_current,
+        body_emission_coefficient,
+        gate_source_capacitance: optional_non_negative_parameter(component, "cgs")?.unwrap_or(0.0),
+        gate_drain_capacitance: optional_non_negative_parameter(component, "cgd")?.unwrap_or(0.0),
+        drain_source_capacitance: optional_non_negative_parameter(component, "cds")?.unwrap_or(0.0),
+        swap_ds: optional_bool_parameter(component, "swap_ds")?.unwrap_or(false),
+    })
 }
 
 fn diode_model(component: &ComponentSpec) -> Result<(f64, f64), MnaError> {

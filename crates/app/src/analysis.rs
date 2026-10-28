@@ -159,7 +159,9 @@ impl SignalCatalog {
                 component.pins.len() == 2
                     || matches!(
                         component.kind,
-                        ComponentKind::ShuntReference | ComponentKind::Comparator
+                        ComponentKind::ShuntReference
+                            | ComponentKind::Comparator
+                            | ComponentKind::Mosfet
                     )
             })
             .map(|component| component.label.clone())
@@ -580,6 +582,7 @@ impl LiveValues {
         let (positive_pin, negative_pin) = match symbol.kind {
             SymbolKind::ShuntReference => (pins.get(1), pins.get(2)),
             SymbolKind::Comparator => (pins.get(2), pins.get(4)),
+            SymbolKind::Mosfet => (pins.first(), pins.get(2)),
             _ => (pins.first(), pins.get(1)),
         };
         let across = match (positive_pin, negative_pin) {
@@ -609,6 +612,13 @@ impl LiveValues {
                             1.0
                         }
                     }),
+                _ => None,
+            },
+            SymbolKind::Mosfet => match (pins.get(1), pins.get(2)) {
+                (Some(gate), Some(source)) => gate
+                    .voltage
+                    .zip(source.voltage)
+                    .map(|(gate, source)| gate - source),
                 _ => None,
             },
             _ => None,
@@ -675,6 +685,9 @@ fn derive_current(symbol: &Symbol, voltage: f64, reference_voltage: Option<f64>)
         SymbolKind::Comparator => {
             return comparator_sink_current(&symbol.params, reference_voltage?, voltage);
         }
+        SymbolKind::Mosfet => {
+            return mosfet_current(&symbol.params, voltage, reference_voltage?);
+        }
         _ => None,
     }?;
     (resistance.abs() > f64::MIN_POSITIVE).then_some(voltage / resistance)
@@ -712,6 +725,11 @@ pub(crate) fn symbol_terminal_injections(symbol: &Symbol, current: f64) -> [f64;
     if symbol.kind == SymbolKind::Comparator {
         return [0.0, 0.0, -current, 0.0, current];
     }
+    if symbol.kind == SymbolKind::Mosfet {
+        // Drain, gate, source: the channel current enters the drain and leaves
+        // through the source, and the gate draws no steady current.
+        return [-current, 0.0, current, 0.0, 0.0];
+    }
     if symbol.kind == SymbolKind::ShuntReference {
         let reference_current = symbol
             .params
@@ -728,6 +746,71 @@ pub(crate) fn symbol_terminal_injections(symbol: &Symbol, current: f64) -> [f64;
         ];
     }
     [-current, current, 0.0, 0.0, 0.0]
+}
+
+/// Steady-state drain current of the level-1 MOSFET for the live overlay.
+///
+/// Uses the same square law and body diode as the simulator, in symbol
+/// coordinates: `vds` is the drain-to-source pin voltage and `vgs` the
+/// gate-to-source pin voltage.
+fn mosfet_current(params: &sim_core::netlist::ParamMap, vds: f64, vgs: f64) -> Option<f64> {
+    let number = |key: &str| {
+        params
+            .get(key)
+            .and_then(ParamValue::as_number)
+            .filter(|value| value.is_finite())
+    };
+    let channel = params.get("channel").and_then(ParamValue::as_text)?;
+    let polarity = if channel.eq_ignore_ascii_case("n") {
+        1.0
+    } else if channel.eq_ignore_ascii_case("p") {
+        -1.0
+    } else {
+        return None;
+    };
+    let threshold = number("vth")?;
+    let gain = number("k")?;
+    let lambda = number("lambda").unwrap_or(0.0);
+    let saturation_current = number("is").unwrap_or(1e-14);
+    let emission = number("n").unwrap_or(1.0);
+    if threshold <= 0.0
+        || gain <= 0.0
+        || lambda < 0.0
+        || saturation_current <= 0.0
+        || emission <= 0.0
+    {
+        return None;
+    }
+    let swapped = params
+        .get("swap_ds")
+        .and_then(ParamValue::as_bool)
+        .unwrap_or(false);
+    // Source pin at 0 V, drain pin at `vds`, gate pin at `vgs`.
+    let (internal_drain, internal_source) = if swapped { (0.0, vds) } else { (vds, 0.0) };
+    let gate_source = polarity * (vgs - internal_source);
+    let drain_source = polarity * (internal_drain - internal_source);
+    let forward = |gate_source: f64, drain_source: f64| -> f64 {
+        let overdrive = gate_source - threshold;
+        if overdrive <= 0.0 {
+            return 0.0;
+        }
+        let modulation = 1.0 + lambda * drain_source;
+        if drain_source < overdrive {
+            gain * (2.0 * overdrive * drain_source - drain_source * drain_source) * modulation
+        } else {
+            gain * overdrive * overdrive * modulation
+        }
+    };
+    let channel_current = if drain_source >= 0.0 {
+        forward(gate_source, drain_source)
+    } else {
+        -forward(gate_source - drain_source, -drain_source)
+    };
+    let thermal = emission * 1.380_649e-23 * 300.15 / 1.602_176_634e-19;
+    let body = saturation_current * (((-drain_source) / thermal).min(80.0)).exp_m1();
+    let internal = polarity * (channel_current - body);
+    // With permuted terminals the symbol's drain is the internal source.
+    Some(if swapped { -internal } else { internal })
 }
 
 fn comparator_sink_current(
@@ -2169,6 +2252,62 @@ mod tests {
         assert!((current - 1e-3).abs() < 1e-12);
         let power = observed.power.unwrap();
         assert!((power - 1e-3).abs() < 1e-12);
+    }
+
+    #[test]
+    fn mosfet_live_current_matches_the_square_law_and_swap() {
+        let n_params: sim_core::netlist::ParamMap = [
+            ("channel".to_owned(), ParamValue::Text("n".to_owned())),
+            ("vth".to_owned(), ParamValue::Number(1.6)),
+            ("k".to_owned(), ParamValue::Number(0.05)),
+            ("lambda".to_owned(), ParamValue::Number(0.02)),
+            ("is".to_owned(), ParamValue::Number(1e-14)),
+            ("n".to_owned(), ParamValue::Number(1.0)),
+            ("swap_ds".to_owned(), ParamValue::Bool(false)),
+        ]
+        .into();
+        let saturation = 0.05 * 1.4_f64.powi(2) * 1.06;
+        let triode = 0.05 * (2.0 * 1.4 * 0.5 - 0.25) * 1.01;
+        let measured = mosfet_current(&n_params, 3.0, 3.0).unwrap();
+        assert!((measured - saturation).abs() < 1e-12);
+        let measured = mosfet_current(&n_params, 0.5, 3.0).unwrap();
+        assert!((measured - triode).abs() < 1e-12);
+        assert!(mosfet_current(&n_params, 3.0, 1.0).unwrap().abs() < 1e-12);
+
+        let p_params: sim_core::netlist::ParamMap = [
+            ("channel".to_owned(), ParamValue::Text("p".to_owned())),
+            ("vth".to_owned(), ParamValue::Number(1.6)),
+            ("k".to_owned(), ParamValue::Number(0.05)),
+            ("lambda".to_owned(), ParamValue::Number(0.02)),
+            ("is".to_owned(), ParamValue::Number(1e-14)),
+            ("n".to_owned(), ParamValue::Number(1.0)),
+            ("swap_ds".to_owned(), ParamValue::Bool(false)),
+        ]
+        .into();
+        let mirrored = mosfet_current(&p_params, -3.0, -3.0).unwrap();
+        assert!((mirrored + saturation).abs() < 1e-12);
+
+        let mut swapped = n_params.clone();
+        swapped.insert("swap_ds".to_owned(), ParamValue::Bool(true));
+        // D and S permuted: the symbol drain is the internal source, so the
+        // same terminal bias conducts in reverse (D = 0 V, S = 0.5 V, G = 3 V).
+        let reversed = mosfet_current(&swapped, -0.5, 2.5).unwrap();
+        assert!((reversed + triode).abs() < 1e-9);
+
+        let injections = symbol_terminal_injections(
+            &Symbol::from_def(
+                SymbolId(9),
+                editor_core::SymbolRegistry::builtin()
+                    .get(&SymbolKind::Mosfet)
+                    .unwrap(),
+                GridPos::new(0, 0),
+                "M1",
+                editor_core::Orientation::R0,
+                false,
+            ),
+            0.25,
+        );
+        assert_eq!(injections, [-0.25, 0.0, 0.25, 0.0, 0.0]);
     }
 
     #[test]

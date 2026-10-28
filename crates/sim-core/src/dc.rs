@@ -148,7 +148,7 @@ pub(crate) fn solve_dc_internal(
         strategy: options.strategy,
     };
     let initial = DVector::zeros(size);
-    let junction_voltages = vec![0.0; circuit.nonlinear_count()];
+    let junction_voltages = vec![0.0; circuit.nonlinear_state_len()];
     let outcome = solve_robust(
         &circuit,
         config,

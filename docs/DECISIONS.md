@@ -39,46 +39,54 @@ documents spécialisés.
    jamais du paramètre `dc`. Pas de capacité de jonction ni de modèle grand
    signal AC. Voir [COMPONENTS.md](COMPONENTS.md).
 
+8. **MOSFET niveau 1 explicite.** Trois broches `d`, `g`, `s`, bulk relié à la
+   source ; loi carrée triode/saturation avec `lambda`, résistances d'accès
+   internes, diode de corps et capacités linéaires optionnelles. `swap_ds` est une
+   permutation électrique des bornes avant l'assemblage, pas un second modèle.
+   L'AC linéarise `gm`, `gds` et la diode au point DC. Les défauts sont ancrés sur
+   les fiches 2N7002 et BSS84. Voir [COMPONENTS.md](COMPONENTS.md) et
+   [NUMERICS.md](NUMERICS.md).
+
 ## Interface et transport
 
-8. **Protocole binaire versionné.** Trames `CSIM` + postcard, un job en attente,
+9. **Protocole binaire versionné.** Trames `CSIM` + postcard, un job en attente,
    coalescence à 60 Hz, révisions croissantes et résultats complets ou erreurs
    typées. L'interface ne voit jamais les matrices. Le service tourne encore
    dans le fil de l'interface ; worker dédié et `SharedArrayBuffer` restent à
    brancher. Voir [PROTOCOL.md](PROTOCOL.md).
-9. **Instruments dans l'application.** Le catalogue, les traces, les mesures, la
+10. **Instruments dans l'application.** Le catalogue, les traces, les mesures, la
    FFT de Hann, le Bode et le CSV sont des traitements de présentation dans
    `circuitsim-app`. Les graphiques sont décimés à 4 096 points ; mesures et
    exports gardent toutes les valeurs. Voir [INSTRUMENTS.md](INSTRUMENTS.md).
-10. **Formats versionnés et interface bornée.** `SCHEMA_VERSION = 1`,
-    `PROTOCOL_VERSION = 3`, 100 000 pas transitoires, 10 000 points AC et
+11. **Formats versionnés et interface bornée.** `SCHEMA_VERSION = 1`,
+    `PROTOCOL_VERSION = 4`, 100 000 pas transitoires, 10 000 points AC et
     16 384 points FFT. Un format incompatible est refusé, jamais interprété
     approximativement. Voir [PROTOCOL.md](PROTOCOL.md) et
     [INSTRUMENTS.md](INSTRUMENTS.md).
-11. **Presse-papiers interne et historique nommé.** Le copier/coller reste dans
+12. **Presse-papiers interne et historique nommé.** Le copier/coller reste dans
     `circuitsim-app` : aucune dépendance au presse-papiers système n’est
     ajoutée, le contenu est déterministe et les identifiants sont régénérés au
     collage. L’historique conserve un libellé par commande et permet un saut
     bidirectionnel sans réécrire le schéma. Voir [EDITOR.md](EDITOR.md).
-12. **Dispositions fiables plutôt qu’un dockage libre.** Les panneaux restent
+13. **Dispositions fiables plutôt qu’un dockage libre.** Les panneaux restent
     des zones fixes, redimensionnables et masquables, avec quatre presets
     testables. Aucune bibliothèque de dockage n’est ajoutée : le gain ne
     justifie pas le risque d’états incohérents, et le canevas garde toujours la
     priorité. La mini-carte est une projection pure testée dans `view.rs`. Voir
     [UI.md](UI.md).
-13. **Simulation interactive par transitoire complet.** Le bouton **Simuler** et
+14. **Simulation interactive par transitoire complet.** Le bouton **Simuler** et
     l’option **Auto** réutilisent le transitoire existant, avec un délai de
     0,35 s et une seule tentative par révision. Aucun solveur n’est déplacé dans
     le fil de l’interface et aucun résultat partiel n’est affiché. Le dernier
     échantillon alimente le canevas et l’inspecteur. Voir
     [INSTRUMENTS.md](INSTRUMENTS.md).
-14. **Accessibilité sans dépendance supplémentaire.** Le contraste, la taille et
+15. **Accessibilité sans dépendance supplémentaire.** Le contraste, la taille et
     la réduction des animations utilisent les styles egui et `set_zoom_factor`.
     Les préférences restent session-locales pour éviter d’activer la persistance
     d’eframe et ses dépendances ; `Tab`/`Maj+Tab` restent la navigation clavier
     native d’egui. Le thème **Clair** et les palettes de tension sont des jetons
     internes au canevas, sans nouvelle bibliothèque. Voir [UI.md](UI.md).
-15. **Lisibilité par calques indépendants.** La tension, le courant, la
+16. **Lisibilité par calques indépendants.** La tension, le courant, la
     puissance, les valeurs, les références et les labels sont des couches
     désactivables. La couleur de tension est normalisée sur la valeur absolue
     maximale du circuit, avec une palette daltonienne par défaut et une variante
@@ -87,11 +95,11 @@ documents spécialisés.
 
 ## Tests et périmètre
 
-16. **Composants personnalisés représentés, pas simulés.** Le registre,
+17. **Composants personnalisés représentés, pas simulés.** Le registre,
     l'extraction, le JSON et la netlist acceptent `Custom`; les solveurs le
     refusent avec `MnaError::UnsupportedComponent` jusqu'à l'ajout d'un modèle
     dans `sim-core`. Voir [COMPONENTS.md](COMPONENTS.md).
-17. **Tests natifs, benchmarks et CI.** Les tests ne demandent ni navigateur ni
+18. **Tests natifs, benchmarks et CI.** Les tests ne demandent ni navigateur ni
     ngspice ; les propriétés proptest affichent leur graine. La CI vérifie
     format, clippy, tests, WASM, benchmarks rapides, exemples et builds
     natif/web. Les budgets Criterion sont des seuils de revue, non bloquants sur

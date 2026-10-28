@@ -159,6 +159,7 @@ pub fn symbol_kind_name(kind: &SymbolKind) -> &'static str {
         SymbolKind::ShuntReference => "Référence shunt programmable",
         SymbolKind::Comparator => "Comparateur à collecteur ouvert",
         SymbolKind::OpAmp => "Amplificateur opérationnel",
+        SymbolKind::Mosfet => "Transistor MOSFET",
         SymbolKind::Voltmeter => "Voltmètre",
         SymbolKind::Ammeter => "Ampèremètre",
         SymbolKind::Ohmmeter => "Ohmmètre",

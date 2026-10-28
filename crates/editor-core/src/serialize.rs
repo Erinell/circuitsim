@@ -152,6 +152,111 @@ mod tests {
     }
 
     #[test]
+    fn round_trips_a_mosfet_symbol_and_its_properties() {
+        let mut schematic = Schematic::new();
+        let mut history = crate::undo::UndoStack::new();
+        let registry = crate::symbol::SymbolRegistry::builtin();
+        let definition = registry.get(&SymbolKind::Mosfet).unwrap();
+        let id = crate::symbol::SymbolId(schematic.allocate_id().unwrap());
+        let mut symbol = crate::symbol::Symbol::from_def(
+            id,
+            definition,
+            crate::grid::GridPos::new(5, 2),
+            "M1",
+            crate::grid::Orientation::R0,
+            false,
+        );
+        symbol.params.insert(
+            "channel".to_owned(),
+            sim_core::netlist::ParamValue::Text("p".to_owned()),
+        );
+        symbol.params.insert(
+            "swap_ds".to_owned(),
+            sim_core::netlist::ParamValue::Bool(true),
+        );
+        history
+            .execute(
+                &mut schematic,
+                crate::command::Command::AddSymbol(symbol.clone()),
+            )
+            .unwrap();
+
+        let json = to_json(&schematic).unwrap();
+        let restored = from_json(&json).unwrap();
+
+        assert_eq!(restored, schematic);
+        assert_eq!(restored.symbol(id), Some(&symbol));
+        assert!(json.contains("Mosfet"));
+        let restored_symbol = restored.symbol(id).unwrap();
+        assert_eq!(
+            restored_symbol
+                .params
+                .get("channel")
+                .and_then(sim_core::netlist::ParamValue::as_text),
+            Some("p")
+        );
+        assert_eq!(
+            restored_symbol
+                .params
+                .get("swap_ds")
+                .and_then(sim_core::netlist::ParamValue::as_bool),
+            Some(true)
+        );
+    }
+
+    #[test]
+    fn loads_a_version_one_project_without_mosfets() {
+        let json = r#"{
+            "schema_version": 1,
+            "schematic": {
+                "symbols": {
+                    "1": {
+                        "id": 1,
+                        "kind": "Resistor",
+                        "at": { "x": 0, "y": 0 },
+                        "orientation": "R0",
+                        "mirrored": false,
+                        "label": "R1",
+                        "params": {
+                            "resistance": { "kind": "number", "value": 1000.0 }
+                        }
+                    }
+                },
+                "wires": {
+                    "2": {
+                        "id": 2,
+                        "a": { "x": 0, "y": 0 },
+                        "b": { "x": 10, "y": 0 }
+                    }
+                },
+                "junctions": {},
+                "labels": {},
+                "next_id": 3
+            }
+        }"#;
+        let schematic = from_json(json).unwrap();
+        let registry = SymbolRegistry::builtin();
+        let mosfet = registry.get(&SymbolKind::Mosfet).unwrap();
+        // A project saved before the MOSFET existed keeps its own symbols and
+        // gains the documented defaults only when a MOSFET is placed.
+        assert_eq!(schematic.symbols().count(), 1);
+        assert_eq!(
+            mosfet
+                .defaults
+                .get("channel")
+                .and_then(sim_core::netlist::ParamValue::as_text),
+            Some("n")
+        );
+        assert_eq!(
+            mosfet
+                .defaults
+                .get("vth")
+                .and_then(sim_core::netlist::ParamValue::as_number),
+            Some(1.6)
+        );
+    }
+
+    #[test]
     fn rejects_future_schema_versions_before_parsing_the_payload() {
         let json = r#"{"schema_version":99,"future":true,"schematic":{"layout":"unknown"}}"#;
         assert!(matches!(

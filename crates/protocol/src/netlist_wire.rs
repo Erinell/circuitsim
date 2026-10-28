@@ -168,6 +168,7 @@ enum WireComponentKind {
     Custom(String),
     ShuntReference,
     Comparator,
+    Mosfet,
 }
 
 impl WireComponentKind {
@@ -187,6 +188,7 @@ impl WireComponentKind {
             ComponentKind::Custom(name) => Self::Custom(name.clone()),
             ComponentKind::ShuntReference => Self::ShuntReference,
             ComponentKind::Comparator => Self::Comparator,
+            ComponentKind::Mosfet => Self::Mosfet,
         }
     }
 
@@ -206,6 +208,7 @@ impl WireComponentKind {
             Self::Custom(name) => ComponentKind::Custom(name),
             Self::ShuntReference => ComponentKind::ShuntReference,
             Self::Comparator => ComponentKind::Comparator,
+            Self::Mosfet => ComponentKind::Mosfet,
         }
     }
 }
