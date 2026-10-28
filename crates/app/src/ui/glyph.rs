@@ -123,8 +123,7 @@ pub(crate) fn body_half_extent(kind: &SymbolKind) -> f32 {
         SymbolKind::Capacitor => 0.9,
         SymbolKind::Diode | SymbolKind::Led | SymbolKind::Zener | SymbolKind::Switch => 0.8,
         SymbolKind::ShuntReference => 1.0,
-        SymbolKind::Comparator => 1.0,
-        SymbolKind::OpAmp => 1.5,
+        SymbolKind::Comparator | SymbolKind::OpAmp => 1.5,
         SymbolKind::Ground => 1.4,
         _ => 1.0,
     }
@@ -437,80 +436,8 @@ fn paint_body(
         SymbolKind::Led => paint_diode(painter, symbol, center, scale, stroke, true),
         SymbolKind::Zener => paint_zener(painter, symbol, center, scale, stroke),
         SymbolKind::ShuntReference => paint_shunt_reference(painter, symbol, center, scale, stroke),
-        SymbolKind::Comparator => paint_comparator(painter, symbol, center, scale, stroke),
-        SymbolKind::OpAmp => {
-            line_local(
-                painter,
-                symbol,
-                center,
-                scale,
-                &[(-1.5, -1.5), (-1.5, 1.5), (1.5, 0.0), (-1.5, -1.5)],
-                stroke,
-            );
-            line_local(
-                painter,
-                symbol,
-                center,
-                scale,
-                &[(-2.0, -1.0), (-1.5, -1.0)],
-                stroke,
-            );
-            line_local(
-                painter,
-                symbol,
-                center,
-                scale,
-                &[(-2.0, 1.0), (-1.5, 1.0)],
-                stroke,
-            );
-            line_local(
-                painter,
-                symbol,
-                center,
-                scale,
-                &[(1.5, 0.0), (2.0, 0.0)],
-                stroke,
-            );
-            line_local(
-                painter,
-                symbol,
-                center,
-                scale,
-                &[(0.0, -2.0), (0.0, -0.75)],
-                stroke,
-            );
-            line_local(
-                painter,
-                symbol,
-                center,
-                scale,
-                &[(0.0, 0.75), (0.0, 2.0)],
-                stroke,
-            );
-            line_local(
-                painter,
-                symbol,
-                center,
-                scale,
-                &[(-1.3, -0.62), (-0.8, -0.62)],
-                stroke,
-            );
-            line_local(
-                painter,
-                symbol,
-                center,
-                scale,
-                &[(-1.05, -0.87), (-1.05, -0.37)],
-                stroke,
-            );
-            line_local(
-                painter,
-                symbol,
-                center,
-                scale,
-                &[(-1.3, 0.62), (-0.8, 0.62)],
-                stroke,
-            );
+        SymbolKind::Comparator | SymbolKind::OpAmp => {
+            paint_opamp(painter, symbol, center, scale, stroke)
         }
         SymbolKind::Voltmeter | SymbolKind::Ammeter | SymbolKind::Ohmmeter => {
             painter.circle_stroke(center, scale * 0.9, stroke);
@@ -740,19 +667,13 @@ fn paint_shunt_reference(
     );
 }
 
-fn paint_comparator(painter: &Painter, symbol: &Symbol, center: Pos2, scale: f32, stroke: Stroke) {
+fn paint_opamp(painter: &Painter, symbol: &Symbol, center: Pos2, scale: f32, stroke: Stroke) {
     line_local(
         painter,
         symbol,
         center,
         scale,
-        &[
-            (-0.85, -1.0),
-            (0.85, -1.0),
-            (0.85, 1.0),
-            (-0.85, 1.0),
-            (-0.85, -1.0),
-        ],
+        &[(-1.5, -1.5), (-1.5, 1.5), (1.5, 0.0), (-1.5, -1.5)],
         stroke,
     );
     line_local(
@@ -760,7 +681,7 @@ fn paint_comparator(painter: &Painter, symbol: &Symbol, center: Pos2, scale: f32
         symbol,
         center,
         scale,
-        &[(-2.0, 1.0), (-0.85, 1.0)],
+        &[(-2.0, -1.0), (-1.5, -1.0)],
         stroke,
     );
     line_local(
@@ -768,7 +689,7 @@ fn paint_comparator(painter: &Painter, symbol: &Symbol, center: Pos2, scale: f32
         symbol,
         center,
         scale,
-        &[(-2.0, -1.0), (-0.85, -1.0)],
+        &[(-2.0, 1.0), (-1.5, 1.0)],
         stroke,
     );
     line_local(
@@ -776,7 +697,7 @@ fn paint_comparator(painter: &Painter, symbol: &Symbol, center: Pos2, scale: f32
         symbol,
         center,
         scale,
-        &[(0.85, 0.0), (2.0, 0.0)],
+        &[(1.5, 0.0), (2.0, 0.0)],
         stroke,
     );
     line_local(
@@ -784,7 +705,7 @@ fn paint_comparator(painter: &Painter, symbol: &Symbol, center: Pos2, scale: f32
         symbol,
         center,
         scale,
-        &[(0.0, 1.0), (0.0, 2.0)],
+        &[(0.0, -2.0), (0.0, -0.75)],
         stroke,
     );
     line_local(
@@ -792,27 +713,32 @@ fn paint_comparator(painter: &Painter, symbol: &Symbol, center: Pos2, scale: f32
         symbol,
         center,
         scale,
-        &[(0.0, -1.0), (0.0, -2.0)],
+        &[(0.0, 0.75), (0.0, 2.0)],
         stroke,
     );
-    for (text, position) in [
-        ("+", Vec2::new(-0.45, 0.55)),
-        ("−", Vec2::new(-0.45, -0.55)),
-    ] {
-        painter.text(
-            paint_position(symbol, center, scale, position),
-            Align2::CENTER_CENTER,
-            text,
-            FontId::proportional((scale * 0.55).clamp(7.0, 12.0)),
-            stroke.color,
-        );
-    }
-    painter.text(
-        paint_position(symbol, center, scale, Vec2::new(0.15, 0.0)),
-        Align2::CENTER_CENTER,
-        "393",
-        FontId::proportional((scale * 0.5).clamp(7.0, 12.0)),
-        stroke.color,
+    line_local(
+        painter,
+        symbol,
+        center,
+        scale,
+        &[(-1.3, -0.62), (-0.8, -0.62)],
+        stroke,
+    );
+    line_local(
+        painter,
+        symbol,
+        center,
+        scale,
+        &[(-1.05, -0.87), (-1.05, -0.37)],
+        stroke,
+    );
+    line_local(
+        painter,
+        symbol,
+        center,
+        scale,
+        &[(-1.3, 0.62), (-0.8, 0.62)],
+        stroke,
     );
 }
 
@@ -944,10 +870,10 @@ mod tests {
     }
 
     #[test]
-    fn comparator_body_matches_the_shunt_reference_extent() {
+    fn comparator_body_matches_the_opamp_extent() {
         assert_eq!(
             body_half_extent(&SymbolKind::Comparator),
-            body_half_extent(&SymbolKind::ShuntReference)
+            body_half_extent(&SymbolKind::OpAmp)
         );
     }
 }
