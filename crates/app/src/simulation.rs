@@ -1,31 +1,49 @@
 //! Live transient session controlled by the application shell.
 
 use std::collections::BTreeMap;
+use std::time::Duration;
 
 use sim_core::{TransientSample, TransientSession};
+use web_time::Instant;
 
 use crate::analysis::{
     prepare_realtime, LiveValues, RunContext, SimulationError, TransientSettings,
 };
 use crate::document::Document;
 
-/// Maximum number of integration steps executed during one frame.
-pub const MAX_STEPS_PER_FRAME: usize = 800;
-/// Maximum number of samples retained for the spectral analyses.
-pub const MAX_SAMPLES: usize = 100_000;
+/// Wall-clock budget spent on integration during one frame, in seconds.
+pub const LIVE_TICK_BUDGET_SECONDS: f64 = 0.005;
+/// Smallest integration step used by the live session, in seconds.
+///
+/// The oscilloscope and the spectrum consume one sample per millisecond, so a
+/// finer step only burns CPU. Complete analyses keep the configured step.
+pub const LIVE_MIN_STEP_SECONDS: f64 = 1e-3;
+/// Maximum number of samples retained for the scopes and the spectrum.
+pub const MAX_SAMPLES: usize = 10_000;
 /// Sliding time window shown by the scopes, in simulated seconds.
 pub const DEFAULT_SCOPE_WINDOW_SECONDS: f64 = 10.0;
 /// Smallest selectable scope window, in simulated seconds.
 pub const MIN_SCOPE_WINDOW_SECONDS: f64 = 0.5;
 /// Largest selectable scope window, in simulated seconds.
-pub const MAX_SCOPE_WINDOW_SECONDS: f64 = 30.0;
-/// Fixed time resolution of the decimated scope buffer, in seconds.
-const SCOPE_SAMPLE_INTERVAL_SECONDS: f64 = 1e-3;
-/// Maximum number of decimated samples kept for the scopes.
-const MAX_SCOPE_SAMPLES: usize = 32_000;
+///
+/// It matches the retained window at the live cadence (`MAX_SAMPLES` × 1 ms).
+pub const MAX_SCOPE_WINDOW_SECONDS: f64 = 10.0;
 /// Speed multipliers offered by the live controls.
 pub const LIVE_SPEEDS: [f64; 6] = [0.25, 0.5, 1.0, 2.0, 5.0, 10.0];
 
+/// Number of dead slots dropped at once when the sample ring is full.
+///
+/// The oldest slots stay allocated until `TRIM_CHUNK` of them are dead, then a
+/// single front drain drops them. A small chunk keeps the worst frame cheap and
+/// bounds the over-allocation; no steady-state frame allocates.
+const TRIM_CHUNK: usize = 256;
+/// Hard safety cap on the steps of one tick, independent of the time budget.
+const MAX_STEPS_PER_TICK: usize = 4_096;
+/// Longest wall-clock interval turned into simulated time after a host stall.
+const MAX_CATCHUP_SECONDS: f64 = 0.25;
+/// Window over which the simulated/real-time ratio is measured, in seconds.
+const RATE_WINDOW_SECONDS: f64 = 1.0;
+/// Ratio under which the engine is reported as too slow.
 const LAG_THRESHOLD: f64 = 0.65;
 
 /// Result of one live tick.
@@ -45,17 +63,13 @@ pub struct LiveSimulation {
     context: RunContext,
     synced_revision: u64,
     sample_revision: u64,
-    samples: Vec<TransientSample>,
-    display_samples: Vec<TransientSample>,
-    display_stride: usize,
-    display_counter: usize,
+    samples: SampleBuffer,
     last_wall: f64,
+    target_time: f64,
     speed: f64,
     paused: bool,
-    ratio: f64,
-    lag: bool,
-    simulated_total: f64,
-    wall_total: f64,
+    rate: RateWindow,
+    last_steps: usize,
 }
 
 impl LiveSimulation {
@@ -68,67 +82,84 @@ impl LiveSimulation {
         let extraction = document
             .extraction()
             .ok_or_else(|| SimulationError::Transient("aucune netlist valide".to_owned()))?;
-        let setup = prepare_realtime(extraction, settings, document.revision())?;
+        let mut setup = prepare_realtime(extraction, settings, document.revision())?;
+        let requested = setup.context.nominal_step.unwrap_or(setup.options.step);
+        let live_step = live_step(requested);
+        setup.options.step = live_step;
+        setup.context.nominal_step = Some(live_step);
         let mut session = TransientSession::new(&setup.netlist, &setup.options)
             .map_err(|error| SimulationError::Transient(error.to_string()))?;
-        let samples = session.drain_samples();
-        let display_stride = scope_stride(setup.context.nominal_step);
-        let display_samples = samples.clone();
+        let mut samples = SampleBuffer::new(MAX_SAMPLES);
+        for sample in session.drain_samples() {
+            samples.push(sample);
+        }
+        let start = session.time();
         Ok(Self {
             session,
             context: setup.context,
             synced_revision: document.revision(),
             sample_revision: document.revision(),
             samples,
-            display_samples,
-            display_stride,
-            display_counter: 0,
             last_wall: now,
+            target_time: start,
             speed: 1.0,
             paused: false,
-            ratio: 1.0,
-            lag: false,
-            simulated_total: 0.0,
-            wall_total: 0.0,
+            rate: RateWindow::default(),
+            last_steps: 0,
         })
     }
 
     /// Advances the session up to the host clock.
     pub fn tick(&mut self, document: &Document, now: f64) -> Result<TickOutcome, SimulationError> {
+        self.tick_with_budget(
+            document,
+            now,
+            Duration::from_secs_f64(LIVE_TICK_BUDGET_SECONDS),
+        )
+    }
+
+    /// Advances the session with an explicit wall-clock budget.
+    fn tick_with_budget(
+        &mut self,
+        document: &Document,
+        now: f64,
+        budget: Duration,
+    ) -> Result<TickOutcome, SimulationError> {
+        self.last_steps = 0;
         match self.sync(document)? {
             Sync::Restart => return Ok(TickOutcome::NeedsRestart),
             Sync::Unchanged | Sync::Updated => {}
         }
+        let wall = (now - self.last_wall).max(0.0);
+        self.last_wall = now;
         if self.paused {
-            self.last_wall = now;
+            self.target_time = self.session.time();
+            self.rate.reset();
             return Ok(TickOutcome::Paused);
         }
-        let elapsed = (now - self.last_wall).max(0.0);
-        self.last_wall = now;
-        let start = self.session.time();
-        let target = start + elapsed * self.speed;
+        // A host stall (window drag, debugger, sleep) must not turn into minutes
+        // of catch-up work: the deficit is reported by the rate meter instead.
+        self.target_time += wall.min(MAX_CATCHUP_SECONDS) * self.speed;
+        let start_time = self.session.time();
+        let started = Instant::now();
         let mut steps = 0;
-        while self.session.time() < target && steps < MAX_STEPS_PER_FRAME {
+        while self.session.time() < self.target_time && steps < MAX_STEPS_PER_TICK {
             self.session
-                .step()
+                .advance()
                 .map_err(|error| SimulationError::Transient(error.to_string()))?;
+            self.samples.push(self.session.snapshot());
             steps += 1;
+            // At least one step runs per tick, so a slow circuit still advances.
+            if started.elapsed() >= budget {
+                break;
+            }
         }
-        let drained = self.session.drain_samples();
-        self.ingest(drained);
-        let simulated = (self.session.time() - start).max(0.0);
-        self.simulated_total += simulated;
-        self.wall_total += elapsed;
-        let wanted = self.wall_total * self.speed;
-        self.ratio = if wanted > f64::MIN_POSITIVE {
-            (self.simulated_total / wanted).clamp(0.0, 1.0)
-        } else {
-            1.0
-        };
-        self.lag = self.ratio < LAG_THRESHOLD && self.wall_total > 0.1;
+        self.last_steps = steps;
         if steps > 0 {
             self.sample_revision = self.synced_revision;
         }
+        let simulated = (self.session.time() - start_time).max(0.0);
+        self.rate.record(simulated, wall * self.speed, wall);
         Ok(TickOutcome::Advanced)
     }
 
@@ -140,13 +171,13 @@ impl LiveSimulation {
             ));
         }
         self.session
-            .step()
+            .advance()
             .map_err(|error| SimulationError::Transient(error.to_string()))?;
-        let drained = self.session.drain_samples();
-        self.ingest(drained);
+        self.samples.push(self.session.snapshot());
+        self.last_steps = 1;
+        self.target_time = self.session.time();
         self.sample_revision = self.synced_revision;
-        self.ratio = 1.0;
-        self.lag = false;
+        self.rate = RateWindow::default();
         Ok(())
     }
 
@@ -169,38 +200,39 @@ impl LiveSimulation {
     pub fn set_speed(&mut self, speed: f64) {
         if speed.is_finite() && speed > 0.0 {
             self.speed = speed.clamp(0.05, 100.0);
-            self.simulated_total = 0.0;
-            self.wall_total = 0.0;
-            self.ratio = 1.0;
-            self.lag = false;
+            self.target_time = self.session.time();
+            self.rate = RateWindow::default();
         }
     }
 
     /// Returns the ratio between simulated and requested time.
     pub const fn ratio(&self) -> f64 {
-        self.ratio
+        self.rate.ratio
     }
 
     /// Returns whether the engine cannot keep up with the requested speed.
     pub const fn lagging(&self) -> bool {
-        self.lag
+        self.rate.lagging
+    }
+
+    /// Returns the number of steps executed by the latest tick.
+    pub const fn last_steps(&self) -> usize {
+        self.last_steps
     }
 
     /// Returns the retained samples in increasing time order.
     pub fn samples(&self) -> &[TransientSample] {
-        &self.samples
+        self.samples.as_slice()
     }
 
-    /// Returns the decimated samples kept for the scopes.
-    pub fn display_samples(&self) -> &[TransientSample] {
-        &self.display_samples
+    /// Returns the effective integration step used by the live session.
+    pub fn effective_step(&self) -> Option<f64> {
+        self.context.nominal_step
     }
 
-    /// Returns the effective step of the decimated scope traces.
+    /// Returns the effective step of the live scope traces.
     pub fn scope_step(&self) -> Option<f64> {
-        self.context
-            .nominal_step
-            .map(|step| step * self.display_stride as f64)
+        self.context.nominal_step
     }
 
     /// Returns the name and revision mapping captured at session start.
@@ -260,53 +292,105 @@ impl LiveSimulation {
             Err(error) => Err(SimulationError::Transient(error.to_string())),
         }
     }
+}
 
-    fn trim_samples(&mut self) {
-        if self.samples.len() > MAX_SAMPLES {
-            let excess = self.samples.len() - MAX_SAMPLES;
-            self.samples.drain(0..excess);
+/// Returns the integration step used by the live session.
+fn live_step(requested: f64) -> f64 {
+    if requested.is_finite() && requested > LIVE_MIN_STEP_SECONDS {
+        requested
+    } else {
+        LIVE_MIN_STEP_SECONDS
+    }
+}
+
+/// Sample ring with an amortised head trim.
+///
+/// The oldest slots stay allocated until `TRIM_CHUNK` of them are dead, then a
+/// single front drain drops them. A steady-state frame therefore never allocates
+/// and never copies the retained window.
+struct SampleBuffer {
+    samples: Vec<TransientSample>,
+    head: usize,
+    capacity: usize,
+}
+
+impl SampleBuffer {
+    fn new(capacity: usize) -> Self {
+        Self {
+            samples: Vec::new(),
+            head: 0,
+            capacity: capacity.max(1),
         }
     }
 
-    fn ingest(&mut self, drained: Vec<TransientSample>) {
-        for sample in drained {
-            self.display_counter = self.display_counter.wrapping_add(1);
-            if self.display_counter.is_multiple_of(self.display_stride) {
-                self.display_samples.push(sample.clone());
+    fn push(&mut self, sample: TransientSample) {
+        if self.samples.len() >= self.capacity {
+            self.head += 1;
+            if self.head >= TRIM_CHUNK {
+                self.samples.drain(0..self.head);
+                self.head = 0;
             }
-            self.samples.push(sample);
         }
-        self.trim_samples();
-        self.trim_display_samples();
+        self.samples.push(sample);
     }
 
-    fn trim_display_samples(&mut self) {
-        let Some(latest) = self.display_samples.last().map(|sample| sample.time) else {
-            return;
-        };
-        let cutoff = latest - MAX_SCOPE_WINDOW_SECONDS;
-        let first = self
-            .display_samples
-            .partition_point(|sample| sample.time < cutoff);
-        if first > 0 {
-            self.display_samples.drain(0..first);
-        }
-        if self.display_samples.len() > MAX_SCOPE_SAMPLES {
-            let excess = self.display_samples.len() - MAX_SCOPE_SAMPLES;
-            self.display_samples.drain(0..excess);
+    fn as_slice(&self) -> &[TransientSample] {
+        &self.samples[self.head..]
+    }
+
+    fn last(&self) -> Option<&TransientSample> {
+        self.samples.last()
+    }
+
+    #[cfg(test)]
+    fn len(&self) -> usize {
+        self.samples.len() - self.head
+    }
+
+    #[cfg(test)]
+    fn physical_len(&self) -> usize {
+        self.samples.len()
+    }
+}
+
+/// Sliding measurement of the simulated/real-time ratio.
+struct RateWindow {
+    simulated: f64,
+    wanted: f64,
+    wall: f64,
+    ratio: f64,
+    lagging: bool,
+}
+
+impl Default for RateWindow {
+    fn default() -> Self {
+        Self {
+            simulated: 0.0,
+            wanted: 0.0,
+            wall: 0.0,
+            ratio: 1.0,
+            lagging: false,
         }
     }
 }
 
-fn scope_stride(step: Option<f64>) -> usize {
-    let Some(step) = step.filter(|step| step.is_finite() && *step > 0.0) else {
-        return 1;
-    };
-    let stride = (SCOPE_SAMPLE_INTERVAL_SECONDS / step).round().max(1.0);
-    if stride.is_finite() {
-        stride as usize
-    } else {
-        1
+impl RateWindow {
+    fn reset(&mut self) {
+        *self = Self::default();
+    }
+
+    fn record(&mut self, simulated: f64, wanted: f64, wall: f64) {
+        self.simulated += simulated;
+        self.wanted += wanted;
+        self.wall += wall;
+        if self.wall < RATE_WINDOW_SECONDS || self.wanted <= f64::MIN_POSITIVE {
+            return;
+        }
+        self.ratio = (self.simulated / self.wanted).clamp(0.0, 1.0);
+        self.lagging = self.ratio < LAG_THRESHOLD;
+        self.simulated = 0.0;
+        self.wanted = 0.0;
+        self.wall = 0.0;
     }
 }
 
@@ -329,6 +413,19 @@ mod tests {
         assert!(session.last_sample().is_some());
         assert!(!session.paused());
         assert_eq!(session.sample_revision(), document.revision());
+    }
+
+    #[test]
+    fn live_step_is_floored_at_one_millisecond() {
+        assert!((live_step(1e-5) - 1e-3).abs() < f64::EPSILON);
+        assert!((live_step(1e-3) - 1e-3).abs() < f64::EPSILON);
+        assert!((live_step(2e-3) - 2e-3).abs() < f64::EPSILON);
+        assert!((live_step(f64::NAN) - 1e-3).abs() < f64::EPSILON);
+
+        let document = Document::demo().unwrap();
+        let session = LiveSimulation::start(&document, &TransientSettings::default(), 0.0).unwrap();
+        assert_eq!(session.effective_step(), Some(1e-3));
+        assert_eq!(session.scope_step(), Some(1e-3));
     }
 
     #[test]
@@ -370,45 +467,86 @@ mod tests {
     }
 
     #[test]
-    fn scope_samples_use_a_fixed_decimation_and_window() {
+    fn one_tick_reaches_the_host_clock_when_the_budget_allows() {
         let document = Document::demo().unwrap();
         let mut session =
             LiveSimulation::start(&document, &TransientSettings::default(), 0.0).unwrap();
-        assert_eq!(session.display_samples.len(), 1);
-        let step = session.scope_step().unwrap();
-        assert!((step - 1e-3).abs() < 1e-12, "scope step = {step}");
-        for _ in 0..99 {
-            session.step_once(&document).unwrap();
+        // 10.5 ms requested, 1 ms live step: the eleventh step overshoots.
+        assert_eq!(
+            session.tick(&document, 0.0105).unwrap(),
+            TickOutcome::Advanced
+        );
+        assert_eq!(session.last_steps(), 11);
+        assert_eq!(session.samples().len(), 12);
+        let times = session
+            .samples()
+            .iter()
+            .map(|sample| sample.time)
+            .collect::<Vec<_>>();
+        for pair in times.windows(2) {
+            assert!((pair[1] - pair[0] - 1e-3).abs() < 1e-12);
         }
-        assert_eq!(session.display_samples.len(), 1);
-        session.step_once(&document).unwrap();
-        assert_eq!(session.display_samples.len(), 2);
+        let last = session.last_sample().unwrap().time;
+        assert!((0.0105..0.0115).contains(&last), "last time = {last}");
     }
 
     #[test]
-    fn display_samples_are_trimmed_to_thirty_seconds() {
+    fn an_exhausted_budget_stops_after_one_step() {
         let document = Document::demo().unwrap();
         let mut session =
             LiveSimulation::start(&document, &TransientSettings::default(), 0.0).unwrap();
-        let template = session.samples[0].clone();
-        session.display_samples.clear();
-        for index in 0..=40 {
+        let outcome = session
+            .tick_with_budget(&document, 0.1, Duration::ZERO)
+            .unwrap();
+        assert_eq!(outcome, TickOutcome::Advanced);
+        assert_eq!(session.last_steps(), 1);
+        assert!((session.last_sample().unwrap().time - 1e-3).abs() < 1e-12);
+    }
+
+    #[test]
+    fn the_rate_meter_reports_a_budget_it_cannot_follow() {
+        let document = Document::demo().unwrap();
+        let mut session =
+            LiveSimulation::start(&document, &TransientSettings::default(), 0.0).unwrap();
+        for index in 1..=30 {
+            session
+                .tick_with_budget(&document, f64::from(index) * 0.05, Duration::ZERO)
+                .unwrap();
+        }
+        // 30 steps of 1 ms for 1.5 s requested.
+        assert!(session.ratio() < 0.1, "ratio = {}", session.ratio());
+        assert!(session.lagging());
+    }
+
+    #[test]
+    fn the_rate_meter_follows_a_healthy_tick() {
+        let document = Document::demo().unwrap();
+        let mut session =
+            LiveSimulation::start(&document, &TransientSettings::default(), 0.0).unwrap();
+        for index in 1..=30 {
+            session.tick(&document, f64::from(index) * 0.05).unwrap();
+        }
+        assert!(session.ratio() > 0.95, "ratio = {}", session.ratio());
+        assert!(!session.lagging());
+    }
+
+    #[test]
+    fn the_sample_buffer_keeps_a_bounded_window() {
+        let document = Document::demo().unwrap();
+        let session = LiveSimulation::start(&document, &TransientSettings::default(), 0.0).unwrap();
+        let template = session.samples()[0].clone();
+        let mut buffer = SampleBuffer::new(MAX_SAMPLES);
+        for index in 0..25_000 {
             let mut sample = template.clone();
             sample.time = f64::from(index);
-            session.display_samples.push(sample);
+            buffer.push(sample);
         }
-        session.trim_display_samples();
-        let first = session.display_samples.first().unwrap().time;
-        assert!(first >= 10.0 - 1e-12, "first kept time = {first}");
-    }
-
-    #[test]
-    fn scope_stride_scales_with_the_integration_step() {
-        assert_eq!(scope_stride(Some(1e-5)), 100);
-        assert_eq!(scope_stride(Some(1e-3)), 1);
-        assert_eq!(scope_stride(Some(1e-6)), 1_000);
-        assert_eq!(scope_stride(None), 1);
-        assert_eq!(scope_stride(Some(0.0)), 1);
+        assert_eq!(buffer.len(), MAX_SAMPLES);
+        assert!(buffer.physical_len() <= MAX_SAMPLES * 3 / 2);
+        let first = buffer.as_slice()[0].time;
+        let last = buffer.last().unwrap().time;
+        assert_eq!(last, 24_999.0);
+        assert_eq!(first, 24_999.0 - (MAX_SAMPLES as f64 - 1.0));
     }
 
     #[test]
@@ -419,6 +557,7 @@ mod tests {
         session.set_paused(true);
         let time = session.last_sample().unwrap().time;
         assert_eq!(session.tick(&document, 0.5).unwrap(), TickOutcome::Paused);
+        assert_eq!(session.last_steps(), 0);
         assert_eq!(session.last_sample().unwrap().time, time);
         session.step_once(&document).unwrap();
         assert!(session.last_sample().unwrap().time > time);

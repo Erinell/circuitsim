@@ -56,6 +56,12 @@ sémantique.
 
 ### Changed
 
+- **Simulation temps réel** : budget de 5 ms de calcul par image au lieu de
+  800 pas fixes, pas live plancheré à 1 ms, un échantillon par milliseconde
+  simulée au lieu d'un par pas d'intégration, et tampon en anneau de
+  10 000 échantillons sans `Vec::drain` par image. Le pas effectif et le badge
+  de retard restent visibles ; les analyses complètes gardent le pas saisi, tous
+  leurs échantillons, les CSV et les spectres.
 - L'en-tête place désormais menus et commandes sur une même rangée, avec les
   actions centrées ; les fenêtres étroites conservent un retour à la ligne centré.
   L'alignement vertical est harmonisé, la recherche est visible et l'état de
@@ -74,8 +80,8 @@ sémantique.
   encore de le suspendre.
 - Les portées affichent une fenêtre glissante de **10 s de temps simulé** par
   défaut, indépendante de la vitesse de lecture. La durée est réglable de 0,5 à
-  30 s dans les contrôles. Le tampon d’affichage est décimé à pas fixe pour rester
-  borné, tandis que le tampon complet alimente le spectre.
+  10 s dans les contrôles. Un seul anneau de 10 000 échantillons alimente les
+  portées et le spectre, sans recopie périodique.
 - Les boutons **Monter** et **Descendre** réordonnent la portée par son
   identifiant ; ils sont désactivés aux extrémités. **Recentrer** réinitialise le
   zoom et le déplacement X/Y de la portée active.

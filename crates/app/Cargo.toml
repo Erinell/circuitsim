@@ -24,6 +24,7 @@ serde.workspace = true
 serde_json.workspace = true
 sim-core = { path = "../sim-core" }
 thiserror.workspace = true
+web-time.workspace = true
 worker = { path = "../worker" }
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]

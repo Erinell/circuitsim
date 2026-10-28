@@ -333,6 +333,37 @@ fn incremental_session_matches_a_full_transient() {
 }
 
 #[test]
+fn advancing_without_samples_matches_the_stepped_session() {
+    let (netlist, source, output, _, _) = rc_netlist();
+    let options = TransientOptions {
+        stop_time: f64::MAX,
+        step: 1e-5,
+        events: vec![source_event(0.0, source, 5.0)],
+        ..TransientOptions::default()
+    };
+    let mut stepped = TransientSession::new(&netlist, &options).unwrap();
+    let mut advanced = TransientSession::new(&netlist, &options).unwrap();
+    assert_eq!(advanced.snapshot().time, 0.0);
+    for _ in 0..25 {
+        let sample = stepped.step().unwrap();
+        advanced.advance().unwrap();
+        let snapshot = advanced.snapshot();
+        assert_eq!(snapshot.time, sample.time);
+        assert_eq!(snapshot.node_voltages, sample.node_voltages);
+        assert_eq!(snapshot.branch_currents, sample.branch_currents);
+    }
+    assert_eq!(advanced.steps(), 25);
+    // `advance` retains nothing beyond the initial operating point.
+    assert_eq!(advanced.drain_samples().len(), 1);
+    assert!(stepped
+        .sample()
+        .unwrap()
+        .node_voltage(output)
+        .unwrap()
+        .is_finite());
+}
+
+#[test]
 fn charges_a_capacitor_through_a_resistor() {
     let (netlist, source, output, capacitor, _) = rc_netlist();
     let options = TransientOptions {

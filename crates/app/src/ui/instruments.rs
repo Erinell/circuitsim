@@ -656,6 +656,25 @@ impl InstrumentsState {
         {
             self.set_realtime_speed(speed);
         }
+        if let Some(step) = self
+            .realtime
+            .as_ref()
+            .and_then(LiveSimulation::effective_step)
+        {
+            ui.label(
+                RichText::new(format!(
+                    "Pas temps réel : {}",
+                    format_si_precision(step, Unit::Second, 3)
+                ))
+                .small()
+                .color(crate::ui::muted_text_color(ui)),
+            )
+            .on_hover_text(
+                "Pas d'intégration de la session temps réel : au moins 1 ms pour \
+                 suivre l'affichage et la mémoire bornée. Les analyses complètes \
+                 gardent le pas saisi dans l'onglet Spectre.",
+            );
+        }
         let mut animation = self.animation_speed;
         if ui
             .add(
@@ -815,6 +834,10 @@ impl InstrumentsState {
         let running = self.realtime_active();
         let ratio = self.live_ratio();
         let lagging = self.live_lagging();
+        let effective_step = self
+            .realtime
+            .as_ref()
+            .and_then(LiveSimulation::effective_step);
         let action = realtime_controls(
             ui,
             &mut self.transient,
@@ -825,6 +848,7 @@ impl InstrumentsState {
             running,
             ratio,
             lagging,
+            effective_step,
         );
         if speed != self.realtime_speed {
             self.set_realtime_speed(speed);
@@ -1253,7 +1277,7 @@ impl InstrumentsState {
                 return Ok(Some(Vec::new()));
             }
             let signals = signals.iter().cloned().collect::<Vec<_>>();
-            let samples = run.display_samples();
+            let samples = run.samples();
             let latest = samples.last().map_or(0.0, |sample| sample.time);
             let start = latest - self.scope_window;
             let first = samples.partition_point(|sample| sample.time < start);
@@ -1301,8 +1325,7 @@ impl InstrumentsState {
             .next()
             .ok_or(SimulationError::NoData)?;
             let step = run
-                .context()
-                .nominal_step
+                .effective_step()
                 .ok_or(SimulationError::InvalidSpectrumStep)?;
             let spectrum = compute_spectrum(&trace, step)?;
             return Ok(Some((trace, spectrum)));
@@ -1517,6 +1540,7 @@ fn realtime_controls(
     running: bool,
     ratio: f64,
     lagging: bool,
+    effective_step: Option<f64>,
 ) -> RealtimeAction {
     ui.heading("Transitoire temps réel");
     ui.horizontal(|ui| {
@@ -1537,6 +1561,11 @@ fn realtime_controls(
                 RichText::new(format!("trop lent (×{:.1})", ratio))
                     .small()
                     .color(ERROR),
+            )
+            .on_hover_text(
+                "Chaque image est limitée à 5 ms de calcul et le pas temps réel \
+                 reste au moins égal à 1 ms. Réduisez la vitesse ou simplifiez le \
+                 circuit.",
             );
         } else if running {
             ui.label(
@@ -1557,6 +1586,20 @@ fn realtime_controls(
                     .hint_text("10u"),
             );
             ui.end_row();
+            if let Some(step) = effective_step {
+                ui.label("Live");
+                ui.label(
+                    RichText::new(format_si_precision(step, Unit::Second, 3))
+                        .small()
+                        .color(crate::ui::muted_text_color(ui)),
+                )
+                .on_hover_text(
+                    "Pas d'intégration réellement utilisé par la session temps réel : au \
+                     moins 1 ms pour suivre l'affichage. Les analyses complètes gardent le \
+                     pas saisi ci-dessus.",
+                );
+                ui.end_row();
+            }
         });
     ui.checkbox(&mut settings.step_enabled, "Échelon de source")
         .on_hover_text(
@@ -1994,9 +2037,9 @@ mod tests {
         state.set_scope_window(2.5);
         assert!((state.scope_window() - 2.5).abs() < f64::EPSILON);
         state.set_scope_window(100.0);
-        assert!((state.scope_window() - 30.0).abs() < f64::EPSILON);
+        assert!((state.scope_window() - 10.0).abs() < f64::EPSILON);
         state.set_scope_window(f64::NAN);
-        assert!((state.scope_window() - 30.0).abs() < f64::EPSILON);
+        assert!((state.scope_window() - 10.0).abs() < f64::EPSILON);
     }
 
     #[test]

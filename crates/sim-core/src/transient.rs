@@ -313,8 +313,12 @@ impl TransientSession {
         Ok(())
     }
 
-    /// Advances exactly one fixed step.
-    pub fn step(&mut self) -> Result<TransientSample, TransientError> {
+    /// Advances exactly one fixed step without building a sample.
+    ///
+    /// Pacing callers use this instead of [`Self::step`] and request a
+    /// [`Self::snapshot`] only when they need to display the state, which avoids
+    /// one pair of `BTreeMap`s per integration step.
+    pub fn advance(&mut self) -> Result<(), TransientError> {
         let time = self.time;
         let next_time = time + self.step;
         if !next_time.is_finite() || next_time <= time {
@@ -362,9 +366,28 @@ impl TransientSession {
         self.junction_voltages = self.circuit.junction_voltages(&self.previous);
         self.time = next_time;
         self.steps += 1;
-        let sample = build_sample(&self.working, &self.circuit, &self.previous, next_time);
+        Ok(())
+    }
+
+    /// Builds a sample of the current state on demand.
+    pub fn snapshot(&self) -> TransientSample {
+        build_sample(&self.working, &self.circuit, &self.previous, self.time)
+    }
+
+    /// Advances exactly one fixed step and returns the resulting sample.
+    ///
+    /// The sample is also retained for [`Self::finish`]; use [`Self::advance`]
+    /// and [`Self::snapshot`] when every intermediate sample is not needed.
+    pub fn step(&mut self) -> Result<TransientSample, TransientError> {
+        self.advance()?;
+        let sample = self.snapshot();
         self.samples.push(sample.clone());
         Ok(sample)
+    }
+
+    /// Number of integration intervals accepted so far.
+    pub const fn steps(&self) -> usize {
+        self.steps
     }
 
     /// Finishes the session with a complete energy audit.
