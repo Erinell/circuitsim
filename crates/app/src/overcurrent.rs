@@ -18,7 +18,7 @@ pub const WARNING_RATIO: f64 = 0.8;
 /// Fraction of the limit where the red critical state starts.
 pub const CRITICAL_RATIO: f64 = 1.0;
 /// Default current allowed in a wire or net.
-pub const DEFAULT_WIRE_CURRENT_LIMIT: f64 = 1.0;
+pub const DEFAULT_WIRE_CURRENT_LIMIT: f64 = 10.0;
 
 /// Visual and diagnostic severity of an observed current.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, PartialOrd, Ord)]
@@ -334,6 +334,7 @@ mod tests {
 
     #[test]
     fn component_limit_comes_from_imax() {
+        assert_eq!(crate::overcurrent::DEFAULT_WIRE_CURRENT_LIMIT, 10.0);
         assert_eq!(component_limit(&resistor(0.25)), Some(0.25));
         let mut symbol = resistor(0.25);
         symbol.params.remove("imax");

@@ -356,7 +356,7 @@ fn builtin_defs() -> Vec<SymbolDef> {
             SymbolKind::Inductor,
             &[("inductance", 1e-3), ("resistance", 0.01), ("imax", 0.5)],
         ),
-        two_terminal(SymbolKind::VoltageSource, &[("dc", 5.0), ("imax", 1.0)]),
+        two_terminal(SymbolKind::VoltageSource, &[("dc", 5.0), ("imax", 10.0)]),
         two_terminal(SymbolKind::CurrentSource, &[("dc", 0.001), ("imax", 1.0)]),
         SymbolDef::new(
             SymbolKind::Ground,
@@ -518,6 +518,11 @@ mod tests {
                 "missing imax for {kind:?}"
             );
         }
+        let source = registry.get(&SymbolKind::VoltageSource).unwrap();
+        assert_eq!(
+            source.defaults.get("imax").and_then(ParamValue::as_number),
+            Some(10.0)
+        );
         let diode = registry.get(&SymbolKind::Diode).unwrap();
         for key in ["type", "vf", "if", "n", "imax"] {
             assert!(

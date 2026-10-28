@@ -22,7 +22,7 @@ La distribution web utilise `index.html` et Trunk.
 | `ui/instruments.rs`, `ui/scopes.rs` | panneau unifié de simulation, portées et graphiques |
 
 De haut en bas : barre d'outils avec menus **Fichier**, **Édition**, **Dessin**,
-**Afficher**, **Options** et **Aide**, puis uniquement les contrôles
+**Affichage**, **Options** et **Aide**, puis uniquement les contrôles
 **Marche/Arrêt**, **Reset** et **Pas** ; palette filtrable à gauche, canevas
 central, inspecteur/ERC à droite, panneau unifié **Instruments et portées** en
 bas (210–620 px, visible par défaut), barre d'état. Les outils, composants,
@@ -48,7 +48,7 @@ adaptatif. La fenêtre native s'ouvre maximisée ; les fenêtres **Démarrage**,
 
 Les fils sont épaissis et colorés selon la tension du net après simulation :
 dégradé bleu/gris/orange par défaut, variante cyan/gris/magenta, avec une
-légende `-V / 0 / +V`. Le menu **Afficher** règle indépendamment les calques
+légende `-V / 0 / +V`. Le menu **Affichage** règle indépendamment les calques
 Tension, Courant, Surintensités, Puissance, Valeurs, Références et Labels de nets.
 Les erreurs ERC restent rouges et prioritaires. Le flux de courant utilise des
 points jaunes à halo sombre, avec densité et vitesse proportionnelles au courant
@@ -64,10 +64,10 @@ tension : liseré ambre entre 80 et 100 % de la limite, rouge au-delà, badge
 n'est réutilisé et le fil garde sa couleur de tension. Le dézoom conserve le
 liseré et, pour le critique, le badge. La surcouche est statique : elle ne
 clignote pas et respecte donc la réduction des animations. La limite des
-fils/nets se règle dans **Afficher → Limite des fils** (1 A par défaut) ; les
-composants utilisent leur paramètre `imax`. Le survol affiche le courant exact,
-la limite, le pourcentage et la sévérité. Sans transitoire à jour, aucune alerte
-n'est dessinée.
+fils/nets se règle dans la fenêtre **Préférences d’affichage** (10 A par défaut,
+comme les sources de tension) ; les composants utilisent leur paramètre `imax`.
+Le survol affiche le courant exact, la limite, le pourcentage et la sévérité.
+Sans transitoire à jour, aucune alerte n'est dessinée.
 Une extrémité libre d'un fil peut être tirée le long de son axe pour l'allonger
 ou le raccourcir ; les extrémités connectées ne sont pas redimensionnables. La
 mini-carte du coin inférieur droit montre le contenu, la sélection et la fenêtre
@@ -147,6 +147,7 @@ Le bouton **Accessibilité** ou `Ctrl+Maj+A` ouvre les préférences d’afficha
 - thème **Sombre**, **Contraste élevé** ou **Clair** ;
 - taille de l’interface 85, 100, 115 ou 130 % ;
 - réduction des animations ;
+- limite des fils/nets (10 A par défaut, ambre dès 80 % et rouge au-delà de 100 %) ;
 - rappel de la navigation clavier `Tab`/`Maj+Tab`.
 
 Ces réglages, les calques, les palettes, la grille, les favoris, les vitesses et
@@ -229,7 +230,7 @@ live.
   signal. **Figer** conserve le tracé, **Effacer** le vide, les flèches
   réordonnent, **Fusionner** joint la portée suivante et **Supprimer** la retire.
   Les signaux tracés sont rappelés par un marqueur de couleur sur le fil ou le
-  composant correspondant. Le panneau reste accessible par **Afficher →
+  composant correspondant. Le panneau reste accessible par **Affichage →
   Instruments et portées**. La fenêtre temporelle couvre **10 s de temps
   simulé** par défaut et se règle de 0,5 à 30 s dans les contrôles. Le bouton
   **Recentrer** réinitialise le zoom et le déplacement X/Y ; **Monter** et

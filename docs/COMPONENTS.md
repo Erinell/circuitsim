@@ -30,7 +30,7 @@ négatif. En AC, `AcExcitation.magnitude` est une amplitude crête et
 | `Resistor` | `resistance = 1000` Ω, `imax = 0.25` A | `i = v/R` | `i = v/R` | conductance `1/R` |
 | `Capacitor` | `capacitance = 1e-6` F, `imax = 1` A | ouvert | `i = C dv/dt`, Euler arrière | `jωC` |
 | `Inductor` | `inductance = 1e-3` H, `resistance = 0.01` Ω, `imax = 0.5` A | `v = R i` (court-circuit si `R = 0`) | `v = R i + L di/dt` | `R + jωL` |
-| `VoltageSource` | `dc = 5` V, `imax = 1` A | `v(a)-v(b)=dc` | valeur après événements | phasor |
+| `VoltageSource` | `dc = 5` V, `imax = 10` A | `v(a)-v(b)=dc` | valeur après événements | phasor |
 | `CurrentSource` | `dc = 1e-3` A, `imax = 1` A | `dc` de `a` vers `b` | valeur après événements | phasor |
 | `Ground` | aucun | `0 V` | `0 V` | `0 V` |
 

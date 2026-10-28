@@ -129,13 +129,14 @@ Les raccourcis sont ignorés lorsqu’un champ texte a le focus, à l’exceptio
   suivent le sens réel du courant estimé, avec une densité et une vitesse
   proportionnelles au courant. `Vue → Courant animé` masque ce flux.
 - La couleur des fils suit la tension du net : bleu/gris/orange par défaut,
-  variante cyan/gris/magenta, avec une légende. Le menu **Afficher** règle les
+  variante cyan/gris/magenta, avec une légende. Le menu **Affichage** règle les
   calques Tension, Courant, Surintensités, Puissance, Valeurs, Références et
   Labels.
 - Une surintensité ajoute un liseré ambre (80–100 %) ou rouge (> 100 %) sans
   recolorer le fil, un badge `I / Imax`, et un contour avec triangle `!` sur le
   composant. Le survol donne courant, limite, pourcentage et sévérité. La limite
-  des fils est réglable ; sans simulation à jour, aucune alerte n’apparaît.
+  des fils est réglable dans les **Préférences d’affichage** (10 A par défaut) ;
+  sans simulation à jour, aucune alerte n’apparaît.
 - La puissance dissipée ajoute un halo dont la luminosité est réglable. Le sens
   du courant peut être conventionnel ou électronique.
 - Un fil signalé par l’ERC (erreur ou avertissement) est tracé en rouge, prioritaire
@@ -193,7 +194,7 @@ Les raccourcis sont ignorés lorsqu’un champ texte a le focus, à l’exceptio
   du graphique ; **Ajouter une portée** se trouve dans les contrôles.
   Un clic droit sur un composant ou un fil ajoute le signal à la dernière
   portée. Les onglets **Spectre** et **Bode** partagent le même panneau, visible
-  par défaut et repliable depuis **Afficher**.
+  par défaut et repliable depuis **Affichage**.
 - La portée affiche une fenêtre glissante de **10 s de temps simulé** par défaut,
   réglable de 0,5 à 30 s, indépendante de la vitesse de lecture. Le tampon
   d’affichage est décimé à pas fixe pour rester borné ; le tampon complet alimente

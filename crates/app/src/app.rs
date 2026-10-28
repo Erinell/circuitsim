@@ -512,7 +512,7 @@ impl CircuitApp {
                 ui.close();
             }
         });
-        ui.menu_button("Afficher", |ui| {
+        ui.menu_button("Affichage", |ui| {
             ui.checkbox(&mut self.show_palette, "Palette");
             ui.checkbox(&mut self.show_inspector, "Inspecteur");
             ui.checkbox(&mut self.show_instruments, "Instruments et portées");
@@ -534,18 +534,6 @@ impl CircuitApp {
             ui.checkbox(&mut settings.layers.references, "Références");
             ui.checkbox(&mut settings.layers.net_labels, "Labels de nets");
             ui.checkbox(&mut settings.small_grid, "Petite grille");
-            ui.horizontal(|ui| {
-                ui.label("Limite des fils");
-                ui.add(
-                    egui::DragValue::new(&mut settings.wire_current_limit)
-                        .speed(0.01)
-                        .range(1e-6..=1_000.0)
-                        .suffix(" A"),
-                )
-                .on_hover_text(
-                    "Courant maximal d'un fil ou d'un net ; 80 % déclenche l'ambre, 100 % le rouge",
-                );
-            });
             ui.separator();
             for layout in LayoutPreset::ALL {
                 if ui.button(layout.label()).clicked() {
@@ -1439,6 +1427,35 @@ impl CircuitApp {
                 {
                     changed = true;
                 }
+                ui.add_space(6.0);
+                ui.separator();
+                ui.label(RichText::new("Canevas").strong());
+                ui.horizontal(|ui| {
+                    ui.label("Limite des fils");
+                    let mut limit = self.canvas.settings().wire_current_limit;
+                    if ui
+                        .add(
+                            egui::DragValue::new(&mut limit)
+                                .speed(0.01)
+                                .range(1e-6..=1_000.0)
+                                .suffix(" A"),
+                        )
+                        .on_hover_text(
+                            "Courant maximal d'un fil ou d'un net ; 80 % déclenche l'ambre, \
+                             100 % le rouge",
+                        )
+                        .changed()
+                    {
+                        self.canvas.settings_mut().wire_current_limit = limit;
+                    }
+                });
+                ui.label(
+                    RichText::new(
+                        "Avertissement dès 80 % de la limite, critique au-delà de 100 %.",
+                    )
+                    .small()
+                    .color(ui::MUTED),
+                );
                 ui.add_space(6.0);
                 ui.separator();
                 ui.label(
