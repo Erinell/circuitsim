@@ -167,6 +167,7 @@ enum WireComponentKind {
     OpAmp,
     Custom(String),
     ShuntReference,
+    Comparator,
 }
 
 impl WireComponentKind {
@@ -185,6 +186,7 @@ impl WireComponentKind {
             ComponentKind::OpAmp => Self::OpAmp,
             ComponentKind::Custom(name) => Self::Custom(name.clone()),
             ComponentKind::ShuntReference => Self::ShuntReference,
+            ComponentKind::Comparator => Self::Comparator,
         }
     }
 
@@ -203,6 +205,7 @@ impl WireComponentKind {
             Self::OpAmp => ComponentKind::OpAmp,
             Self::Custom(name) => ComponentKind::Custom(name),
             Self::ShuntReference => ComponentKind::ShuntReference,
+            Self::Comparator => ComponentKind::Comparator,
         }
     }
 }

@@ -673,6 +673,39 @@ impl MnaCircuit {
                         dynamic_impedance,
                     }));
             }
+            ComponentKind::Comparator => {
+                let input_offset = number_parameter(component, "v_offset")?;
+                if input_offset.abs() > 5e-3 {
+                    return Err(MnaError::InvalidParameterValue {
+                        component: component.id,
+                        key: "v_offset",
+                        value: input_offset,
+                        requirement: "within -5e-3 to 5e-3 volts",
+                    });
+                }
+                let sink_resistance = positive_parameter(component, "r_sink")?;
+                let maximum_current = positive_parameter(component, "imax")?;
+                if maximum_current > 20e-3 {
+                    return Err(MnaError::InvalidParameterValue {
+                        component: component.id,
+                        key: "imax",
+                        value: maximum_current,
+                        requirement: "no greater than 20e-3 amperes",
+                    });
+                }
+                self.nonlinear
+                    .push(NonlinearDevice::Comparator(ComparatorDevice {
+                        component: component.id,
+                        input_plus: self.pin_unknown(component, 0),
+                        input_minus: self.pin_unknown(component, 1),
+                        output: self.pin_unknown(component, 2),
+                        positive_supply: self.pin_unknown(component, 3),
+                        negative_supply: self.pin_unknown(component, 4),
+                        input_offset,
+                        sink_resistance,
+                        maximum_current,
+                    }));
+            }
             ComponentKind::OpAmp => {
                 let output = self.pin_unknown(component, 2);
                 let in_plus = self.pin_unknown(component, 0);
@@ -809,6 +842,7 @@ struct CurrentSourceElement {
 enum NonlinearDevice {
     Diode(DiodeDevice),
     ShuntReference(ShuntReferenceDevice),
+    Comparator(ComparatorDevice),
 }
 
 impl NonlinearDevice {
@@ -816,6 +850,7 @@ impl NonlinearDevice {
         match self {
             Self::Diode(device) => device.component,
             Self::ShuntReference(device) => device.component,
+            Self::Comparator(device) => device.component,
         }
     }
 
@@ -823,6 +858,7 @@ impl NonlinearDevice {
         match self {
             Self::Diode(device) => device.junction_voltage(solution),
             Self::ShuntReference(device) => device.reference_error_at(solution),
+            Self::Comparator(device) => device.input_error_at(solution),
         }
     }
 
@@ -830,6 +866,7 @@ impl NonlinearDevice {
         match self {
             Self::Diode(device) => device.limiting_voltage(),
             Self::ShuntReference(device) => device.dynamic_impedance * device.maximum_current,
+            Self::Comparator(_) => 1.0,
         }
     }
 
@@ -870,6 +907,17 @@ impl NonlinearDevice {
                     device.reference_current,
                 );
             }
+            Self::Comparator(device) => {
+                let output_voltage = device.output_voltage_at(solution);
+                let (current, slope) = device.current_and_conductance(voltage, output_voltage);
+                stamp_conductance(conductance, device.output, device.negative_supply, slope);
+                stamp_current_source(
+                    sources,
+                    device.output,
+                    device.negative_supply,
+                    current - slope * output_voltage,
+                );
+            }
         }
     }
 
@@ -898,6 +946,19 @@ impl NonlinearDevice {
                     cathode_slope,
                 );
             }
+            Self::Comparator(device) => {
+                let input_error = device.input_error_at(solution);
+                let output_voltage = device.output_voltage_at(solution);
+                let slope = device
+                    .current_and_conductance(input_error, output_voltage)
+                    .1;
+                stamp_complex_conductance(
+                    conductance,
+                    device.output,
+                    device.negative_supply,
+                    Complex::new(slope, 0.0),
+                );
+            }
         }
     }
 
@@ -905,6 +966,7 @@ impl NonlinearDevice {
         match self {
             Self::Diode(device) => device.junction_voltage(solution),
             Self::ShuntReference(device) => device.cathode_voltage_at(solution),
+            Self::Comparator(device) => device.output_voltage_at(solution),
         }
     }
 
@@ -916,6 +978,14 @@ impl NonlinearDevice {
                 let cathode_voltage = device.cathode_voltage_at(solution);
                 device
                     .current_and_slopes(reference_voltage, cathode_voltage)
+                    .0
+            }
+            Self::Comparator(device) => {
+                device
+                    .current_and_conductance(
+                        device.input_error_at(solution),
+                        device.output_voltage_at(solution),
+                    )
                     .0
             }
         }
@@ -1020,6 +1090,48 @@ impl ShuntReferenceDevice {
             command_slope * headroom,
             commanded * headroom_slope,
         )
+    }
+}
+
+struct ComparatorDevice {
+    component: ComponentId,
+    input_plus: Option<usize>,
+    input_minus: Option<usize>,
+    output: Option<usize>,
+    positive_supply: Option<usize>,
+    negative_supply: Option<usize>,
+    input_offset: f64,
+    sink_resistance: f64,
+    maximum_current: f64,
+}
+
+impl ComparatorDevice {
+    fn input_error_at(&self, solution: &DVector<f64>) -> f64 {
+        let supply_voltage = node_voltage(solution, self.positive_supply)
+            - node_voltage(solution, self.negative_supply);
+        if !(2.0..=36.0).contains(&supply_voltage) {
+            1.0
+        } else {
+            node_voltage(solution, self.input_plus)
+                - node_voltage(solution, self.input_minus)
+                - self.input_offset
+        }
+    }
+
+    fn output_voltage_at(&self, solution: &DVector<f64>) -> f64 {
+        node_voltage(solution, self.output) - node_voltage(solution, self.negative_supply)
+    }
+
+    fn current_and_conductance(&self, input_error: f64, output_voltage: f64) -> (f64, f64) {
+        if input_error >= 0.0 {
+            return (0.0, 0.0);
+        }
+        let raw_current = output_voltage / self.sink_resistance;
+        if raw_current >= self.maximum_current {
+            (self.maximum_current, 0.0)
+        } else {
+            (raw_current, 1.0 / self.sink_resistance)
+        }
     }
 }
 
@@ -1394,6 +1506,76 @@ mod shunt_reference_tests {
             .unwrap();
         let expected = (5.0 - output) / 100.0 - output / 1_000.0 - 2e-6;
         assert!((current - expected).abs() < 1e-8);
+    }
+}
+
+#[cfg(test)]
+mod comparator_tests {
+    use super::*;
+    use crate::dc::{solve_dc_internal, DcOptions};
+    use crate::netlist::{NetlistBuilder, NodeKind};
+
+    #[test]
+    fn comparator_current_is_positive_from_output_to_negative_supply() {
+        let mut builder = NetlistBuilder::new();
+        let ground = builder.add_node("0", NodeKind::Ground).unwrap();
+        let vcc = builder.add_node("vcc", NodeKind::Electrical).unwrap();
+        let input_plus = builder.add_node("in_plus", NodeKind::Electrical).unwrap();
+        let input_minus = builder.add_node("in_minus", NodeKind::Electrical).unwrap();
+        let output = builder.add_node("out", NodeKind::Electrical).unwrap();
+        for (label, voltage, node) in [
+            ("VCC", 5.0, vcc),
+            ("VINP", 1.0, input_plus),
+            ("VINM", 2.0, input_minus),
+        ] {
+            builder
+                .add_component(
+                    ComponentKind::VoltageSource,
+                    label,
+                    [("dc".to_owned(), ParamValue::Number(voltage))].into(),
+                    vec![node, ground],
+                )
+                .unwrap();
+        }
+        builder
+            .add_component(
+                ComponentKind::Resistor,
+                "RPU",
+                [("resistance".to_owned(), ParamValue::Number(1_000.0))].into(),
+                vec![vcc, output],
+            )
+            .unwrap();
+        let comparator = builder
+            .add_component(
+                ComponentKind::Comparator,
+                "U1",
+                [
+                    ("v_offset".to_owned(), ParamValue::Number(0.0)),
+                    ("r_sink".to_owned(), ParamValue::Number(20.0)),
+                    ("imax".to_owned(), ParamValue::Number(0.02)),
+                ]
+                .into(),
+                vec![input_plus, input_minus, output, vcc, ground],
+            )
+            .unwrap();
+        let netlist = builder.build().unwrap();
+        let solved = solve_dc_internal(&netlist, DcOptions::default()).unwrap();
+        let voltage = solved
+            .circuit
+            .component_voltage(comparator, &solved.solution)
+            .unwrap();
+        let current = solved
+            .circuit
+            .component_current(comparator, &solved.solution, AssemblyMode::Dc)
+            .unwrap();
+        let output_voltage = solved
+            .circuit
+            .node_voltage(&solved.solution, output)
+            .unwrap();
+
+        assert!(voltage > 0.0);
+        assert!(current > 0.0);
+        assert!((current - (5.0 - output_voltage) / 1_000.0).abs() < 1e-9);
     }
 }
 

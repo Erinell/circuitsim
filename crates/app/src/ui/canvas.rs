@@ -1074,6 +1074,10 @@ impl CanvasState {
                                     editor_core::SymbolKind::ShuntReference,
                                     "Référence shunt programmable",
                                 ),
+                                (
+                                    editor_core::SymbolKind::Comparator,
+                                    "Comparateur collecteur ouvert",
+                                ),
                                 (editor_core::SymbolKind::OpAmp, "Amplificateur"),
                             ],
                         ),

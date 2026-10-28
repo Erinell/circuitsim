@@ -2129,6 +2129,7 @@ fn label_prefix(kind: &SymbolKind) -> &'static str {
         SymbolKind::Led => "LED",
         SymbolKind::Zener => "DZ",
         SymbolKind::ShuntReference => "U",
+        SymbolKind::Comparator => "U",
         SymbolKind::OpAmp => "U",
         SymbolKind::Voltmeter => "VM",
         SymbolKind::Ammeter => "AM",
@@ -2149,12 +2150,14 @@ pub fn parameter_unit(kind: &SymbolKind, key: &str) -> Option<sim_core::units::U
         (SymbolKind::Inductor, "inductance") => Some(Unit::Henry),
         (SymbolKind::Inductor, "resistance") => Some(Unit::Ohm),
         (SymbolKind::ShuntReference, "z_ka") => Some(Unit::Ohm),
+        (SymbolKind::Comparator, "r_sink") => Some(Unit::Ohm),
         (SymbolKind::Led, "wavelength") => None,
         (SymbolKind::Led | SymbolKind::Diode, "vf") => Some(Unit::Volt),
         (SymbolKind::Led | SymbolKind::Diode, "if") => Some(Unit::Ampere),
         (_, "imax") => Some(Unit::Ampere),
         (SymbolKind::VoltageSource, "dc")
         | (SymbolKind::ShuntReference, "vref")
+        | (SymbolKind::Comparator, "v_offset")
         | (SymbolKind::Zener, "bv")
         | (SymbolKind::OpAmp, "v_sat_pos" | "v_sat_neg") => Some(Unit::Volt),
         (SymbolKind::CurrentSource, "dc")
@@ -2231,6 +2234,8 @@ pub fn parameter_label(key: &str) -> &str {
         "iref" => "Courant de la broche REF",
         "ik_min" => "Courant cathode minimal",
         "z_ka" => "Impédance dynamique ZKA",
+        "v_offset" => "Offset d'entrée",
+        "r_sink" => "Résistance de sink",
         "gain" => "Gain",
         "v_sat_pos" => "Saturation positive",
         "v_sat_neg" => "Saturation négative",

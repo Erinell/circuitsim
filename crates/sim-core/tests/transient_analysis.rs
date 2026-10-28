@@ -50,6 +50,14 @@ fn shunt_reference_params() -> ParamMap {
     ])
 }
 
+fn comparator_params() -> ParamMap {
+    params(&[
+        ("v_offset", ParamValue::Number(0.0)),
+        ("r_sink", ParamValue::Number(20.0)),
+        ("imax", ParamValue::Number(0.02)),
+    ])
+}
+
 fn source_event(time: f64, component: ComponentId, value: f64) -> TransientEvent {
     TransientEvent {
         time,
@@ -115,6 +123,72 @@ fn shunt_reference_tracks_a_source_step_in_transient_analysis() {
         "output was {final_voltage}"
     );
     assert!(result.energy.dissipated.is_finite());
+}
+
+#[test]
+fn comparator_releases_its_output_immediately_after_an_input_step() {
+    let mut builder = NetlistBuilder::new();
+    let ground = builder.add_node("0", NodeKind::Ground).unwrap();
+    let vcc = builder.add_node("vcc", NodeKind::Electrical).unwrap();
+    let input_plus = builder.add_node("in_plus", NodeKind::Electrical).unwrap();
+    let input_minus = builder.add_node("in_minus", NodeKind::Electrical).unwrap();
+    let output = builder.add_node("out", NodeKind::Electrical).unwrap();
+    builder
+        .add_component(
+            ComponentKind::VoltageSource,
+            "VCC",
+            number("dc", 5.0),
+            vec![vcc, ground],
+        )
+        .unwrap();
+    let input_source = builder
+        .add_component(
+            ComponentKind::VoltageSource,
+            "VINP",
+            number("dc", 0.0),
+            vec![input_plus, ground],
+        )
+        .unwrap();
+    builder
+        .add_component(
+            ComponentKind::VoltageSource,
+            "VINM",
+            number("dc", 1.0),
+            vec![input_minus, ground],
+        )
+        .unwrap();
+    builder
+        .add_component(
+            ComponentKind::Resistor,
+            "RPU",
+            number("resistance", 1_000.0),
+            vec![vcc, output],
+        )
+        .unwrap();
+    builder
+        .add_component(
+            ComponentKind::Comparator,
+            "U1",
+            comparator_params(),
+            vec![input_plus, input_minus, output, vcc, ground],
+        )
+        .unwrap();
+    let netlist = builder.build().unwrap();
+
+    let result = simulate_transient(
+        &netlist,
+        TransientOptions {
+            start_time: 0.0,
+            stop_time: 2e-4,
+            step: 1e-4,
+            events: vec![source_event(0.0, input_source, 2.0)],
+            ..TransientOptions::default()
+        },
+    )
+    .unwrap();
+
+    assert!(result.samples[0].node_voltage(output).unwrap() < 0.11);
+    assert!((4.99..=5.0).contains(&result.samples.last().unwrap().node_voltage(output).unwrap()));
 }
 
 fn rc_netlist() -> (Netlist, ComponentId, NodeId, ComponentId, NodeId) {

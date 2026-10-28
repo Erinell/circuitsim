@@ -809,6 +809,7 @@ fn accumulate_interval(
                 | ComponentKind::Led
                 | ComponentKind::Zener
                 | ComponentKind::ShuntReference
+                | ComponentKind::Comparator
                 | ComponentKind::OpAmp
         ) {
             continue;
@@ -873,7 +874,8 @@ fn build_energy_audit(
             | ComponentKind::Diode
             | ComponentKind::Led
             | ComponentKind::Zener
-            | ComponentKind::ShuntReference => {
+            | ComponentKind::ShuntReference
+            | ComponentKind::Comparator => {
                 dissipated += interval_absorbed;
                 ComponentEnergy {
                     absorbed: interval_absorbed,

@@ -334,3 +334,5 @@ palettes. Détails dans
 ## Référence shunt programmable
 
 La palette **Semi-conducteurs** inclut la référence shunt programmable TL431/LM431. Son inspecteur édite `VREF`, `IREF`, `IKmin`, `Imax` et `ZKA` avec unités SI et validation de domaine. Les valeurs live affichent les broches, la tension K-A, le courant cathode K vers A et la puissance comprenant le port REF. `Imax` borne le courant du modèle et sert aussi de limite de surintensité.
+
+Le **Comparateur collecteur ouvert** expose `Voffset`, `Rsink` et `Imax`. Le survol et l'inspecteur affichent `V(out)-V(vss)` et le courant sink `out → vss`. Il faut câbler un pull-up externe ; l'état relâché sans chemin électrique peut rendre le circuit singulier. Le comparateur n'est actif que pour une alimentation `VCC-VSS` de 2 à 36 V et n'inclut ni hystérésis ni délai.

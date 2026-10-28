@@ -118,6 +118,19 @@ fn netlist_wire_roundtrips_parameter_variants_and_custom_kinds() {
             vec![output, output, ground],
         )
         .unwrap();
+    builder
+        .add_component(
+            ComponentKind::Comparator,
+            "U2",
+            [
+                ("v_offset".to_owned(), ParamValue::Number(0.0)),
+                ("r_sink".to_owned(), ParamValue::Number(20.0)),
+                ("imax".to_owned(), ParamValue::Number(0.02)),
+            ]
+            .into(),
+            vec![output, output, output, output, ground],
+        )
+        .unwrap();
     let message = ClientMessage::Submit {
         job: Job {
             revision: 1,
@@ -200,12 +213,12 @@ fn rejects_a_short_or_malformed_header() {
 #[test]
 fn rejects_an_unsupported_version_before_decoding_the_payload() {
     let mut frame = encode_request(&request(1)).unwrap();
-    frame[4..6].copy_from_slice(&1u16.to_le_bytes());
+    frame[4..6].copy_from_slice(&2u16.to_le_bytes());
     frame[HEADER_LEN] = 0xff;
     assert_eq!(
         decode_request(&frame).unwrap_err(),
         ProtocolError::UnsupportedVersion {
-            received: 1,
+            received: 2,
             supported: PROTOCOL_VERSION
         }
     );

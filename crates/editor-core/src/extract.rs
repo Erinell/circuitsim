@@ -614,6 +614,7 @@ fn component_kind(kind: &SymbolKind) -> ComponentKind {
         SymbolKind::Led => ComponentKind::Led,
         SymbolKind::Zener => ComponentKind::Zener,
         SymbolKind::ShuntReference => ComponentKind::ShuntReference,
+        SymbolKind::Comparator => ComponentKind::Comparator,
         SymbolKind::OpAmp => ComponentKind::OpAmp,
         SymbolKind::Voltmeter | SymbolKind::Ammeter | SymbolKind::Ohmmeter => {
             ComponentKind::Custom(kind.key().to_owned())
@@ -719,6 +720,44 @@ mod tests {
             symbol: ground.id,
             pin: 0,
         }));
+    }
+
+    #[test]
+    fn comparator_extraction_preserves_input_output_and_supply_pin_order() {
+        let mut schematic = Schematic::new();
+        let mut history = UndoStack::new();
+        add_symbol(
+            &mut schematic,
+            &mut history,
+            SymbolKind::Ground,
+            GridPos::new(-10, -10),
+            "GND1",
+        );
+        let comparator = add_symbol(
+            &mut schematic,
+            &mut history,
+            SymbolKind::Comparator,
+            GridPos::new(0, 0),
+            "U1",
+        );
+
+        let extraction = extract_netlist(&schematic, &registry()).unwrap();
+        let component = extraction.netlist.component_by_label("U1").unwrap();
+
+        assert_eq!(component.kind, ComponentKind::Comparator);
+        assert_eq!(component.pins.len(), 5);
+        assert_eq!(
+            component.pins,
+            (0_u16..5)
+                .map(|pin| {
+                    extraction.net_of_pin[&PinKey {
+                        symbol: comparator.id,
+                        pin,
+                    }]
+                })
+                .collect::<Vec<_>>()
+        );
+        assert!(component.pins.windows(2).all(|pins| pins[0] != pins[1]));
     }
 
     fn add_symbol(

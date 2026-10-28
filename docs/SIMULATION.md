@@ -209,3 +209,9 @@ de jonction, opamp sans alimentation/slew rate/pôle, solveur dense.
 `ComponentKind::ShuntReference` utilise les broches ordonnées `REF`, `K`, `A` et les cinq paramètres `vref`, `iref`, `ik_min`, `imax`, `z_ka`. DC et chaque pas transitoire résolvent la même loi algébrique bornée ; `I_KA` est positif de K vers A et `iref` va de REF vers A. La tension principale du composant est `V(K)-V(A)`. `branch_currents` ne contient pas ce courant non linéaire ; les tensions suffisent à le recalculer avec le modèle.
 
 L'AC petits signaux inclut les dérivées réelles de la loi au point DC sur les broches K, A et REF. Le modèle est instantané : il n'ajoute aucun pôle, capacité, bruit ni comportement de démarrage. Voir [COMPONENTS.md](COMPONENTS.md) pour les valeurs et limites.
+
+## 10. Comparateur à collecteur ouvert
+
+`ComponentKind::Comparator` utilise l'ordre `in+`, `in-`, `out`, `vcc`, `vss`. La sortie est un sink référencé à `vss` ; il faut ajouter un pull-up externe pour obtenir l'état haut. Le modèle ne compare que si `2 V <= V(vcc)-V(vss) <= 36 V`. Le seuil bascule lorsque `V(in+)-V(in-)` passe sous `v_offset`. L'état commute sans délai ni hystérésis, au point DC comme à l'échantillon transitoire suivant.
+
+L'AC conserve l'état logique du point DC et ne transfère pas l'excitation d'entrée à la sortie ; dans l'état sink, il linéarise `r_sink` tant que `imax` n'est pas atteint. Le courant non linéaire `out -> vss` est recalculé depuis les tensions, et n'est pas un courant de branche retourné par le solveur. Sans pull-up ni autre chemin dans l'état relâché, la matrice peut être singulière. Limites et défauts LM393 : [COMPONENTS.md](COMPONENTS.md).

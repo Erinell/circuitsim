@@ -28,7 +28,12 @@ pub(crate) fn net_flows(document: &Document, live: &LiveValues) -> BTreeMap<Stri
         let Some(definition) = document.registry().get(&symbol.kind) else {
             continue;
         };
-        if definition.pins.len() > 3 {
+        if definition.pins.len() != 2
+            && !matches!(
+                symbol.kind,
+                SymbolKind::ShuntReference | SymbolKind::Comparator
+            )
+        {
             continue;
         }
         if symbol.kind == SymbolKind::Switch && !switch_closed(symbol) {
@@ -187,7 +192,12 @@ fn net_wire_currents(
         let Some(definition) = document.registry().get(&symbol.kind) else {
             continue;
         };
-        if definition.pins.len() > 3 {
+        if definition.pins.len() != 2
+            && !matches!(
+                symbol.kind,
+                SymbolKind::ShuntReference | SymbolKind::Comparator
+            )
+        {
             continue;
         }
         let observed = live.symbol(document, symbol);

@@ -216,3 +216,7 @@ ni contenu, ni révision, ni compteur d'identifiants.
 ## Broches de la référence shunt
 
 Le symbole `ShuntReference` conserve l'ordre `REF`, `K`, `A` lors de l'extraction et de la sérialisation. REF est la broche de mesure, K la cathode de sortie et A l'anode commune ; la tension et le courant principaux affichés sont `V(K)-V(A)` et `I(K vers A)`. Les paramètres sont modifiables dans l'inspecteur.
+
+## Broches du comparateur LM393
+
+Le symbole `Comparator` conserve l'ordre `in+`, `in-`, `out`, `vcc`, `vss`. `out` est le collecteur ouvert ; `vss` est le retour du courant sink. Un pull-up externe est requis pour définir le niveau relâché. `vcc` active le modèle dans la plage 2–36 V ; son courant et les limites de mode commun ne sont pas modélisés.

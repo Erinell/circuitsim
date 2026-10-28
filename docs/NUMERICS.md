@@ -231,3 +231,9 @@ Le composant `ShuntReference` est un élément non linéaire à trois terminaux.
 En régime actif, l'assemblage utilise `gREF = h/z_ka` si `0<u<imax`, et `gKA = u*dh/dVKA`. Ces pentes occupent les lignes KCL de K et A et les colonnes des tensions REF, K et A. La source équivalente vaut `I_KA - gREF*(e+vref) - gKA*VKA`. Le limiteur de Newton porte sur `e`, à l'échelle `z_ka*imax`. L'AC réutilise les mêmes dérivées réelles au point DC, sans dynamique fréquentielle. En transitoire, l'audit d'énergie inclut `VKA*I_KA + VREF,A*iref` dans la puissance absorbée.
 
 Cette loi est un modèle comportemental statique, pas un sous-circuit transistor ni une reproduction de la compensation du TL431. Ses approximations et plages de régulation sont décrites dans [COMPONENTS.md](COMPONENTS.md).
+
+## 11. Comparateur à collecteur ouvert
+
+Le comparateur choisit l'état sink si `e = V(in+)-V(in-)-v_offset < 0` et si `2 V <= V(vcc)-V(vss) <= 36 V`. Dans cet état, `Iout = min(V(out,vss)/r_sink, imax)` orienté de OUT vers VSS ; sinon `Iout = 0`. L'assemblage est équivalent à une conductance `1/r_sink` entre OUT et VSS tant que le courant est inférieur à `imax`, sinon à une source de courant plafonnée. Le Jacobien ne comporte pas de dérivée par rapport aux entrées : le comparateur est un commutateur algébrique, pas un gain analogique élevé.
+
+En AC, l'état du comparateur est figé par le point DC ; seule la pente de sortie active participe à la matrice complexe. La source de pull-up est un composant externe et conserve son excitation AC. Le modèle ne représente ni délai/hystérésis, ni courant d'entrée, ni limites de mode commun, ni courant d'alimentation VCC. Pour éviter les oscillations de Newton, la résistance active est extrapolée sous VSS pendant les itérations ; cette extrapolation n'est pas une caractéristique physique de la puce.
