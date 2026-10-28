@@ -6,7 +6,7 @@ use crate::analysis::LiveValues;
 use crate::document::Document;
 use crate::overcurrent::{self, Severity};
 use crate::ui::canvas::CanvasState;
-use crate::ui::{Status, CRITICAL, MUTED, WARNING};
+use crate::ui::{muted_text_color, Status, CRITICAL, WARNING};
 
 /// Draws the overcurrent list and selects the clicked object.
 pub fn show(
@@ -34,7 +34,7 @@ pub fn show(
                 ui.label(
                     RichText::new("Lancez une simulation pour détecter les surintensités.")
                         .small()
-                        .color(MUTED),
+                        .color(muted_text_color(ui)),
                 );
                 return;
             }
@@ -42,7 +42,7 @@ pub fn show(
                 ui.label(
                     RichText::new("Résultat antérieur : alertes masquées.")
                         .small()
-                        .color(MUTED),
+                        .color(muted_text_color(ui)),
                 );
                 return;
             }
@@ -50,7 +50,7 @@ pub fn show(
                 ui.label(
                     RichText::new("Aucune surintensité détectée.")
                         .small()
-                        .color(MUTED),
+                        .color(muted_text_color(ui)),
                 );
                 return;
             }

@@ -114,6 +114,16 @@ struct DisplayPreferences {
     reduce_motion: bool,
 }
 
+#[derive(Clone, Copy)]
+struct ToolbarState {
+    now: f64,
+    running: bool,
+    paused: bool,
+    can_simulate: bool,
+    live_error: bool,
+    primary_text: Color32,
+}
+
 impl Default for DisplayPreferences {
     fn default() -> Self {
         Self {
@@ -126,6 +136,20 @@ impl Default for DisplayPreferences {
 
 /// Supported interface scales.
 const UI_SCALES: [f32; 4] = [0.85, 1.0, 1.15, 1.3];
+const TOOLBAR_IDENTITY_WIDTH: f32 = 300.0;
+const TOOLBAR_DIRTY_WIDTH: f32 = 45.0;
+const TOOLBAR_ACTIONS_WIDTH: f32 = 610.0;
+const TOOLBAR_ERROR_WIDTH: f32 = 50.0;
+const TOOLBAR_CENTER_GAP: f32 = 16.0;
+
+fn toolbar_fits_single_row(available_width: f32, zoom: f32, dirty: bool, live_error: bool) -> bool {
+    if !available_width.is_finite() || !zoom.is_finite() || zoom <= 0.0 {
+        return false;
+    }
+    let identity_width = TOOLBAR_IDENTITY_WIDTH + if dirty { TOOLBAR_DIRTY_WIDTH } else { 0.0 };
+    let actions_width = TOOLBAR_ACTIONS_WIDTH + if live_error { TOOLBAR_ERROR_WIDTH } else { 0.0 };
+    available_width >= (identity_width * 2.0 + actions_width + TOOLBAR_CENTER_GAP) * zoom
+}
 
 impl LayoutPreset {
     const ALL: [Self; 4] = [Self::All, Self::Editing, Self::Simulation, Self::Canvas];
@@ -429,12 +453,16 @@ impl CircuitApp {
                 }
                 ui.close();
             }
-            if ui.button("Projet…").clicked() {
+            if ui.button("Projet JSON…").clicked() {
                 self.project_dialog.open_with(&self.document);
                 ui.close();
             }
             ui.separator();
-            ui.label(RichText::new("Exemples").small().color(ui::MUTED));
+            ui.label(
+                RichText::new("Exemples")
+                    .small()
+                    .color(ui::muted_text_color(ui)),
+            );
             for (label, builder) in [
                 (
                     "RC",
@@ -569,7 +597,7 @@ impl CircuitApp {
             }
         });
         ui.menu_button("Options", |ui| {
-            if ui.button("Préférences d'affichage…").clicked() {
+            if ui.button("Accessibilité et affichage").clicked() {
                 self.show_preferences = true;
                 ui.close();
             }
@@ -591,65 +619,151 @@ impl CircuitApp {
     }
 
     fn toolbar(&mut self, ui: &mut Ui) {
-        ui.add_space(2.0);
-        ui.horizontal_wrapped(|ui| {
-            ui.label(RichText::new("CircuitSim").strong().size(16.0));
-            ui.label(RichText::new("Éditeur").small().color(ui::MUTED));
-            if self.document.is_dirty() {
-                ui.label(RichText::new("● modifié").small().color(ui::ACCENT));
-            }
-            ui.separator();
-            self.menu_bar(ui);
-            ui.separator();
+        let state = ToolbarState {
+            now: ui.input(|input| input.time),
+            running: self.instruments.realtime_active(),
+            paused: self.instruments.realtime_paused(),
+            can_simulate: self.instruments.can_simulate(&self.document),
+            live_error: self.instruments.live_error().is_some(),
+            primary_text: if ui.visuals().dark_mode {
+                Color32::WHITE
+            } else {
+                Color32::from_rgb(22, 63, 112)
+            },
+        };
+        let dirty = self.document.is_dirty();
+        let zoom = ui.ctx().zoom_factor();
+        let available_width = ui.available_width();
+        let single_row = toolbar_fits_single_row(available_width, zoom, dirty, state.live_error);
 
-            let now = ui.input(|input| input.time);
-            let running = self.instruments.realtime_active();
-            let paused = self.instruments.realtime_paused();
-            if ui
-                .add_enabled(
-                    running || self.instruments.can_simulate(&self.document),
-                    egui::Button::new(if running && !paused {
+        if single_row {
+            ui.horizontal(|ui| {
+                let content_center = ui.max_rect().center().x;
+                self.toolbar_identity(ui, state.primary_text);
+                let centered_left = content_center - TOOLBAR_ACTIONS_WIDTH * zoom * 0.5;
+                ui.add_space((centered_left - ui.cursor().left()).max(0.0));
+                self.toolbar_actions(ui, state);
+            });
+        } else {
+            ui.vertical(|ui| {
+                ui.horizontal_wrapped(|ui| self.toolbar_identity(ui, state.primary_text));
+                ui.with_layout(egui::Layout::top_down(Align::Center), |ui| {
+                    self.toolbar_actions(ui, state);
+                });
+            });
+        }
+    }
+
+    fn toolbar_identity(&mut self, ui: &mut Ui, primary_text: Color32) {
+        egui::Frame::new()
+            .fill(ui.visuals().selection.bg_fill)
+            .corner_radius(egui::CornerRadius::same(7))
+            .inner_margin(egui::Margin::symmetric(2, 3))
+            .show(ui, |ui| {
+                ui.label(RichText::new("CS").strong().color(primary_text));
+            });
+        ui.label(RichText::new("CircuitSim").strong().size(17.0));
+        if self.document.is_dirty() {
+            ui.label(RichText::new("● Modifié").small().color(ui::ACCENT));
+        }
+        ui.separator();
+        self.menu_bar(ui);
+    }
+
+    fn toolbar_actions(&mut self, ui: &mut Ui, state: ToolbarState) {
+        egui::Frame::new()
+            .fill(ui.visuals().faint_bg_color)
+            .corner_radius(egui::CornerRadius::same(8))
+            .inner_margin(egui::Margin {
+                left: 8,
+                right: 8,
+                top: 4,
+                bottom: 4,
+            })
+            .show(ui, |ui| {
+                ui.horizontal_wrapped(|ui| {
+                    if ui
+                        .button("Rechercher  Ctrl+K")
+                        .on_hover_text("Ouvrir la palette de commandes (Ctrl+K)")
+                        .clicked()
+                    {
+                        self.palette.toggle(self.canvas.last_pointer_grid());
+                        self.canvas.cancel_interaction();
+                    }
+                    ui.separator();
+                    let start_label = if state.running && !state.paused {
                         "Pause"
+                    } else if state.running {
+                        "Reprendre"
                     } else {
-                        "Marche"
-                    }),
-                )
-                .on_hover_text("Espace : marche/arrêt de la simulation continue")
-                .clicked()
-            {
-                self.toggle_live(now);
-            }
-            if ui
-                .add_enabled(running, egui::Button::new("Reset"))
-                .on_hover_text("F5 : remet la session à t = 0")
-                .clicked()
-            {
-                self.reset_live(now);
-            }
-            if ui
-                .add_enabled(running && paused, egui::Button::new("Pas"))
-                .on_hover_text("Avance d'un pas lorsque la simulation est en pause")
-                .clicked()
-            {
-                self.step_live();
-            }
-            if self.instruments.live_lagging() {
-                ui.label(
-                    RichText::new(format!("trop lent (×{:.1})", self.instruments.live_ratio()))
-                        .small()
-                        .color(ui::ACCENT),
-                )
-                .on_hover_text("Le moteur ne suit pas la vitesse demandée");
-            }
-            if let Some(error) = self.instruments.live_error() {
-                ui.label(RichText::new("Circuit invalide").color(Color32::from_rgb(240, 128, 128)))
-                    .on_hover_text(error.to_owned());
-            }
-            if self.instruments.is_busy() {
-                ui.spinner();
-            }
-        });
-        ui.add_space(2.0);
+                        "Démarrer"
+                    };
+                    if ui
+                        .add_enabled(
+                            state.running || state.can_simulate,
+                            egui::Button::new(
+                                RichText::new(start_label)
+                                    .strong()
+                                    .color(state.primary_text),
+                            )
+                            .fill(ui.visuals().selection.bg_fill)
+                            .stroke(ui.visuals().selection.stroke),
+                        )
+                        .on_hover_text("Espace : démarrer, mettre en pause ou reprendre")
+                        .clicked()
+                    {
+                        self.toggle_live(state.now);
+                    }
+                    if ui
+                        .add_enabled(state.running, egui::Button::new("Réinitialiser"))
+                        .on_hover_text("F5 : remet la session à t = 0")
+                        .clicked()
+                    {
+                        self.reset_live(state.now);
+                    }
+                    if ui
+                        .add_enabled(
+                            state.running && state.paused,
+                            egui::Button::new("Pas suivant"),
+                        )
+                        .on_hover_text("Avance d'un pas lorsque la simulation est en pause")
+                        .clicked()
+                    {
+                        self.step_live();
+                    }
+
+                    let live_error = self.instruments.live_error().map(str::to_owned);
+                    let (status_label, tone) = if state.live_error {
+                        ("Circuit invalide", Color32::from_rgb(240, 96, 96))
+                    } else if state.running && state.paused {
+                        ("En pause", Color32::from_rgb(238, 190, 92))
+                    } else if state.running {
+                        ("En marche", Color32::from_rgb(112, 210, 155))
+                    } else if state.can_simulate {
+                        ("Prêt", ui::HOVER)
+                    } else {
+                        ("À vérifier", ui::muted_text_color(ui))
+                    };
+                    ui.separator();
+                    status_chip(ui, status_label, tone);
+                    if self.instruments.live_lagging() {
+                        let lag = format!("Trop lent (×{:.1})", self.instruments.live_ratio());
+                        ui.label(RichText::new(&lag).small().color(ui::ACCENT))
+                            .on_hover_text("Le moteur ne suit pas la vitesse demandée");
+                    }
+                    if let Some(error) = live_error {
+                        ui.label(
+                            RichText::new("Détails")
+                                .small()
+                                .color(ui::muted_text_color(ui)),
+                        )
+                        .on_hover_text(error);
+                    }
+                    if self.instruments.is_busy() {
+                        ui.spinner();
+                    }
+                });
+            });
     }
 
     fn compact_symbols(&self) -> Vec<editor_core::SymbolKind> {
@@ -677,8 +791,12 @@ impl CircuitApp {
     }
 
     fn status_bar(&mut self, ui: &mut Ui) {
-        ui.horizontal(|ui| {
-            self.status.show(ui);
+        ui.horizontal_wrapped(|ui| {
+            egui::Frame::new()
+                .fill(ui.visuals().faint_bg_color)
+                .corner_radius(egui::CornerRadius::same(6))
+                .inner_margin(egui::Margin::symmetric(7, 3))
+                .show(ui, |ui| self.status.show(ui));
             ui.separator();
             let tool = match &self.tool {
                 Tool::Select => "Sélection".to_owned(),
@@ -702,14 +820,14 @@ impl CircuitApp {
                     )
                 ))
                 .small()
-                .color(ui::MUTED),
+                .color(ui::muted_text_color(ui)),
             );
             ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                 let zoom = self.canvas.viewport().zoom_percent();
                 ui.label(
                     RichText::new(format!("Zoom {zoom:.0} % · grille entière"))
                         .small()
-                        .color(ui::MUTED),
+                        .color(ui::muted_text_color(ui)),
                 );
             });
         });
@@ -739,7 +857,7 @@ impl CircuitApp {
                     &live,
                 );
                 history::show(ui, &mut self.document, &mut self.status);
-                ui::erc::show(ui, &mut self.document, &mut self.status);
+                ui::erc::show(ui, &mut self.document, &mut self.canvas, &mut self.status);
                 let settings = *self.canvas.settings();
                 ui::diagnostics::show(
                     ui,
@@ -1242,7 +1360,11 @@ impl CircuitApp {
                             .strong()
                             .color(ui::ACCENT),
                     );
-                    ui.label(RichText::new(detail).small().color(ui::MUTED));
+                    ui.label(
+                        RichText::new(detail)
+                            .small()
+                            .color(ui::muted_text_color(ui)),
+                    );
                     ui.add_space(3.0);
                 }
                 ui.separator();
@@ -1275,7 +1397,7 @@ impl CircuitApp {
                          de commandes.",
                     )
                     .small()
-                    .color(ui::MUTED),
+                    .color(ui::muted_text_color(ui)),
                 );
             });
         if load_demo {
@@ -1384,7 +1506,7 @@ impl CircuitApp {
                 ui.label(
                     RichText::new("Réglages appliqués à cette session.")
                         .small()
-                        .color(ui::MUTED),
+                        .color(ui::muted_text_color(ui)),
                 );
                 ui.separator();
                 ui.label(RichText::new("Thème").strong());
@@ -1454,7 +1576,7 @@ impl CircuitApp {
                         "Avertissement dès 80 % de la limite, critique au-delà de 100 %.",
                     )
                     .small()
-                    .color(ui::MUTED),
+                    .color(ui::muted_text_color(ui)),
                 );
                 ui.add_space(6.0);
                 ui.separator();
@@ -1464,7 +1586,7 @@ impl CircuitApp {
                          Échap ferme les fenêtres. Ctrl+K ouvre toutes les commandes.",
                     )
                     .small()
-                    .color(ui::MUTED),
+                    .color(ui::muted_text_color(ui)),
                 );
                 ui.add_space(6.0);
                 if ui.button("Réinitialiser").clicked() {
@@ -1501,7 +1623,7 @@ impl CircuitApp {
                          Ctrl+Maj+A ouvre les préférences d’affichage.",
                     )
                     .small()
-                    .color(ui::MUTED),
+                    .color(ui::muted_text_color(ui)),
                 );
                 ui.add_space(6.0);
                 ui.label(RichText::new("Souris").strong());
@@ -1533,9 +1655,9 @@ impl CircuitApp {
                 );
                 ui.label(
                     "La simulation continue démarre à l'ouverture. Espace l'arrête ou la reprend ; \
-                     Reset et F5 reviennent à t = 0. Les paramètres sont appliqués à chaud tant que \
-                     la topologie reste compatible. Les fils sont colorés par tension et les sondes \
-                     V/A/Ω se placent depuis la palette.",
+                     Réinitialiser et F5 reviennent à t = 0. Les paramètres sont appliqués à chaud \
+                     tant que la topologie reste compatible. Les fils sont colorés par tension ; \
+                     les tensions et courants sont lisibles au survol et dans les portées.",
                 );
                 ui.label(
                     "Dans la portée, deux clics placent les curseurs A et B ; les écarts et \
@@ -1557,7 +1679,7 @@ impl CircuitApp {
                      nommé. Un clic droit sur le canevas propose les actions de l’objet.",
                 );
                 ui.label(
-                    "Le menu Vue masque les panneaux, choisit une disposition et règle le \
+                    "Le menu Affichage masque les panneaux, choisit une disposition et règle le \
                      zoom. La mini-carte et les flèches déplacent la vue sans toucher au schéma.",
                 );
                 ui.label(
@@ -1572,7 +1694,7 @@ impl CircuitApp {
                          le schéma, et toute action acceptée peut être annulée.",
                     )
                     .small()
-                    .color(ui::MUTED),
+                    .color(ui::muted_text_color(ui)),
                 );
             });
         self.show_help = open;
@@ -1607,9 +1729,17 @@ impl eframe::App for CircuitApp {
 
         egui::Panel::top("top_bar")
             .resizable(false)
+            .frame(
+                egui::Frame::side_top_panel(ui.style())
+                    .inner_margin(egui::Margin::symmetric(12, 8)),
+            )
             .show(ui, |ui| self.toolbar(ui));
         egui::Panel::bottom("status_bar")
             .resizable(false)
+            .frame(
+                egui::Frame::side_top_panel(ui.style())
+                    .inner_margin(egui::Margin::symmetric(10, 5)),
+            )
             .show(ui, |ui| self.status_bar(ui));
         if self.show_instruments {
             let wire_limit = self.canvas.settings().wire_current_limit;
@@ -1622,6 +1752,10 @@ impl eframe::App for CircuitApp {
             } = self;
             egui::Panel::bottom("instruments_panel")
                 .resizable(true)
+                .frame(
+                    egui::Frame::side_top_panel(ui.style())
+                        .inner_margin(egui::Margin::symmetric(10, 8)),
+                )
                 .default_size(324.0)
                 .size_range(210.0..=620.0)
                 .show(ui, |ui| {
@@ -1631,6 +1765,10 @@ impl eframe::App for CircuitApp {
         if self.show_palette {
             egui::Panel::left("palette_panel")
                 .resizable(true)
+                .frame(
+                    egui::Frame::side_top_panel(ui.style())
+                        .inner_margin(egui::Margin::symmetric(10, 8)),
+                )
                 .default_size(248.0)
                 .size_range(220.0..=330.0)
                 .show(ui, |ui| {
@@ -1647,6 +1785,10 @@ impl eframe::App for CircuitApp {
         if self.show_inspector {
             egui::Panel::right("inspector_panel")
                 .resizable(true)
+                .frame(
+                    egui::Frame::side_top_panel(ui.style())
+                        .inner_margin(egui::Margin::symmetric(10, 8)),
+                )
                 .default_size(335.0)
                 .size_range(280.0..=470.0)
                 .show(ui, |ui| {
@@ -1685,28 +1827,40 @@ fn apply_style(context: &Context, preferences: DisplayPreferences) {
     };
     context.set_visuals(visuals);
     context.all_styles_mut(|style| {
-        style.spacing.item_spacing = egui::vec2(7.0, 5.0);
-        style.spacing.button_padding = egui::vec2(8.0, 4.0);
+        style.spacing.item_spacing = egui::vec2(8.0, 6.0);
+        style.spacing.button_padding = egui::vec2(10.0, 5.0);
+        style.spacing.window_margin = egui::Margin::same(12);
         style.animation_time = if preferences.reduce_motion { 0.0 } else { 0.15 };
         style
             .text_styles
-            .insert(egui::TextStyle::Heading, FontId::proportional(19.0));
+            .insert(egui::TextStyle::Heading, FontId::proportional(20.0));
         style
             .text_styles
-            .insert(egui::TextStyle::Small, FontId::proportional(10.0));
+            .insert(egui::TextStyle::Small, FontId::proportional(11.0));
     });
     context.set_zoom_factor(preferences.scale);
 }
 
 fn dark_visuals() -> egui::Visuals {
     let mut visuals = egui::Visuals::dark();
-    visuals.panel_fill = Color32::from_rgb(18, 24, 35);
-    visuals.window_fill = Color32::from_rgb(24, 32, 46);
-    visuals.extreme_bg_color = Color32::from_rgb(13, 19, 28);
-    visuals.faint_bg_color = Color32::from_rgb(28, 37, 51);
-    visuals.selection.bg_fill = Color32::from_rgb(62, 103, 152);
-    visuals.hyperlink_color = ui::HOVER;
-    visuals.window_stroke = egui::Stroke::new(1.0, Color32::from_rgb(56, 76, 102));
+    visuals.panel_fill = Color32::from_rgb(20, 27, 39);
+    visuals.window_fill = Color32::from_rgb(28, 38, 54);
+    visuals.extreme_bg_color = Color32::from_rgb(13, 19, 29);
+    visuals.faint_bg_color = Color32::from_rgb(31, 42, 59);
+    visuals.selection.bg_fill = Color32::from_rgb(41, 94, 154);
+    visuals.selection.stroke = egui::Stroke::new(1.0, Color32::from_rgb(204, 228, 255));
+    visuals.hyperlink_color = Color32::from_rgb(113, 207, 222);
+    visuals.window_stroke = egui::Stroke::new(1.0, Color32::from_rgb(62, 78, 101));
+    visuals.widgets.inactive.weak_bg_fill = Color32::from_rgb(39, 52, 71);
+    visuals.widgets.inactive.bg_fill = Color32::from_rgb(39, 52, 71);
+    visuals.widgets.inactive.bg_stroke = egui::Stroke::new(1.0, Color32::from_rgb(58, 75, 99));
+    visuals.widgets.hovered.weak_bg_fill = Color32::from_rgb(53, 72, 98);
+    visuals.widgets.hovered.bg_fill = Color32::from_rgb(53, 72, 98);
+    visuals.widgets.hovered.fg_stroke = egui::Stroke::new(1.5, Color32::WHITE);
+    visuals.widgets.active.weak_bg_fill = Color32::from_rgb(39, 94, 145);
+    visuals.widgets.active.bg_fill = Color32::from_rgb(39, 94, 145);
+    visuals.widgets.active.fg_stroke = egui::Stroke::new(1.5, Color32::WHITE);
+    rounded_widget_corners(&mut visuals, 6);
     visuals
 }
 
@@ -1725,20 +1879,55 @@ fn high_contrast_visuals() -> egui::Visuals {
     visuals.widgets.inactive.fg_stroke = egui::Stroke::new(1.2, Color32::WHITE);
     visuals.widgets.hovered.fg_stroke = egui::Stroke::new(1.5, Color32::WHITE);
     visuals.widgets.active.fg_stroke = egui::Stroke::new(1.5, Color32::WHITE);
+    rounded_widget_corners(&mut visuals, 4);
     visuals
 }
 
 fn light_visuals() -> egui::Visuals {
     let mut visuals = egui::Visuals::light();
-    visuals.panel_fill = Color32::from_rgb(248, 249, 251);
+    visuals.panel_fill = Color32::from_rgb(244, 247, 251);
     visuals.window_fill = Color32::WHITE;
-    visuals.extreme_bg_color = Color32::from_rgb(238, 241, 246);
-    visuals.faint_bg_color = Color32::from_rgb(232, 236, 242);
-    visuals.selection.bg_fill = Color32::from_rgb(188, 214, 244);
-    visuals.selection.stroke = egui::Stroke::new(1.0, Color32::from_rgb(28, 86, 156));
-    visuals.hyperlink_color = Color32::from_rgb(0, 110, 130);
-    visuals.window_stroke = egui::Stroke::new(1.0, Color32::from_rgb(196, 204, 216));
+    visuals.extreme_bg_color = Color32::from_rgb(232, 237, 245);
+    visuals.faint_bg_color = Color32::from_rgb(235, 240, 247);
+    visuals.selection.bg_fill = Color32::from_rgb(207, 226, 249);
+    visuals.selection.stroke = egui::Stroke::new(1.0, Color32::from_rgb(27, 72, 126));
+    visuals.hyperlink_color = Color32::from_rgb(0, 102, 122);
+    visuals.window_stroke = egui::Stroke::new(1.0, Color32::from_rgb(195, 205, 219));
+    visuals.widgets.inactive.weak_bg_fill = Color32::from_rgb(232, 238, 246);
+    visuals.widgets.inactive.bg_fill = Color32::from_rgb(232, 238, 246);
+    visuals.widgets.inactive.bg_stroke = egui::Stroke::new(1.0, Color32::from_rgb(192, 204, 220));
+    visuals.widgets.hovered.weak_bg_fill = Color32::from_rgb(218, 231, 247);
+    visuals.widgets.hovered.bg_fill = Color32::from_rgb(218, 231, 247);
+    visuals.widgets.hovered.fg_stroke = egui::Stroke::new(1.5, Color32::from_rgb(26, 54, 90));
+    visuals.widgets.active.weak_bg_fill = Color32::from_rgb(194, 218, 247);
+    visuals.widgets.active.bg_fill = Color32::from_rgb(194, 218, 247);
+    visuals.widgets.active.fg_stroke = egui::Stroke::new(1.5, Color32::from_rgb(22, 63, 112));
+    rounded_widget_corners(&mut visuals, 6);
     visuals
+}
+
+fn rounded_widget_corners(visuals: &mut egui::Visuals, radius: u8) {
+    visuals.window_corner_radius = egui::CornerRadius::same(radius.saturating_add(2));
+    let radius = egui::CornerRadius::same(radius);
+    visuals.menu_corner_radius = radius;
+    visuals.widgets.noninteractive.corner_radius = radius;
+    visuals.widgets.inactive.corner_radius = radius;
+    visuals.widgets.hovered.corner_radius = radius;
+    visuals.widgets.active.corner_radius = radius;
+    visuals.widgets.open.corner_radius = radius;
+}
+
+fn status_chip(ui: &mut Ui, label: &str, tone: Color32) {
+    egui::Frame::new()
+        .fill(ui.visuals().faint_bg_color)
+        .corner_radius(egui::CornerRadius::same(7))
+        .inner_margin(egui::Margin::symmetric(8, 4))
+        .show(ui, |ui| {
+            ui.horizontal(|ui| {
+                ui.label(RichText::new("●").color(tone));
+                ui.label(label);
+            });
+        });
 }
 
 fn selection_has_symbols(document: &Document) -> bool {
@@ -1767,7 +1956,38 @@ mod tests {
             .text_styles
             .get(&egui::TextStyle::Small)
             .map_or(0.0, |font| font.size);
-        assert!(size >= 10.0, "small text size = {size}");
+        assert!(size >= 11.0, "small text size = {size}");
+    }
+
+    #[test]
+    fn modern_themes_keep_distinct_widget_interaction_states() {
+        let dark = dark_visuals();
+        assert_eq!(
+            dark.widgets.inactive.corner_radius,
+            egui::CornerRadius::same(6)
+        );
+        assert_ne!(dark.widgets.inactive.bg_fill, dark.widgets.hovered.bg_fill);
+        assert_ne!(dark.widgets.hovered.bg_fill, dark.widgets.active.bg_fill);
+
+        let light = light_visuals();
+        assert_eq!(
+            light.widgets.inactive.corner_radius,
+            egui::CornerRadius::same(6)
+        );
+        assert_ne!(
+            light.widgets.inactive.bg_fill,
+            light.widgets.hovered.bg_fill
+        );
+
+        let high_contrast = high_contrast_visuals();
+        assert_eq!(
+            high_contrast.widgets.inactive.corner_radius,
+            egui::CornerRadius::same(4)
+        );
+        assert_eq!(
+            high_contrast.widgets.inactive.fg_stroke.color,
+            Color32::WHITE
+        );
     }
 
     #[test]
@@ -1786,6 +2006,14 @@ mod tests {
         assert_eq!(LayoutPreset::Simulation.visibility(), (false, true, true));
         assert_eq!(LayoutPreset::Canvas.visibility(), (false, false, false));
         assert_eq!(LayoutPreset::ALL.len(), 4);
+    }
+
+    #[test]
+    fn toolbar_stays_centered_when_it_fits_and_wraps_for_compact_windows() {
+        assert!(toolbar_fits_single_row(1_432.0, 1.0, true, false));
+        assert!(!toolbar_fits_single_row(1_200.0, 1.0, false, false));
+        assert!(!toolbar_fits_single_row(1_432.0, 1.15, true, false));
+        assert!(!toolbar_fits_single_row(f32::NAN, 1.0, false, false));
     }
 
     #[test]

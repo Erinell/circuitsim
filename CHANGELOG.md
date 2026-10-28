@@ -52,6 +52,15 @@ sémantique.
 
 ### Changed
 
+- L'en-tête place désormais menus et commandes sur une même rangée, avec les
+  actions centrées ; les fenêtres étroites conservent un retour à la ligne centré.
+  L'alignement vertical est harmonisé, la recherche est visible et l'état de
+  simulation plus lisible.
+- La liste de la palette de commandes occupe toute sa largeur ; sa barre de
+  défilement reste à droite de la fenêtre.
+- Les textes secondaires passent à 11 px et les boutons bénéficient d'un peu plus
+  d'espace pour améliorer leur lisibilité et leur confort de clic. Leur couleur
+  est adaptée au thème et vérifiée à 4,5:1 dans les trois thèmes.
 - Le menu **Afficher** est renommé **Affichage**. La limite des fils/nets est
   déplacée dans la fenêtre **Préférences d’affichage**.
 - Les raccourcis à une lettre pour placer les composants sont retirés ; le
@@ -86,6 +95,9 @@ sémantique.
 
 ### Fixed
 
+- Un clic sur un diagnostic ERC cadre maintenant l'objet sélectionné dans le
+  canevas, comme pour les alertes de surintensité.
+
 - Un interrupteur **ouvert** ne fait plus apparaître de fuite dans les
   graphiques : `roff` passe à `1e18 Ω` par défaut, son courant est rapporté
   exactement à zéro, et les traces sous `1 pV` / `1 fA` sont ramenées à zéro.
@@ -95,8 +107,6 @@ sémantique.
 - Le panneau des portées n’affiche plus de barre de défilement superflue ni de
   séparateur au-dessus de la première portée. Ajouter une portée conserve des
   hauteurs identiques pour tous les tracés.
-- Les textes secondaires passent de 9 à 10 px pour une lisibilité légèrement
-  meilleure sans agrandir les contrôles principaux.
 - Le courant animé s’arrête quand l’interrupteur est ouvert, y compris lorsque le
   solveur renvoie un courant de fuite résiduel.
 - Les sources de tension des exemples diviseur, LED, interrupteur et RLC sont

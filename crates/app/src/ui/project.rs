@@ -4,7 +4,7 @@ use eframe::egui::{self, Align2, RichText, TextEdit, Ui, Vec2};
 
 use crate::document::Document;
 use crate::export;
-use crate::ui::{Status, MUTED};
+use crate::ui::{muted_text_color, Status};
 
 /// Project JSON dialog shared by native and web builds.
 pub struct ProjectDialog {
@@ -117,7 +117,7 @@ impl ProjectDialog {
                         "Un JSON invalide ou d'une version future est refusé sans modifier le schéma courant.",
                     )
                     .small()
-                    .color(MUTED),
+                    .color(muted_text_color(ui)),
                 );
                 if ui.button("Fermer").clicked() {
                     self.open = false;

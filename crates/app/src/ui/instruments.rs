@@ -21,7 +21,7 @@ use crate::document::Document;
 use crate::export;
 use crate::simulation::{LiveSimulation, TickOutcome, LIVE_SPEEDS};
 use crate::ui::scopes::InlineScopes;
-use crate::ui::{Status, ACCENT, HOVER, MUTED, SYMBOL};
+use crate::ui::{Status, ACCENT, HOVER, SYMBOL};
 
 const ERROR: Color32 = Color32::from_rgb(240, 128, 128);
 const CONTROL_WIDTH: f32 = 304.0;
@@ -581,7 +581,7 @@ impl InstrumentsState {
                                      · double-clic : auto-échelle",
                                 )
                                 .small()
-                                .color(MUTED),
+                                .color(crate::ui::muted_text_color(ui)),
                             );
                             ui.separator();
                             let mut window = self.scope_window;
@@ -609,7 +609,7 @@ impl InstrumentsState {
                                     self.scope_window
                                 ))
                                 .small()
-                                .color(MUTED),
+                                .color(crate::ui::muted_text_color(ui)),
                             );
                             ui.separator();
                             self.export_controls(ui, document, status);
@@ -633,23 +633,6 @@ impl InstrumentsState {
         ui.heading("Contrôles");
         let running = self.realtime_active();
         let paused = self.realtime_paused();
-        ui.label(
-            RichText::new(if running {
-                if paused {
-                    "Pause"
-                } else {
-                    "En marche"
-                }
-            } else if self.live_error.is_some() {
-                "Circuit invalide"
-            } else {
-                "Arrêtée"
-            })
-            .strong(),
-        );
-        if self.live_lagging() {
-            ui.label(RichText::new(format!("trop lent (×{:.1})", self.live_ratio())).color(ERROR));
-        }
         let live_error = self.live_error().map(str::to_owned);
         if let Some(error) = live_error {
             if ui
@@ -701,8 +684,10 @@ impl InstrumentsState {
                     can_run || running,
                     egui::Button::new(if running && !paused {
                         "Pause"
+                    } else if running {
+                        "Reprendre"
                     } else {
-                        "Marche"
+                        "Démarrer"
                     }),
                 )
                 .on_hover_text("Espace")
@@ -715,14 +700,14 @@ impl InstrumentsState {
                 }
             }
             if ui
-                .add_enabled(running, egui::Button::new("Reset"))
+                .add_enabled(running, egui::Button::new("Réinitialiser"))
                 .on_hover_text("Remet la session à t = 0")
                 .clicked()
             {
                 self.reset_realtime(document, now, status);
             }
             if ui
-                .add_enabled(running && paused, egui::Button::new("Pas"))
+                .add_enabled(running && paused, egui::Button::new("Pas suivant"))
                 .on_hover_text("Avance d'un pas en pause")
                 .clicked()
             {
@@ -754,7 +739,7 @@ impl InstrumentsState {
                 ui.label(
                     RichText::new(format!("Calcul {} en cours…", analysis_name(kind)))
                         .small()
-                        .color(MUTED),
+                        .color(crate::ui::muted_text_color(ui)),
                 );
             }
             ui.separator();
@@ -775,7 +760,7 @@ impl InstrumentsState {
                         format_si_precision(time, Unit::Second, 4)
                     ))
                     .small()
-                    .color(MUTED),
+                    .color(crate::ui::muted_text_color(ui)),
                 );
             }
             if self
@@ -861,7 +846,10 @@ impl InstrumentsState {
                         format_frequency(peak.frequency)
                     ));
                 } else {
-                    ui.label(RichText::new("Aucune composante non continue.").color(MUTED));
+                    ui.label(
+                        RichText::new("Aucune composante non continue.")
+                            .color(crate::ui::muted_text_color(ui)),
+                    );
                 }
                 ui.label(
                     RichText::new(format!(
@@ -870,12 +858,13 @@ impl InstrumentsState {
                         format_frequency(spectrum.resolution)
                     ))
                     .small()
-                    .color(MUTED),
+                    .color(crate::ui::muted_text_color(ui)),
                 );
             }
             Ok(None) => {
                 ui.label(
-                    RichText::new("Lancez le transitoire pour calculer le spectre.").color(MUTED),
+                    RichText::new("Lancez le transitoire pour calculer le spectre.")
+                        .color(crate::ui::muted_text_color(ui)),
                 );
             }
             Err(error) => {
@@ -903,7 +892,7 @@ impl InstrumentsState {
                 ui.label(
                     RichText::new(format!("{} points de fréquence", trace.points.len()))
                         .small()
-                        .color(MUTED),
+                        .color(crate::ui::muted_text_color(ui)),
                 );
                 if let Some(frequency) = self.bode_cursor {
                     if let Some(point) = nearest_bode_point(&trace.points, frequency) {
@@ -921,12 +910,15 @@ impl InstrumentsState {
                     ui.label(
                         RichText::new("Clic sur le graphe : marqueur de fréquence.")
                             .small()
-                            .color(MUTED),
+                            .color(crate::ui::muted_text_color(ui)),
                     );
                 }
             }
             Ok(None) => {
-                ui.label(RichText::new("Lancez l'analyse AC pour tracer le Bode.").color(MUTED));
+                ui.label(
+                    RichText::new("Lancez l'analyse AC pour tracer le Bode.")
+                        .color(crate::ui::muted_text_color(ui)),
+                );
             }
             Err(error) => {
                 ui.colored_label(ERROR, error.user_message());
@@ -1119,12 +1111,12 @@ impl InstrumentsState {
                 ui.label(
                     RichText::new("Toutes les valeurs de l'onglet actif, sans décimation.")
                         .small()
-                        .color(MUTED),
+                        .color(crate::ui::muted_text_color(ui)),
                 );
                 ui.label(
                     RichText::new(format!("Nom proposé : {}", self.tab.filename()))
                         .small()
-                        .color(MUTED),
+                        .color(crate::ui::muted_text_color(ui)),
                 );
                 let mut copy = false;
                 let mut persist = false;
@@ -1550,7 +1542,7 @@ fn realtime_controls(
             ui.label(
                 RichText::new(format!("{:.0} % du temps réel", ratio * 100.0))
                     .small()
-                    .color(MUTED),
+                    .color(crate::ui::muted_text_color(ui)),
             );
         }
     });
@@ -1573,7 +1565,9 @@ fn realtime_controls(
         );
     if settings.step_enabled {
         if catalog.sources.is_empty() {
-            ui.label(RichText::new("Aucune source indépendante.").color(MUTED));
+            ui.label(
+                RichText::new("Aucune source indépendante.").color(crate::ui::muted_text_color(ui)),
+            );
         } else {
             let previous_source = settings.source.clone();
             egui::ComboBox::from_id_salt("transient_step_source")
@@ -1699,7 +1693,9 @@ fn ac_controls(
         });
     ui.label("Source excitée");
     if catalog.sources.is_empty() {
-        ui.label(RichText::new("Aucune source indépendante.").color(MUTED));
+        ui.label(
+            RichText::new("Aucune source indépendante.").color(crate::ui::muted_text_color(ui)),
+        );
     } else {
         egui::ComboBox::from_id_salt("ac_source")
             .selected_text(settings.source.as_deref().unwrap_or("—"))
@@ -1728,7 +1724,7 @@ fn ac_controls(
         ui.label(
             RichText::new("Le gain est normalisé par l'amplitude d'excitation.")
                 .small()
-                .color(MUTED),
+                .color(crate::ui::muted_text_color(ui)),
         );
     }
     ui.add_enabled(can_run, egui::Button::new("Lancer l'analyse AC"))
@@ -1739,7 +1735,7 @@ fn spectrum_signal_control(ui: &mut Ui, signal: &mut Option<SignalId>, catalog: 
     ui.label("Signal analysé");
     let available = catalog.signals();
     if available.is_empty() {
-        ui.label(RichText::new("Aucun signal disponible.").color(MUTED));
+        ui.label(RichText::new("Aucun signal disponible.").color(crate::ui::muted_text_color(ui)));
         *signal = None;
         return;
     }
@@ -1758,7 +1754,9 @@ fn spectrum_signal_control(ui: &mut Ui, signal: &mut Option<SignalId>, catalog: 
 fn bode_output_control(ui: &mut Ui, output: &mut Option<String>, catalog: &SignalCatalog) {
     ui.label("Tension de sortie");
     if catalog.voltages.is_empty() {
-        ui.label(RichText::new("Aucune tension disponible.").color(MUTED));
+        ui.label(
+            RichText::new("Aucune tension disponible.").color(crate::ui::muted_text_color(ui)),
+        );
         *output = None;
         return;
     }
@@ -1949,7 +1947,7 @@ fn bode_grid(input: egui_plot::GridInput) -> Vec<egui_plot::GridMark> {
 
 fn empty_plot_message(ui: &mut Ui, message: &str) {
     ui.add_space(16.0);
-    ui.label(RichText::new(message).color(MUTED));
+    ui.label(RichText::new(message).color(crate::ui::muted_text_color(ui)));
 }
 
 #[cfg(test)]

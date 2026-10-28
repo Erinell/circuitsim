@@ -3,7 +3,7 @@
 use eframe::egui::{self, RichText, Ui};
 
 use crate::document::Document;
-use crate::ui::{Status, MUTED};
+use crate::ui::{muted_text_color, Status};
 
 /// Draws the named history and jumps to the selected state.
 pub fn show(ui: &mut Ui, document: &mut Document, status: &mut Status) {
@@ -16,7 +16,7 @@ pub fn show(ui: &mut Ui, document: &mut Document, status: &mut Status) {
                 ui.label(
                     RichText::new("Aucune modification enregistrée.")
                         .small()
-                        .color(MUTED),
+                        .color(muted_text_color(ui)),
                 );
                 return;
             }
@@ -28,7 +28,7 @@ pub fn show(ui: &mut Ui, document: &mut Document, status: &mut Status) {
                 let state = index + 1;
                 let mut text = RichText::new(format!("{state} · {}", item.label));
                 if !item.applied {
-                    text = text.color(MUTED);
+                    text = text.color(muted_text_color(ui));
                 }
                 let response = ui.selectable_label(position == state, text);
                 if response.clicked() {
@@ -43,7 +43,7 @@ pub fn show(ui: &mut Ui, document: &mut Document, status: &mut Status) {
                     "Cliquez un état pour y revenir ; Ctrl+Z et Ctrl+Y restent disponibles.",
                 )
                 .small()
-                .color(MUTED),
+                .color(muted_text_color(ui)),
             );
             if let Some(target) = target {
                 match document.undo_to(target) {

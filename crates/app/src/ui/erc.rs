@@ -4,10 +4,11 @@ use editor_core::{ErcCode, ErcSeverity, ObjectRef};
 use eframe::egui::{self, Color32, RichText, Ui};
 
 use crate::document::Document;
-use crate::ui::{Status, MUTED};
+use crate::ui::canvas::CanvasState;
+use crate::ui::{muted_text_color, Status};
 
-/// Draws the ERC summary and lets the user select a finding's subject.
-pub fn show(ui: &mut Ui, document: &mut Document, status: &mut Status) {
+/// Draws the ERC summary and lets the user select and frame a finding's subject.
+pub fn show(ui: &mut Ui, document: &mut Document, canvas: &mut CanvasState, status: &mut Status) {
     ui.separator();
     ui.heading("Contrôle ERC");
     if let Some(error) = document.extraction_error() {
@@ -18,7 +19,7 @@ pub fn show(ui: &mut Ui, document: &mut Document, status: &mut Status) {
         return;
     }
     let Some(extraction) = document.extraction() else {
-        ui.label(RichText::new("Aucune extraction disponible.").color(MUTED));
+        ui.label(RichText::new("Aucune extraction disponible.").color(muted_text_color(ui)));
         return;
     };
 
@@ -59,10 +60,16 @@ pub fn show(ui: &mut Ui, document: &mut Document, status: &mut Status) {
                                 RichText::new(issue_label(issue.code)).color(color),
                             );
                             if !location.is_empty() {
-                                ui.label(RichText::new(location).small().color(MUTED));
+                                ui.label(
+                                    RichText::new(location).small().color(muted_text_color(ui)),
+                                );
                             }
                             if let Some(subject) = issue.subject {
-                                ui.label(RichText::new(subject_name(subject)).small().color(MUTED));
+                                ui.label(
+                                    RichText::new(subject_name(subject))
+                                        .small()
+                                        .color(muted_text_color(ui)),
+                                );
                             }
                             response
                         })
@@ -73,12 +80,7 @@ pub fn show(ui: &mut Ui, document: &mut Document, status: &mut Status) {
                             status.info("Ce diagnostic ne cible aucun objet.");
                             continue;
                         };
-                        if document.contains_object(subject) {
-                            document.select_only(Some(subject));
-                            status.info(format!("{} sélectionné.", subject_name(subject)));
-                        } else {
-                            status.error("L'objet ciblé n'existe plus.");
-                        }
+                        select_issue_subject(document, canvas, status, subject);
                     }
                 }
             });
@@ -89,7 +91,11 @@ pub fn show(ui: &mut Ui, document: &mut Document, status: &mut Status) {
         .default_open(false)
         .show(ui, |ui| {
             if document.nets().is_empty() {
-                ui.label(RichText::new("Aucun net simulable.").small().color(MUTED));
+                ui.label(
+                    RichText::new("Aucun net simulable.")
+                        .small()
+                        .color(muted_text_color(ui)),
+                );
                 return;
             }
             for net in document.nets() {
@@ -98,7 +104,7 @@ pub fn show(ui: &mut Ui, document: &mut Document, status: &mut Status) {
                     ui.label(
                         RichText::new(format!("{} broche(s)", net.pins.len()))
                             .small()
-                            .color(MUTED),
+                            .color(muted_text_color(ui)),
                     );
                 });
             }
@@ -158,6 +164,23 @@ fn subject_name(subject: ObjectRef) -> String {
     }
 }
 
+fn select_issue_subject(
+    document: &mut Document,
+    canvas: &mut CanvasState,
+    status: &mut Status,
+    subject: ObjectRef,
+) {
+    if document.contains_object(subject) {
+        document.select_only(Some(subject));
+        if let Some(bounds) = document.selection_bounds() {
+            canvas.request_fit_bounds(bounds);
+        }
+        status.info(format!("{} sélectionné.", subject_name(subject)));
+    } else {
+        status.error("L'objet ciblé n'existe plus.");
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -192,5 +215,26 @@ mod tests {
             subject_name(ObjectRef::Wire(editor_core::WireId(7))),
             "fil #7"
         );
+    }
+
+    #[test]
+    fn selecting_an_erc_subject_requests_a_canvas_fit() {
+        let mut document = Document::new();
+        let symbol = document
+            .add_symbol(
+                editor_core::SymbolKind::Resistor,
+                editor_core::GridPos::new(12, -4),
+            )
+            .unwrap();
+        let subject = ObjectRef::Symbol(symbol);
+        let expected_bounds = document.selection_bounds();
+        document.clear_selection();
+        let mut canvas = CanvasState::new();
+        let mut status = Status::default();
+
+        select_issue_subject(&mut document, &mut canvas, &mut status, subject);
+
+        assert!(document.selection().contains(&subject));
+        assert_eq!(canvas.pending_fit_bounds_for_test(), expected_bounds);
     }
 }

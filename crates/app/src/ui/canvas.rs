@@ -23,7 +23,7 @@ use crate::ui::glyph::{paint_symbol, GlyphColors, SymbolText};
 use crate::ui::theme::{
     CanvasPalette, CanvasSettings, CanvasTheme, CurrentDirection, VoltageScale,
 };
-use crate::ui::{symbol_kind_name, Status, MUTED};
+use crate::ui::{muted_text_color, symbol_kind_name, Status};
 use crate::view::{MinimapTransform, Viewport, DEFAULT_SCALE};
 
 const MINIMAP_WIDTH: f32 = 152.0;
@@ -271,6 +271,11 @@ impl CanvasState {
         self.pending_fit = Some(bounds);
     }
 
+    #[cfg(test)]
+    pub(crate) const fn pending_fit_bounds_for_test(&self) -> Option<(GridPos, GridPos)> {
+        self.pending_fit
+    }
+
     /// Returns whether the minimap is drawn.
     pub const fn minimap_visible(&self) -> bool {
         self.minimap_visible
@@ -495,7 +500,11 @@ impl CanvasState {
                     ui.colored_label(Color32::from_rgb(240, 128, 128), error);
                 }
                 if !names.is_empty() {
-                    ui.label(egui::RichText::new("Nets existants").small().color(MUTED));
+                    ui.label(
+                        egui::RichText::new("Nets existants")
+                            .small()
+                            .color(muted_text_color(ui)),
+                    );
                     ui.horizontal_wrapped(|ui| {
                         for name in &names {
                             if ui.small_button(name).clicked() {
@@ -508,7 +517,7 @@ impl CanvasState {
                 ui.label(
                     egui::RichText::new("Le nom est coupé autour des espaces extérieurs.")
                         .small()
-                        .color(MUTED),
+                        .color(muted_text_color(ui)),
                 );
                 ui.horizontal(|ui| {
                     if ui.button("Créer").clicked() {

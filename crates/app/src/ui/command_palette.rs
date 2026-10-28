@@ -132,22 +132,31 @@ impl CommandPalette {
                 ui.label(
                     egui::RichText::new("Entrée pour exécuter · Échap pour fermer")
                         .small()
-                        .color(crate::ui::MUTED),
+                        .color(crate::ui::muted_text_color(ui)),
                 );
                 ui.separator();
 
                 let matches = self.matches(document);
                 if matches.is_empty() {
-                    ui.label(egui::RichText::new("Aucun résultat.").color(crate::ui::MUTED));
+                    ui.label(
+                        egui::RichText::new("Aucun résultat.")
+                            .color(crate::ui::muted_text_color(ui)),
+                    );
                 } else {
                     self.selected = self.selected.min(matches.len() - 1);
                     egui::ScrollArea::vertical()
+                        .auto_shrink([false, true])
                         .max_height(330.0)
                         .show(ui, |ui| {
                             for (index, (_, label, detail, command)) in matches.iter().enumerate() {
                                 let selected = index == self.selected;
-                                let response =
-                                    ui.selectable_label(selected, format!("{label}   {detail}"));
+                                let response = ui.add(
+                                    egui::Button::selectable(
+                                        selected,
+                                        format!("{label}   {detail}"),
+                                    )
+                                    .min_size(egui::vec2(ui.available_width(), 0.0)),
+                                );
                                 if response.clicked() {
                                     action = Some(command.clone());
                                     close = true;
