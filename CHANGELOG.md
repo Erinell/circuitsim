@@ -13,7 +13,10 @@ sémantique.
   d'accès `rd`/`rs`, diode de corps, capacités `cgs`/`cgd`/`cds` et permutation
   électrique `swap_ds`. Modèle DC, transitoire et AC (`gm`/`gds`) dans
   `sim-core`, symbole et inspecteur avec choix du canal N/P, extraction, valeurs
-  live et animation des fils. Défauts ancrés sur les fiches 2N7002 et BSS84.
+  live et animation des fils. Défauts ancrés sur les fiches 2N7002 et BSS84. Le
+  symbole dessine la diode de corps et met en miroir vertical les liaisons
+  drain/source, le bulk et cette diode quand `swap_ds` est actif, sans déplacer
+  les points de connexion.
 - Référence shunt programmable TL431/LM431 à trois broches (REF, K, A), avec
   paramètres éditables et modèle non linéaire DC, transitoire et petits signaux AC.
 - Comparateur LM393 à collecteur ouvert avec broches d'alimentation, paramètres

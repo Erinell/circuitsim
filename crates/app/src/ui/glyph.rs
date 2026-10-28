@@ -632,13 +632,21 @@ fn paint_mosfet(painter: &Painter, symbol: &Symbol, center: Pos2, scale: f32, st
         .and_then(ParamValue::as_bool)
         .unwrap_or(false);
 
+    // `swap_ds` is an electrical permutation, so the connection points never
+    // move: only the drawn structure is mirrored vertically. The source and its
+    // bulk tie move to the top and the body diode turns with them.
+    let dy = if swapped { -1.0 } else { 1.0 };
+    let lead = |points: &[(f32, f32)]| -> Vec<(f32, f32)> {
+        points.iter().map(|(x, y)| (*x, dy * y)).collect()
+    };
+
     // Gate lead and gate plate.
     line_local(
         painter,
         symbol,
         center,
         scale,
-        &[(-2.0, 0.0), (-1.25, 0.0)],
+        &[(-2.0, 0.0), (-1.15, 0.0)],
         stroke,
     );
     line_local(
@@ -646,81 +654,134 @@ fn paint_mosfet(painter: &Painter, symbol: &Symbol, center: Pos2, scale: f32, st
         symbol,
         center,
         scale,
-        &[(-1.25, -1.4), (-1.25, 1.4)],
+        &[(-1.15, -1.15), (-1.15, 1.15)],
         stroke,
     );
     // Three-segment channel bar.
-    for (top, bottom) in [(-1.5, -0.75), (-0.4, 0.4), (0.75, 1.5)] {
+    for (top, bottom) in [(-1.25, -0.55), (-0.35, 0.35), (0.55, 1.25)] {
         line_local(
             painter,
             symbol,
             center,
             scale,
-            &[(-0.85, top), (-0.85, bottom)],
+            &[(-0.8, top), (-0.8, bottom)],
             stroke,
         );
     }
-    // Drain (top) and source (bottom) leads.
-    line_local(
-        painter,
-        symbol,
-        center,
-        scale,
-        &[(-0.85, -1.1), (1.2, -1.1), (1.2, -2.0), (2.0, -2.0)],
-        stroke,
-    );
-    line_local(
-        painter,
-        symbol,
-        center,
-        scale,
-        &[(-0.85, 1.1), (1.2, 1.1), (1.2, 2.0), (2.0, 2.0)],
-        stroke,
-    );
-    // Bulk tied to the source.
-    line_local(
-        painter,
-        symbol,
-        center,
-        scale,
-        &[(-0.85, 0.0), (0.6, 0.0), (0.6, 1.1)],
-        stroke,
-    );
-    // Channel arrow: N points at the channel, P points away from it.
-    let arrow = if p_channel {
-        [(0.45, 0.0), (0.1, -0.2), (0.45, 0.0), (0.1, 0.2)]
-    } else {
-        [(-0.8, 0.0), (-0.45, -0.2), (-0.8, 0.0), (-0.45, 0.2)]
-    };
-    line_local(painter, symbol, center, scale, &arrow, stroke);
 
-    if swapped {
-        let marker = Stroke::new((stroke.width * 0.8).max(1.0), stroke.color);
-        line_local(
-            painter,
-            symbol,
-            center,
-            scale,
-            &[(1.6, -0.45), (1.6, 0.45)],
-            marker,
-        );
-        line_local(
-            painter,
-            symbol,
-            center,
-            scale,
-            &[(1.42, -0.22), (1.6, -0.45), (1.78, -0.22)],
-            marker,
-        );
-        line_local(
-            painter,
-            symbol,
-            center,
-            scale,
-            &[(1.42, 0.22), (1.6, 0.45), (1.78, 0.22)],
-            marker,
-        );
-    }
+    // Drain and source leads, mirrored together by `swap_ds`.
+    let drain = lead(&[(-0.8, -0.9), (0.55, -0.9), (0.55, -2.0), (2.0, -2.0)]);
+    let source = lead(&[(-0.8, 0.9), (0.55, 0.9), (0.55, 2.0), (2.0, 2.0)]);
+    line_local(painter, symbol, center, scale, &drain, stroke);
+    line_local(painter, symbol, center, scale, &source, stroke);
+    // Bulk tied to the source.
+    let bulk = lead(&[(-0.8, 0.0), (0.35, 0.0), (0.35, 0.9)]);
+    line_local(painter, symbol, center, scale, &bulk, stroke);
+
+    // Channel arrow: N points at the channel, P points away from it.
+    let (tip, base) = if p_channel {
+        (-0.38, -0.72)
+    } else {
+        (-0.72, -0.38)
+    };
+    fill_triangle(
+        painter,
+        symbol,
+        center,
+        scale,
+        [(tip, 0.0), (base, -0.19), (base, 0.19)],
+        stroke.color,
+    );
+
+    // Body diode from the source (anode, bulk) to the drain (cathode), reversed
+    // for P. It hangs off the two vertical leads, so `swap_ds` mirrors it with
+    // them while the connection points stay put.
+    let diode_x = 1.32;
+    let diode_half = 1.36;
+    let diode_tip = 0.26;
+    line_local(
+        painter,
+        symbol,
+        center,
+        scale,
+        &lead(&[(0.55, -diode_half), (diode_x, -diode_half)]),
+        stroke,
+    );
+    line_local(
+        painter,
+        symbol,
+        center,
+        scale,
+        &lead(&[(0.55, diode_half), (diode_x, diode_half)]),
+        stroke,
+    );
+    line_local(
+        painter,
+        symbol,
+        center,
+        scale,
+        &lead(&[(diode_x, -diode_half), (diode_x, -diode_tip)]),
+        stroke,
+    );
+    line_local(
+        painter,
+        symbol,
+        center,
+        scale,
+        &lead(&[(diode_x, diode_tip), (diode_x, diode_half)]),
+        stroke,
+    );
+    // The apex points at the cathode: up to the drain for N, down to the source
+    // for P.
+    let (triangle, cathode) = if p_channel {
+        (
+            [
+                (diode_x - 0.24, -diode_tip),
+                (diode_x + 0.24, -diode_tip),
+                (diode_x, diode_tip),
+            ],
+            diode_tip,
+        )
+    } else {
+        (
+            [
+                (diode_x - 0.24, diode_tip),
+                (diode_x + 0.24, diode_tip),
+                (diode_x, -diode_tip),
+            ],
+            -diode_tip,
+        )
+    };
+    let triangle = triangle.map(|(x, y)| (x, dy * y));
+    fill_triangle(painter, symbol, center, scale, triangle, stroke.color);
+    line_local(
+        painter,
+        symbol,
+        center,
+        scale,
+        &lead(&[(diode_x - 0.24, cathode), (diode_x + 0.24, cathode)]),
+        stroke,
+    );
+}
+
+/// Fill a local triangle in symbol coordinates.
+fn fill_triangle(
+    painter: &Painter,
+    symbol: &Symbol,
+    center: Pos2,
+    scale: f32,
+    points: [(f32, f32); 3],
+    color: Color32,
+) {
+    let points = points
+        .iter()
+        .map(|(x, y)| paint_position(symbol, center, scale, Vec2::new(*x, *y)))
+        .collect();
+    painter.add(eframe::egui::Shape::convex_polygon(
+        points,
+        color,
+        Stroke::NONE,
+    ));
 }
 
 fn paint_shunt_reference(

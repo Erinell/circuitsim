@@ -227,8 +227,9 @@ Le symbole `Mosfet` conserve l'ordre `d`, `g`, `s` lors de l'extraction, de la
 sérialisation et du protocole. Le drain est en haut à droite, la grille à gauche,
 la source en bas à droite ; le bulk est interne et relié à la source, sans broche
 visible. `swap_ds` ne change pas l'ordre des broches : il permute électriquement
-les deux bornes avant l'assemblage et le symbole affiche un double chevron
-vertical sur le canal. La grille ne consomme aucun courant continu et son nœud
+les deux bornes avant l'assemblage et le symbole met en miroir vertical les
+liaisons drain/source, la liaison de bulk et la diode de corps, sans déplacer les
+points de connexion. La grille ne consomme aucun courant continu et son nœud
 reste un nœud électrique normal.
 
 Les paramètres sont créés avec les défauts du registre et restent éditables dans
