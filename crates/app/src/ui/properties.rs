@@ -224,6 +224,63 @@ impl SymbolDraft {
             };
             symbol.params.insert(param.key.clone(), value);
         }
+        if self.kind == SymbolKind::ShuntReference {
+            let number = |key: &str| {
+                symbol
+                    .params
+                    .get(key)
+                    .and_then(ParamValue::as_number)
+                    .filter(|value| value.is_finite())
+            };
+            let Some(vref) = number("vref") else {
+                return Err("La consigne VREF doit être un nombre fini.".to_owned());
+            };
+            let Some(iref) = number("iref") else {
+                return Err("Le courant REF doit être un nombre fini.".to_owned());
+            };
+            let Some(ik_min) = number("ik_min") else {
+                return Err("Le courant cathode minimal doit être un nombre fini.".to_owned());
+            };
+            let Some(imax) = number("imax") else {
+                return Err("Le courant cathode maximal doit être un nombre fini.".to_owned());
+            };
+            let Some(z_ka) = number("z_ka") else {
+                return Err("L'impédance dynamique doit être un nombre fini.".to_owned());
+            };
+            if vref <= 0.0 || ik_min <= 0.0 || z_ka <= 0.0 || imax < ik_min || iref < 0.0 {
+                return Err(
+                    "VREF, IKmin et ZKA doivent être positifs, IREF non négatif et Imax ≥ IKmin."
+                        .to_owned(),
+                );
+            }
+        } else if self.kind == SymbolKind::Comparator {
+            let number = |key: &str| {
+                symbol
+                    .params
+                    .get(key)
+                    .and_then(ParamValue::as_number)
+                    .filter(|value| value.is_finite())
+            };
+            let Some(offset) = number("v_offset") else {
+                return Err("L'offset d'entrée doit être un nombre fini.".to_owned());
+            };
+            let Some(resistance) = number("r_sink") else {
+                return Err("La résistance de sink doit être un nombre fini.".to_owned());
+            };
+            let Some(maximum_current) = number("imax") else {
+                return Err("Le courant maximal doit être un nombre fini.".to_owned());
+            };
+            if offset.abs() > 5e-3
+                || resistance <= 0.0
+                || maximum_current <= 0.0
+                || maximum_current > 20e-3
+            {
+                return Err(
+                    "Offset entre −5 mV et +5 mV, résistance positive et Imax entre 0 et 20 mA requis."
+                        .to_owned(),
+                );
+            }
+        }
         Ok(symbol)
     }
 }
@@ -742,13 +799,11 @@ fn show_symbol_live(ui: &mut Ui, info: &SymbolLive, live: &LiveValues, revision:
         );
         ui.label(format!("{} · {net} : {voltage}", pin.name));
     }
-    if let (Some(first), Some(second)) = (info.pins.first(), info.pins.get(1)) {
-        if let (Some(a), Some(b)) = (first.voltage, second.voltage) {
-            ui.label(format!(
-                "Tension : {}",
-                format_si_precision(a - b, Unit::Volt, 4)
-            ));
-        }
+    if let Some(voltage) = info.voltage {
+        ui.label(format!(
+            "Tension : {}",
+            format_si_precision(voltage, Unit::Volt, 4)
+        ));
     }
     if let Some(current) = info.current {
         ui.label(format!(
@@ -887,6 +942,30 @@ mod tests {
         )
     }
 
+    fn shunt_reference() -> Symbol {
+        let registry = SymbolRegistry::builtin();
+        Symbol::from_def(
+            SymbolId(2),
+            registry.get(&SymbolKind::ShuntReference).unwrap(),
+            GridPos::new(0, 0),
+            "U1",
+            Orientation::R0,
+            false,
+        )
+    }
+
+    fn comparator() -> Symbol {
+        let registry = SymbolRegistry::builtin();
+        Symbol::from_def(
+            SymbolId(3),
+            registry.get(&SymbolKind::Comparator).unwrap(),
+            GridPos::new(0, 0),
+            "U2",
+            Orientation::R0,
+            false,
+        )
+    }
+
     #[test]
     fn draft_round_trip_preserves_symbol() {
         let symbol = resistor();
@@ -903,6 +982,47 @@ mod tests {
             param.value = ParamDraftValue::Number("not-a-number".to_owned());
         }
         assert!(draft.to_symbol(&symbol).is_err());
+    }
+
+    #[test]
+    fn shunt_reference_rejects_invalid_parameter_domains_in_the_inspector() {
+        let symbol = shunt_reference();
+        for (key, value) in [
+            ("vref", "0"),
+            ("iref", "-1u"),
+            ("ik_min", "0"),
+            ("imax", "500u"),
+            ("z_ka", "0"),
+        ] {
+            let mut draft = SymbolDraft::from_symbol(&symbol);
+            let parameter = draft
+                .params
+                .iter_mut()
+                .find(|param| param.key == key)
+                .unwrap();
+            parameter.value = ParamDraftValue::Number(value.to_owned());
+            assert!(draft.to_symbol(&symbol).is_err(), "accepted {key}={value}");
+        }
+    }
+
+    #[test]
+    fn comparator_rejects_invalid_parameter_domains_in_the_inspector() {
+        let symbol = comparator();
+        for (key, value) in [
+            ("v_offset", "6m"),
+            ("r_sink", "0"),
+            ("imax", "0"),
+            ("imax", "21m"),
+        ] {
+            let mut draft = SymbolDraft::from_symbol(&symbol);
+            let parameter = draft
+                .params
+                .iter_mut()
+                .find(|param| param.key == key)
+                .unwrap();
+            parameter.value = ParamDraftValue::Number(value.to_owned());
+            assert!(draft.to_symbol(&symbol).is_err(), "accepted {key}={value}");
+        }
     }
 
     #[test]

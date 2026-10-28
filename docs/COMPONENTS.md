@@ -102,7 +102,59 @@ positifs. Le terme est nul au seuil et devient négatif au-delà. La pente AC
 inclut le claquage ; résistance dynamique indépendante, bruit, capacité et
 température ne sont pas modélisés.
 
-## 5. Amplificateur opérationnel
+## 5. Référence shunt programmable TL431/LM431
+
+Le composant possède trois broches, dans l'ordre stable du symbole, de la netlist et du protocole : `REF`, `K` (cathode), `A` (anode). Son courant principal `I_KA` est orienté de `K` vers `A` et sa tension principale vaut `V(K)-V(A)`. Le courant d'entrée `I_REF` est orienté de `REF` vers `A`. La broche REF reçoit le réseau externe de programmation ; avec un diviseur `Rhaut` de K à REF et `Rbas` de REF à A, la consigne idéale vaut `V_KA ≈ VREF * (1 + Rhaut/Rbas) + IREF * Rhaut`.
+
+| Paramètre | Défaut | Domaine / rôle |
+| --- | ---: | --- |
+| `vref` | `2.495` V | strictement positif ; consigne interne |
+| `iref` | `2e-6` A | non négatif ; courant constant de REF vers A |
+| `ik_min` | `1e-3` A | strictement positif ; courant cathode au point de consigne |
+| `imax` | `0.1` A | courant cathode plafond du modèle, `imax >= ik_min` |
+| `z_ka` | `0.2` Ω | strictement positif ; pente de contrôle et impédance incrémentale K-A avec REF reliée à K |
+
+Loi statique bornée du solveur :
+
+```text
+e = V(REF) - V(A) - vref
+Icmd = clamp(ik_min + e/z_ka, 0, imax)
+x = clamp((V(K)-V(A))/vref, 0, 1)
+h = x^2 * (3 - 2x)
+I_KA = Icmd * h
+I_REF = iref  (courant de REF vers A)
+```
+
+`h` est une transition lisse de conformité K-A : le composant ne débite pas en sens inverse et le courant augmente progressivement lorsque `VKA` passe de 0 à `vref`. En régulation, hors saturation et avec `VKA >= vref`, la pente vaut `dI_KA/de = 1/z_ka` ; si REF est reliée à K, `z_ka` reproduit l'impédance incrémentale déclarée. Si le courant demandé est inférieur à `ik_min` ou dépasse `imax`, le modèle cesse de réguler ; `imax` est une saturation du modèle, pas une garantie de fonctionnement continu.
+
+Les valeurs par défaut reprennent les valeurs usuelles de la fiche **TI TL431, TL432 Precision Programmable Reference** : `VREF = 2.495 V` typique, `IREF = 2 µA` typique, courant cathode de 1 à 100 mA et `|zKA| = 0.2 Ω` typique. Source : [Texas Instruments, fiche TL431/TL432](https://www.ti.com/lit/ds/symlink/tl431.pdf), caractéristiques électriques et rubriques *Features* / *Dynamic Impedance*.
+
+Modèle volontairement simplifié : commande instantanée sans pôle ni compensation, capacité, bruit, tolérance, température, protection thermique ou dynamique de démarrage. `IREF` est constant et la transition de conformité est une interpolation numérique, non une caractéristique transistor précise. DC et transitoire utilisent la même loi algébrique ; l'AC linéarise ses dérivées au point DC, sans introduire de pôle.
+
+## 6. Comparateur à collecteur ouvert LM393
+
+Broches ordonnées : `in+`, `in-`, `out`, `vcc`, `vss`. Le courant de sortie positif est orienté `out -> vss`, et la tension observée est `V(out)-V(vss)`. Le LM393 a une sortie collecteur ouvert : **le pull-up est externe et obligatoire** pour obtenir un niveau haut. Sans pull-up, un état relâché laisse le nœud de sortie flottant et la résolution DC peut être singulière. `vss` sert de référence à l'étage de sortie ; `vcc` autorise la comparaison si `2 V <= V(vcc)-V(vss) <= 36 V`.
+
+| Paramètre | Défaut | Domaine / rôle |
+| --- | ---: | --- |
+| `v_offset` | `2e-3` V | offset d'entrée ; `-5e-3 <= v_offset <= 5e-3` V |
+| `r_sink` | `20` Ω | strictement positif ; résistance de sortie lorsque le collecteur conduit |
+| `imax` | `20e-3` A | strictement positif et au plus 20 mA ; plafond du courant de sink |
+
+```text
+e = V(in+) - V(in-) - v_offset
+si V(vcc)-V(vss) hors [2 V, 36 V] : collecteur relâché
+sinon si e < 0 : Iout = min((V(out)-V(vss))/r_sink, imax)
+sinon    : Iout = 0  (collecteur relâché)
+```
+
+Le courant `Iout` positif va de `out` à `vss`. Dans la plage normale `V(out) >= V(vss)`, l'état conducteur se comporte comme `r_sink` jusqu'au plafond `imax`. En dehors de cette plage, la résistance est prolongée algébriquement pour aider Newton ; le modèle ne représente pas la protection contre une tension de sortie négative. Un pull-up résistif donne, en état bas non saturé, `Vout-VSS ≈ r_sink * Iout`.
+
+Le défaut `v_offset = 2 mV` reprend l'ordre de grandeur typique de la fiche LM393 ; ±5 mV est la limite spécifiée. `r_sink = 20 Ω` approxime le point typique `VOL ≈ 80 mV` à `IOL = 4 mA` de la courbe de sortie. `imax = 20 mA` correspond à la valeur absolue maximale de courant de sortie, pas à un courant de fonctionnement recommandé. Source : [Texas Instruments, fiche LM393/LM393B](https://www.ti.com/lit/ds/symlink/lm393.pdf), sections 5.1, 5.8 et 5.12, et [fiche produit LM393](https://www.ti.com/product/LM393).
+
+Modèle volontairement simplifié : entrée sans courant, courant d'alimentation nul, limites de mode commun non modélisées, commutation instantanée, sans délai ni hystérésis. L'AC fige l'état logique au point DC et linéarise seulement la résistance de sink active ; le gain de comparaison petit-signal est nul. La résistance de pull-up et sa source restent des composants externes.
+
+## 7. Amplificateur opérationnel
 
 | Paramètre | Défaut | Rôle |
 | --- | ---: | --- |
@@ -121,7 +173,7 @@ le système singulier. Newton utilise `gain` en régime actif et `0` en saturati
 l'AC réutilise cette pente. `v_sat_pos > v_sat_neg`, sinon
 `InvalidSaturation`.
 
-## 6. Sources et excitations
+## 8. Sources et excitations
 
 Une source de tension ou de courant est décrite au repos par `dc`. En
 transitoire :
@@ -148,7 +200,7 @@ En AC, l'excitation est portée par
 court-circuit petits signaux ; une source de courant AC nulle est un circuit
 ouvert. L'orientation AC reste `a -> b`.
 
-## 7. Composants personnalisés
+## 9. Composants personnalisés
 
 `ComponentKind::Custom(String)` et `SymbolKind::Custom(String)` représentent une
 extension. Le registre valide nom, broches et paramètres. Les solveurs refusent
@@ -156,7 +208,7 @@ explicitement le type avec `MnaError::UnsupportedComponent` tant qu'aucun modèl
 n'est implémenté. L'exemple `examples/custom_mosfet.rs` montre la représentation,
 l'extraction et le JSON ; il ne s'agit pas d'un transistor simulé.
 
-## 8. Énergie
+## 10. Énergie
 
 L'audit transitoire évalue la puissance à la fin de chaque pas et calcule :
 

@@ -30,6 +30,30 @@ fn zener_params() -> ParamMap {
     params
 }
 
+fn shunt_reference_params() -> ParamMap {
+    [
+        ("vref", 2.495),
+        ("iref", 2e-6),
+        ("ik_min", 1e-3),
+        ("imax", 0.1),
+        ("z_ka", 0.2),
+    ]
+    .into_iter()
+    .map(|(key, value)| (key.to_owned(), ParamValue::Number(value)))
+    .collect()
+}
+
+fn comparator_params() -> ParamMap {
+    [("v_offset", 0.0), ("r_sink", 20.0), ("imax", 0.02)]
+        .into_iter()
+        .map(|(key, value)| (key.to_owned(), ParamValue::Number(value)))
+        .collect()
+}
+
+fn resistor_params(resistance: f64) -> ParamMap {
+    number_param("resistance", resistance)
+}
+
 #[test]
 fn solves_a_resistive_voltage_divider() {
     let mut builder = NetlistBuilder::new();
@@ -710,4 +734,404 @@ fn rejects_a_degenerate_voltage_source_branch() {
     );
     assert_eq!(netlist.nodes.len(), 2);
     assert_eq!(ground, NodeId(0));
+}
+
+#[test]
+fn programmable_shunt_reference_regulates_with_an_admissible_load() {
+    let mut builder = NetlistBuilder::new();
+    let ground = builder.add_node("0", NodeKind::Ground).unwrap();
+    let supply = builder.add_node("supply", NodeKind::Electrical).unwrap();
+    let cathode = builder.add_node("cathode", NodeKind::Electrical).unwrap();
+    let reference = builder.add_node("reference", NodeKind::Electrical).unwrap();
+    builder
+        .add_component(
+            ComponentKind::VoltageSource,
+            "V1",
+            number_param("dc", 10.0),
+            vec![supply, ground],
+        )
+        .unwrap();
+    builder
+        .add_component(
+            ComponentKind::Resistor,
+            "R1",
+            resistor_params(100.0),
+            vec![supply, cathode],
+        )
+        .unwrap();
+    builder
+        .add_component(
+            ComponentKind::Resistor,
+            "RL",
+            resistor_params(1_000.0),
+            vec![cathode, ground],
+        )
+        .unwrap();
+    builder
+        .add_component(
+            ComponentKind::Resistor,
+            "Rtop",
+            resistor_params(10_000.0),
+            vec![cathode, reference],
+        )
+        .unwrap();
+    builder
+        .add_component(
+            ComponentKind::Resistor,
+            "Rbottom",
+            resistor_params(10_000.0),
+            vec![reference, ground],
+        )
+        .unwrap();
+    let reference_component = builder
+        .add_component(
+            ComponentKind::ShuntReference,
+            "U1",
+            shunt_reference_params(),
+            vec![reference, cathode, ground],
+        )
+        .unwrap();
+    let netlist = builder.build().unwrap();
+
+    let result = solve_dc(&netlist, DcOptions::default()).unwrap();
+
+    let output_voltage = result.node_voltage(cathode).unwrap();
+    let reference_voltage = result.node_voltage(reference).unwrap();
+    let feed_current = (10.0 - output_voltage) / 100.0;
+    let load_current = output_voltage / 1_000.0;
+    let divider_current = (output_voltage - reference_voltage) / 10_000.0;
+    let cathode_current = feed_current - load_current - divider_current;
+    assert!(
+        (5.0..5.06).contains(&output_voltage),
+        "output was {output_voltage}"
+    );
+    assert!((2.49..2.54).contains(&reference_voltage));
+    assert!((1e-3..0.1).contains(&cathode_current));
+    assert!((cathode_current - 0.044).abs() < 0.01);
+    assert!((divider_current - (reference_voltage / 10_000.0 + 2e-6)).abs() < 1e-8);
+    assert!(!result.branch_currents.contains_key(&reference_component));
+}
+
+#[test]
+fn programmable_shunt_reference_does_not_regulate_outside_cathode_current_range() {
+    let mut builder = NetlistBuilder::new();
+    let ground = builder.add_node("0", NodeKind::Ground).unwrap();
+    let supply = builder.add_node("supply", NodeKind::Electrical).unwrap();
+    let output = builder.add_node("out", NodeKind::Electrical).unwrap();
+    let reference = builder.add_node("ref", NodeKind::Electrical).unwrap();
+    builder
+        .add_component(
+            ComponentKind::VoltageSource,
+            "V1",
+            number_param("dc", 10.0),
+            vec![supply, ground],
+        )
+        .unwrap();
+    builder
+        .add_component(
+            ComponentKind::Resistor,
+            "Rfeed",
+            resistor_params(100_000.0),
+            vec![supply, output],
+        )
+        .unwrap();
+    builder
+        .add_component(
+            ComponentKind::Resistor,
+            "Rload",
+            resistor_params(10_000.0),
+            vec![output, ground],
+        )
+        .unwrap();
+    builder
+        .add_component(
+            ComponentKind::Resistor,
+            "Rtop",
+            resistor_params(10_000.0),
+            vec![output, reference],
+        )
+        .unwrap();
+    builder
+        .add_component(
+            ComponentKind::Resistor,
+            "Rbottom",
+            resistor_params(10_000.0),
+            vec![reference, ground],
+        )
+        .unwrap();
+    builder
+        .add_component(
+            ComponentKind::ShuntReference,
+            "U1",
+            shunt_reference_params(),
+            vec![reference, output, ground],
+        )
+        .unwrap();
+    let netlist = builder.build().unwrap();
+
+    let result = solve_dc(&netlist, DcOptions::default()).unwrap();
+
+    let output_voltage = result.node_voltage(output).unwrap();
+    assert!(
+        (0.6..0.65).contains(&output_voltage),
+        "output was {output_voltage}"
+    );
+    assert!(result.node_voltage(reference).unwrap() < 1.0);
+
+    let mut builder = NetlistBuilder::new();
+    let ground = builder.add_node("0", NodeKind::Ground).unwrap();
+    let output = builder.add_node("out", NodeKind::Electrical).unwrap();
+    builder
+        .add_component(
+            ComponentKind::CurrentSource,
+            "I1",
+            number_param("dc", 0.2),
+            vec![ground, output],
+        )
+        .unwrap();
+    builder
+        .add_component(
+            ComponentKind::Resistor,
+            "Rload",
+            resistor_params(100.0),
+            vec![output, ground],
+        )
+        .unwrap();
+    builder
+        .add_component(
+            ComponentKind::ShuntReference,
+            "U1",
+            shunt_reference_params(),
+            vec![output, output, ground],
+        )
+        .unwrap();
+    let upper_limit_netlist = builder.build().unwrap();
+    let upper_limit = solve_dc(&upper_limit_netlist, DcOptions::default()).unwrap();
+    let upper_output = upper_limit.node_voltage(output).unwrap();
+    assert!(
+        (9.9..10.1).contains(&upper_output),
+        "output was {upper_output}"
+    );
+}
+
+#[test]
+fn rejects_invalid_programmable_shunt_reference_parameters() {
+    fn with_reference(params: ParamMap) -> Netlist {
+        let mut builder = NetlistBuilder::new();
+        let ground = builder.add_node("0", NodeKind::Ground).unwrap();
+        let reference = builder.add_node("ref", NodeKind::Electrical).unwrap();
+        let cathode = builder.add_node("k", NodeKind::Electrical).unwrap();
+        builder
+            .add_component(
+                ComponentKind::ShuntReference,
+                "U1",
+                params,
+                vec![reference, cathode, ground],
+            )
+            .unwrap();
+        builder.build().unwrap()
+    }
+
+    for (key, value) in [
+        ("vref", 0.0),
+        ("iref", -1e-6),
+        ("ik_min", 0.0),
+        ("imax", 0.5e-3),
+        ("z_ka", 0.0),
+    ] {
+        let mut params = shunt_reference_params();
+        params.insert(key.to_owned(), ParamValue::Number(value));
+        assert!(
+            matches!(
+                solve_dc(&with_reference(params), DcOptions::default()),
+                Err(DcError::Circuit(MnaError::InvalidParameterValue { .. }))
+            ),
+            "parameter {key}={value} was accepted"
+        );
+    }
+
+    let mut missing = shunt_reference_params();
+    missing.remove("z_ka");
+    assert!(matches!(
+        solve_dc(&with_reference(missing), DcOptions::default()),
+        Err(DcError::Circuit(MnaError::MissingParameter {
+            key: "z_ka",
+            ..
+        }))
+    ));
+}
+
+#[test]
+fn lm393_comparator_sinks_or_releases_its_open_collector_output() {
+    fn with_comparator(
+        input_plus: f64,
+        input_minus: f64,
+        params: ParamMap,
+        pullup: Option<f64>,
+        supply_voltage: f64,
+    ) -> (Netlist, NodeId) {
+        let mut builder = NetlistBuilder::new();
+        let ground = builder.add_node("0", NodeKind::Ground).unwrap();
+        let vcc = builder.add_node("vcc", NodeKind::Electrical).unwrap();
+        let input_plus_node = builder.add_node("in_plus", NodeKind::Electrical).unwrap();
+        let input_minus_node = builder.add_node("in_minus", NodeKind::Electrical).unwrap();
+        let output = builder.add_node("out", NodeKind::Electrical).unwrap();
+        builder
+            .add_component(
+                ComponentKind::VoltageSource,
+                "VCC",
+                number_param("dc", supply_voltage),
+                vec![vcc, ground],
+            )
+            .unwrap();
+        builder
+            .add_component(
+                ComponentKind::VoltageSource,
+                "VINP",
+                number_param("dc", input_plus),
+                vec![input_plus_node, ground],
+            )
+            .unwrap();
+        builder
+            .add_component(
+                ComponentKind::VoltageSource,
+                "VINM",
+                number_param("dc", input_minus),
+                vec![input_minus_node, ground],
+            )
+            .unwrap();
+        if let Some(resistance) = pullup {
+            builder
+                .add_component(
+                    ComponentKind::Resistor,
+                    "RPU",
+                    number(resistance),
+                    vec![vcc, output],
+                )
+                .unwrap();
+        }
+        builder
+            .add_component(
+                ComponentKind::Comparator,
+                "U1",
+                params,
+                vec![input_plus_node, input_minus_node, output, vcc, ground],
+            )
+            .unwrap();
+        (builder.build().unwrap(), output)
+    }
+
+    let (sink_netlist, output) = with_comparator(1.0, 2.0, comparator_params(), Some(1_000.0), 5.0);
+    let sink = solve_dc(&sink_netlist, DcOptions::default()).unwrap();
+    let low_voltage = sink.node_voltage(output).unwrap();
+    assert!(
+        (0.09..0.11).contains(&low_voltage),
+        "low output was {low_voltage}"
+    );
+    let sink_current = (5.0 - low_voltage) / 1_000.0;
+    assert!((4.8e-3..5.0e-3).contains(&sink_current));
+
+    let (offset_netlist, offset_output) = with_comparator(
+        2.502,
+        2.500,
+        [
+            ("v_offset".to_owned(), ParamValue::Number(5e-3)),
+            ("r_sink".to_owned(), ParamValue::Number(20.0)),
+            ("imax".to_owned(), ParamValue::Number(0.02)),
+        ]
+        .into(),
+        Some(1_000.0),
+        5.0,
+    );
+    let offset_result = solve_dc(&offset_netlist, DcOptions::default()).unwrap();
+    assert!(offset_result.node_voltage(offset_output).unwrap() < 0.11);
+
+    let (release_netlist, release_output) =
+        with_comparator(2.0, 1.0, comparator_params(), Some(1_000.0), 5.0);
+    let release = solve_dc(&release_netlist, DcOptions::default()).unwrap();
+    assert!((4.99..=5.0).contains(&release.node_voltage(release_output).unwrap()));
+
+    let (floating_output, _) = with_comparator(2.0, 1.0, comparator_params(), None, 5.0);
+    assert!(matches!(
+        solve_dc(&floating_output, DcOptions::default()),
+        Err(DcError::SingularMatrix { .. })
+    ));
+
+    let (undervoltage_netlist, undervoltage_output) =
+        with_comparator(1.0, 2.0, comparator_params(), Some(1_000.0), 1.5);
+    let undervoltage = solve_dc(&undervoltage_netlist, DcOptions::default()).unwrap();
+    assert!((1.49..=1.5).contains(&undervoltage.node_voltage(undervoltage_output).unwrap()));
+}
+
+#[test]
+fn lm393_comparator_sink_current_is_limited_and_parameters_are_validated() {
+    let mut builder = NetlistBuilder::new();
+    let ground = builder.add_node("0", NodeKind::Ground).unwrap();
+    let vcc = builder.add_node("vcc", NodeKind::Electrical).unwrap();
+    let input_plus = builder.add_node("in_plus", NodeKind::Electrical).unwrap();
+    let input_minus = builder.add_node("in_minus", NodeKind::Electrical).unwrap();
+    let output = builder.add_node("out", NodeKind::Electrical).unwrap();
+    for (label, voltage, node) in [
+        ("VCC", 5.0, vcc),
+        ("VINP", 1.0, input_plus),
+        ("VINM", 2.0, input_minus),
+    ] {
+        builder
+            .add_component(
+                ComponentKind::VoltageSource,
+                label,
+                number_param("dc", voltage),
+                vec![node, ground],
+            )
+            .unwrap();
+    }
+    builder
+        .add_component(
+            ComponentKind::Resistor,
+            "RPU",
+            number(100.0),
+            vec![vcc, output],
+        )
+        .unwrap();
+    builder
+        .add_component(
+            ComponentKind::Comparator,
+            "U1",
+            comparator_params(),
+            vec![input_plus, input_minus, output, vcc, ground],
+        )
+        .unwrap();
+    let limited = solve_dc(&builder.build().unwrap(), DcOptions::default()).unwrap();
+    assert!((2.99..3.01).contains(&limited.node_voltage(output).unwrap()));
+
+    for (key, value) in [
+        ("v_offset", 5.1e-3),
+        ("r_sink", 0.0),
+        ("imax", 0.0),
+        ("imax", 20.1e-3),
+    ] {
+        let mut params = comparator_params();
+        params.insert(key.to_owned(), ParamValue::Number(value));
+        let mut builder = NetlistBuilder::new();
+        let ground = builder.add_node("0", NodeKind::Ground).unwrap();
+        let input_plus = builder.add_node("in_plus", NodeKind::Electrical).unwrap();
+        let input_minus = builder.add_node("in_minus", NodeKind::Electrical).unwrap();
+        let output = builder.add_node("out", NodeKind::Electrical).unwrap();
+        let vcc = builder.add_node("vcc", NodeKind::Electrical).unwrap();
+        builder
+            .add_component(
+                ComponentKind::Comparator,
+                "U1",
+                params,
+                vec![input_plus, input_minus, output, vcc, ground],
+            )
+            .unwrap();
+        assert!(
+            matches!(
+                solve_dc(&builder.build().unwrap(), DcOptions::default()),
+                Err(DcError::Circuit(MnaError::InvalidParameterValue { .. }))
+            ),
+            "accepted {key}={value}"
+        );
+    }
 }

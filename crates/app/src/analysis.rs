@@ -123,7 +123,7 @@ pub struct SignalCatalog {
     pub voltages: Vec<String>,
     /// Branch-current components, sorted by label.
     pub currents: Vec<String>,
-    /// Two-terminal components whose voltage can be plotted, sorted by label.
+    /// Components with a defined primary voltage, sorted by label.
     pub components: Vec<String>,
     /// Independent voltage and current sources, sorted by label.
     pub sources: Vec<SourceChoice>,
@@ -155,7 +155,13 @@ impl SignalCatalog {
             .netlist
             .components
             .iter()
-            .filter(|component| component.pins.len() == 2)
+            .filter(|component| {
+                component.pins.len() == 2
+                    || matches!(
+                        component.kind,
+                        ComponentKind::ShuntReference | ComponentKind::Comparator
+                    )
+            })
             .map(|component| component.label.clone())
             .collect::<Vec<_>>();
         components.sort();
@@ -400,6 +406,8 @@ pub struct LiveValues {
 pub struct SymbolLive {
     /// Transformed pins with their net name and voltage.
     pub pins: Vec<PinLive>,
+    /// Primary component voltage, using K-to-A or OUT-to-VSS for three-terminal models.
+    pub voltage: Option<f64>,
     /// Branch or resistor current when it can be derived.
     pub current: Option<f64>,
     /// Power when both voltage and current are known.
@@ -569,28 +577,77 @@ impl LiveValues {
                 voltage,
             });
         }
-        let across = match (pins.first(), pins.get(1)) {
+        let (positive_pin, negative_pin) = match symbol.kind {
+            SymbolKind::ShuntReference => (pins.get(1), pins.get(2)),
+            SymbolKind::Comparator => (pins.get(2), pins.get(4)),
+            _ => (pins.first(), pins.get(1)),
+        };
+        let across = match (positive_pin, negative_pin) {
             (Some(first), Some(second)) => match (first.voltage, second.voltage) {
                 (Some(a), Some(b)) => Some(a - b),
                 _ => None,
             },
             _ => None,
         };
-        let current = self
-            .current(&symbol.label)
-            .or_else(|| across.and_then(|voltage| derive_current(symbol, voltage)));
-        let power = across
-            .zip(current)
-            .map(|(voltage, current)| voltage * current);
+        let control_voltage = match symbol.kind {
+            SymbolKind::ShuntReference => match (pins.first(), pins.get(2)) {
+                (Some(reference), Some(anode)) => reference
+                    .voltage
+                    .zip(anode.voltage)
+                    .map(|(reference, anode)| reference - anode),
+                _ => None,
+            },
+            SymbolKind::Comparator => match (pins.first(), pins.get(1), pins.get(3), pins.get(4)) {
+                (Some(positive), Some(negative), Some(vcc), Some(vss)) => positive
+                    .voltage
+                    .zip(negative.voltage)
+                    .zip(vcc.voltage.zip(vss.voltage))
+                    .map(|((positive, negative), (vcc, vss))| {
+                        if (2.0..=36.0).contains(&(vcc - vss)) {
+                            positive - negative
+                        } else {
+                            1.0
+                        }
+                    }),
+                _ => None,
+            },
+            _ => None,
+        };
+        let current = self.current(&symbol.label).or_else(|| {
+            across.and_then(|voltage| derive_current(symbol, voltage, control_voltage))
+        });
+        let power = if symbol.kind == SymbolKind::ShuntReference {
+            across.zip(current).map(|(voltage, current)| {
+                let reference_current = symbol
+                    .params
+                    .get("iref")
+                    .and_then(ParamValue::as_number)
+                    .unwrap_or(0.0);
+                let reference_voltage = match (pins.first(), pins.get(2)) {
+                    (Some(reference), Some(anode)) => reference
+                        .voltage
+                        .zip(anode.voltage)
+                        .map(|(reference, anode)| reference - anode)
+                        .unwrap_or(0.0),
+                    _ => 0.0,
+                };
+                voltage * current + reference_voltage * reference_current
+            })
+        } else {
+            across
+                .zip(current)
+                .map(|(voltage, current)| voltage * current)
+        };
         SymbolLive {
             pins,
+            voltage: across,
             current,
             power,
         }
     }
 }
 
-fn derive_current(symbol: &Symbol, voltage: f64) -> Option<f64> {
+fn derive_current(symbol: &Symbol, voltage: f64, reference_voltage: Option<f64>) -> Option<f64> {
     if symbol.kind == SymbolKind::Switch
         && !symbol
             .params
@@ -612,9 +669,90 @@ fn derive_current(symbol: &Symbol, voltage: f64) -> Option<f64> {
         SymbolKind::Diode | SymbolKind::Led | SymbolKind::Zener => {
             return diode_params_current(&symbol.params, symbol.kind == SymbolKind::Zener, voltage);
         }
+        SymbolKind::ShuntReference => {
+            return shunt_reference_current(&symbol.params, reference_voltage?, voltage);
+        }
+        SymbolKind::Comparator => {
+            return comparator_sink_current(&symbol.params, reference_voltage?, voltage);
+        }
         _ => None,
     }?;
     (resistance.abs() > f64::MIN_POSITIVE).then_some(voltage / resistance)
+}
+
+fn shunt_reference_current(
+    params: &sim_core::netlist::ParamMap,
+    reference_voltage: f64,
+    cathode_voltage: f64,
+) -> Option<f64> {
+    let number = |key: &str| {
+        params
+            .get(key)
+            .and_then(ParamValue::as_number)
+            .filter(|value| value.is_finite())
+    };
+    let vref = number("vref")?;
+    let minimum_current = number("ik_min")?;
+    let maximum_current = number("imax")?;
+    let dynamic_impedance = number("z_ka")?;
+    if vref <= 0.0
+        || minimum_current <= 0.0
+        || maximum_current < minimum_current
+        || dynamic_impedance <= 0.0
+    {
+        return None;
+    }
+    let commanded = (minimum_current + (reference_voltage - vref) / dynamic_impedance)
+        .clamp(0.0, maximum_current);
+    let headroom = (cathode_voltage / vref).clamp(0.0, 1.0);
+    Some(commanded * headroom * headroom * (3.0 - 2.0 * headroom))
+}
+
+pub(crate) fn symbol_terminal_injections(symbol: &Symbol, current: f64) -> [f64; 5] {
+    if symbol.kind == SymbolKind::Comparator {
+        return [0.0, 0.0, -current, 0.0, current];
+    }
+    if symbol.kind == SymbolKind::ShuntReference {
+        let reference_current = symbol
+            .params
+            .get("iref")
+            .and_then(ParamValue::as_number)
+            .filter(|value| value.is_finite())
+            .unwrap_or(0.0);
+        return [
+            -reference_current,
+            -current,
+            current + reference_current,
+            0.0,
+            0.0,
+        ];
+    }
+    [-current, current, 0.0, 0.0, 0.0]
+}
+
+fn comparator_sink_current(
+    params: &sim_core::netlist::ParamMap,
+    input_difference: f64,
+    output_voltage: f64,
+) -> Option<f64> {
+    let number = |key: &str| {
+        params
+            .get(key)
+            .and_then(ParamValue::as_number)
+            .filter(|value| value.is_finite())
+    };
+    let offset = number("v_offset")?;
+    let resistance = number("r_sink")?;
+    let maximum_current = number("imax")?;
+    if offset.abs() > 5e-3 || resistance <= 0.0 || maximum_current <= 0.0 || maximum_current > 20e-3
+    {
+        return None;
+    }
+    if input_difference < offset {
+        Some((output_voltage / resistance).min(maximum_current))
+    } else {
+        Some(0.0)
+    }
 }
 
 fn diode_params_current(
@@ -1288,13 +1426,18 @@ pub fn transient_traces_from_samples_with_document(
                     .iter()
                     .find(|spec| spec.label == *name)
                     .ok_or_else(|| SimulationError::MissingSignal(signal.label()))?;
-                if spec.pins.len() != 2 {
+                let (positive_pin, negative_pin) = match spec.kind {
+                    ComponentKind::ShuntReference => (spec.pins.get(1), spec.pins.get(2)),
+                    ComponentKind::Comparator => (spec.pins.get(2), spec.pins.get(4)),
+                    _ => (spec.pins.first(), spec.pins.get(1)),
+                };
+                let (Some(positive_pin), Some(negative_pin)) = (positive_pin, negative_pin) else {
                     return Err(SimulationError::MissingSignal(signal.label()));
-                }
+                };
                 for sample in samples {
                     if let (Some(a), Some(b)) = (
-                        sample.node_voltage(spec.pins[0]),
-                        sample.node_voltage(spec.pins[1]),
+                        sample.node_voltage(*positive_pin),
+                        sample.node_voltage(*negative_pin),
                     ) {
                         points.push([sample.time, a - b]);
                     }
@@ -1376,7 +1519,12 @@ fn sample_net_current(
         let Some(definition) = document.registry().get(&symbol.kind) else {
             continue;
         };
-        if definition.pins.len() != 2 {
+        if definition.pins.len() != 2
+            && !matches!(
+                symbol.kind,
+                SymbolKind::ShuntReference | SymbolKind::Comparator
+            )
+        {
             continue;
         }
         let Some(spec) = extraction
@@ -1402,7 +1550,13 @@ fn sample_net_current(
         let Some(current) = current.filter(|current| current.is_finite()) else {
             continue;
         };
-        for (index, injection) in [-current, current].into_iter().enumerate() {
+        let injections = symbol_terminal_injections(symbol, current);
+        for (index, injection) in injections
+            .iter()
+            .copied()
+            .enumerate()
+            .take(definition.pins.len())
+        {
             let Some(&node) = spec.pins.get(index) else {
                 continue;
             };
@@ -1422,6 +1576,28 @@ fn derived_component_current(
     sample: &TransientSample,
     previous: Option<&TransientSample>,
 ) -> Option<f64> {
+    if spec.kind == ComponentKind::Comparator {
+        let input_plus = sample.node_voltage(*spec.pins.first()?)?;
+        let input_minus = sample.node_voltage(*spec.pins.get(1)?)?;
+        let output = sample.node_voltage(*spec.pins.get(2)?)?;
+        let positive_supply = sample.node_voltage(*spec.pins.get(3)?)?;
+        let negative_supply = sample.node_voltage(*spec.pins.get(4)?)?;
+        return comparator_sink_current(
+            &spec.params,
+            if (2.0..=36.0).contains(&(positive_supply - negative_supply)) {
+                input_plus - input_minus
+            } else {
+                1.0
+            },
+            output - negative_supply,
+        );
+    }
+    if spec.kind == ComponentKind::ShuntReference {
+        let reference = sample.node_voltage(*spec.pins.first()?)?;
+        let cathode = sample.node_voltage(*spec.pins.get(1)?)?;
+        let anode = sample.node_voltage(*spec.pins.get(2)?)?;
+        return shunt_reference_current(&spec.params, reference - anode, cathode - anode);
+    }
     if spec.pins.len() != 2 {
         return None;
     }
@@ -1978,6 +2154,20 @@ mod tests {
         assert!((current - 1e-3).abs() < 1e-12);
         let power = observed.power.unwrap();
         assert!((power - 1e-3).abs() < 1e-12);
+    }
+
+    #[test]
+    fn comparator_live_current_uses_offset_sink_and_release_states() {
+        let params = [
+            ("v_offset".to_owned(), ParamValue::Number(2e-3)),
+            ("r_sink".to_owned(), ParamValue::Number(20.0)),
+            ("imax".to_owned(), ParamValue::Number(0.02)),
+        ]
+        .into();
+
+        assert_eq!(comparator_sink_current(&params, 1e-3, 0.1), Some(5e-3));
+        assert_eq!(comparator_sink_current(&params, 3e-3, 0.1), Some(0.0));
+        assert_eq!(comparator_sink_current(&params, 1e-3, 1.0), Some(0.02));
     }
 
     #[test]

@@ -27,6 +27,8 @@ pub enum SymbolKind {
     Ammeter,
     Ohmmeter,
     Custom(String),
+    ShuntReference,
+    Comparator,
 }
 
 impl SymbolKind {
@@ -43,6 +45,8 @@ impl SymbolKind {
             Self::Diode => "diode",
             Self::Led => "led",
             Self::Zener => "zener",
+            Self::ShuntReference => "shunt_reference",
+            Self::Comparator => "comparator",
             Self::OpAmp => "opamp",
             Self::Voltmeter => "voltmeter",
             Self::Ammeter => "ammeter",
@@ -64,6 +68,8 @@ impl SymbolKind {
             "diode" => Some(Self::Diode),
             "led" => Some(Self::Led),
             "zener" => Some(Self::Zener),
+            "shunt_reference" => Some(Self::ShuntReference),
+            "comparator" => Some(Self::Comparator),
             "opamp" => Some(Self::OpAmp),
             "voltmeter" => Some(Self::Voltmeter),
             "ammeter" => Some(Self::Ammeter),
@@ -386,6 +392,8 @@ fn builtin_defs() -> Vec<SymbolDef> {
                 ("imax", 0.2),
             ],
         ),
+        shunt_reference_def(),
+        comparator_def(),
         SymbolDef::new(
             SymbolKind::OpAmp,
             vec![
@@ -436,6 +444,40 @@ fn diode_def() -> SymbolDef {
     .expect("diode definition is valid")
 }
 
+fn shunt_reference_def() -> SymbolDef {
+    SymbolDef::new(
+        SymbolKind::ShuntReference,
+        vec![
+            PinDef::new("ref", GridPos::new(0, 2)),
+            PinDef::new("k", GridPos::new(-2, 0)),
+            PinDef::new("a", GridPos::new(2, 0)),
+        ],
+        numeric_params(&[
+            ("vref", 2.495),
+            ("iref", 2e-6),
+            ("ik_min", 1e-3),
+            ("imax", 0.1),
+            ("z_ka", 0.2),
+        ]),
+    )
+    .expect("shunt reference definition is valid")
+}
+
+fn comparator_def() -> SymbolDef {
+    SymbolDef::new(
+        SymbolKind::Comparator,
+        vec![
+            PinDef::new("in+", GridPos::new(-2, 1)),
+            PinDef::new("in-", GridPos::new(-2, -1)),
+            PinDef::new("out", GridPos::new(2, 0)),
+            PinDef::new("vcc", GridPos::new(0, 2)),
+            PinDef::new("vss", GridPos::new(0, -2)),
+        ],
+        numeric_params(&[("v_offset", 2e-3), ("r_sink", 20.0), ("imax", 0.02)]),
+    )
+    .expect("comparator definition is valid")
+}
+
 fn two_terminal(kind: SymbolKind, defaults: &[(&str, f64)]) -> SymbolDef {
     SymbolDef::new(
         kind,
@@ -476,7 +518,7 @@ mod tests {
     #[test]
     fn builtin_registry_contains_expected_symbols() {
         let registry = SymbolRegistry::builtin();
-        assert_eq!(registry.len(), 14);
+        assert_eq!(registry.len(), 16);
         assert_eq!(
             registry
                 .get(&SymbolKind::Resistor)
@@ -490,6 +532,12 @@ mod tests {
         assert_eq!(
             registry.get(&SymbolKind::Ground).map(SymbolDef::pin_count),
             Some(1)
+        );
+        assert_eq!(
+            registry
+                .get(&SymbolKind::ShuntReference)
+                .map(SymbolDef::pin_count),
+            Some(3)
         );
     }
 
@@ -636,6 +684,60 @@ mod tests {
         assert_eq!(
             zener.defaults.get("nbv").and_then(ParamValue::as_number),
             Some(1.0)
+        );
+    }
+
+    #[test]
+    fn shunt_reference_has_ordered_pins_and_tl431_defaults() {
+        let registry = SymbolRegistry::builtin();
+        let definition = registry.get(&SymbolKind::ShuntReference).unwrap();
+        assert_eq!(
+            definition
+                .pins
+                .iter()
+                .map(|pin| pin.name.as_str())
+                .collect::<Vec<_>>(),
+            ["ref", "k", "a"]
+        );
+        for (key, value) in [
+            ("vref", 2.495),
+            ("iref", 2e-6),
+            ("ik_min", 1e-3),
+            ("imax", 0.1),
+            ("z_ka", 0.2),
+        ] {
+            assert_eq!(
+                definition.defaults.get(key).and_then(ParamValue::as_number),
+                Some(value)
+            );
+        }
+        assert_eq!(
+            SymbolKind::from_key("shunt_reference"),
+            Some(SymbolKind::ShuntReference)
+        );
+    }
+
+    #[test]
+    fn comparator_has_lm393_pins_and_defaults() {
+        let registry = SymbolRegistry::builtin();
+        let definition = registry.get(&SymbolKind::Comparator).unwrap();
+        assert_eq!(
+            definition
+                .pins
+                .iter()
+                .map(|pin| pin.name.as_str())
+                .collect::<Vec<_>>(),
+            ["in+", "in-", "out", "vcc", "vss"]
+        );
+        for (key, value) in [("v_offset", 2e-3), ("r_sink", 20.0), ("imax", 0.02)] {
+            assert_eq!(
+                definition.defaults.get(key).and_then(ParamValue::as_number),
+                Some(value)
+            );
+        }
+        assert_eq!(
+            SymbolKind::from_key("comparator"),
+            Some(SymbolKind::Comparator)
         );
     }
 }

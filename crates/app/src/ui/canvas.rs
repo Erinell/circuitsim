@@ -1070,6 +1070,14 @@ impl CanvasState {
                                 (editor_core::SymbolKind::Diode, "Diode"),
                                 (editor_core::SymbolKind::Led, "LED"),
                                 (editor_core::SymbolKind::Zener, "Zener"),
+                                (
+                                    editor_core::SymbolKind::ShuntReference,
+                                    "Référence shunt programmable",
+                                ),
+                                (
+                                    editor_core::SymbolKind::Comparator,
+                                    "Comparateur collecteur ouvert",
+                                ),
                                 (editor_core::SymbolKind::OpAmp, "Amplificateur"),
                             ],
                         ),

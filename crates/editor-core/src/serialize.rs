@@ -92,6 +92,66 @@ mod tests {
     }
 
     #[test]
+    fn round_trips_a_shunt_reference_symbol_and_its_properties() {
+        let mut schematic = Schematic::new();
+        let mut history = crate::undo::UndoStack::new();
+        let registry = crate::symbol::SymbolRegistry::builtin();
+        let definition = registry.get(&SymbolKind::ShuntReference).unwrap();
+        let id = crate::symbol::SymbolId(schematic.allocate_id().unwrap());
+        let symbol = crate::symbol::Symbol::from_def(
+            id,
+            definition,
+            crate::grid::GridPos::new(2, 3),
+            "U1",
+            crate::grid::Orientation::R0,
+            false,
+        );
+        history
+            .execute(
+                &mut schematic,
+                crate::command::Command::AddSymbol(symbol.clone()),
+            )
+            .unwrap();
+
+        let json = to_json(&schematic).unwrap();
+        let restored = from_json(&json).unwrap();
+
+        assert_eq!(restored, schematic);
+        assert_eq!(restored.symbol(id), Some(&symbol));
+        assert!(json.contains("ShuntReference"));
+    }
+
+    #[test]
+    fn round_trips_a_comparator_symbol_and_its_properties() {
+        let mut schematic = Schematic::new();
+        let mut history = crate::undo::UndoStack::new();
+        let registry = crate::symbol::SymbolRegistry::builtin();
+        let definition = registry.get(&SymbolKind::Comparator).unwrap();
+        let id = crate::symbol::SymbolId(schematic.allocate_id().unwrap());
+        let symbol = crate::symbol::Symbol::from_def(
+            id,
+            definition,
+            crate::grid::GridPos::new(4, 2),
+            "U1",
+            crate::grid::Orientation::R0,
+            false,
+        );
+        history
+            .execute(
+                &mut schematic,
+                crate::command::Command::AddSymbol(symbol.clone()),
+            )
+            .unwrap();
+
+        let json = to_json(&schematic).unwrap();
+        let restored = from_json(&json).unwrap();
+
+        assert_eq!(restored, schematic);
+        assert_eq!(restored.symbol(id), Some(&symbol));
+        assert!(json.contains("Comparator"));
+    }
+
+    #[test]
     fn rejects_future_schema_versions_before_parsing_the_payload() {
         let json = r#"{"schema_version":99,"future":true,"schematic":{"layout":"unknown"}}"#;
         assert!(matches!(

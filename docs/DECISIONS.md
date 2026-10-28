@@ -51,7 +51,7 @@ documents spécialisés.
    `circuitsim-app`. Les graphiques sont décimés à 4 096 points ; mesures et
    exports gardent toutes les valeurs. Voir [INSTRUMENTS.md](INSTRUMENTS.md).
 10. **Formats versionnés et interface bornée.** `SCHEMA_VERSION = 1`,
-    `PROTOCOL_VERSION = 1`, 100 000 pas transitoires, 10 000 points AC et
+    `PROTOCOL_VERSION = 3`, 100 000 pas transitoires, 10 000 points AC et
     16 384 points FFT. Un format incompatible est refusé, jamais interprété
     approximativement. Voir [PROTOCOL.md](PROTOCOL.md) et
     [INSTRUMENTS.md](INSTRUMENTS.md).

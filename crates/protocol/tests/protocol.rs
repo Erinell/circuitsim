@@ -103,6 +103,34 @@ fn netlist_wire_roundtrips_parameter_variants_and_custom_kinds() {
             },
         )
         .unwrap();
+    builder
+        .add_component(
+            ComponentKind::ShuntReference,
+            "U1",
+            [
+                ("vref".to_owned(), ParamValue::Number(2.495)),
+                ("iref".to_owned(), ParamValue::Number(2e-6)),
+                ("ik_min".to_owned(), ParamValue::Number(1e-3)),
+                ("imax".to_owned(), ParamValue::Number(0.1)),
+                ("z_ka".to_owned(), ParamValue::Number(0.2)),
+            ]
+            .into(),
+            vec![output, output, ground],
+        )
+        .unwrap();
+    builder
+        .add_component(
+            ComponentKind::Comparator,
+            "U2",
+            [
+                ("v_offset".to_owned(), ParamValue::Number(0.0)),
+                ("r_sink".to_owned(), ParamValue::Number(20.0)),
+                ("imax".to_owned(), ParamValue::Number(0.02)),
+            ]
+            .into(),
+            vec![output, output, output, output, ground],
+        )
+        .unwrap();
     let message = ClientMessage::Submit {
         job: Job {
             revision: 1,
