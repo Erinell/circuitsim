@@ -8,7 +8,10 @@ en SI, sauf `closed` qui est booléen.
 ## 1. Broches et signes
 
 Les composants à deux broches utilisent `a`, `b`. L'opamp utilise `in+`, `in-`,
-`out`, `v+`, `v-` dans cet ordre ; `Ground` a une broche `gnd` sur la masse.
+`out`, `v+`, `v-` dans cet ordre ; `Ground` a une broche `gnd` sur la masse. En
+orientation `R0`, les symboles `Comparator` et `OpAmp` placent `in+` et
+l'alimentation positive (`vcc`/`v+`) en haut, `in-` et l'alimentation négative
+(`vss`/`v-`) en bas.
 
 - Tension : `v(a) - v(b)`.
 - Courant de branche : de `a` vers `b`.
@@ -251,7 +254,7 @@ Modèle volontairement simplifié : commande instantanée sans pôle ni compensa
 
 ## 7. Comparateur à collecteur ouvert LM393
 
-Broches ordonnées : `in+`, `in-`, `out`, `vcc`, `vss`. Le courant de sortie positif est orienté `out -> vss`, et la tension observée est `V(out)-V(vss)`. Le LM393 a une sortie collecteur ouvert : **le pull-up est externe et obligatoire** pour obtenir un niveau haut. Sans pull-up, un état relâché laisse le nœud de sortie flottant et la résolution DC peut être singulière. `vss` sert de référence à l'étage de sortie. Le comparateur est désactivé sous `1,8 V`, s'active progressivement entre `1,8 V` et `2,2 V`, puis fonctionne pleinement jusqu'à `36 V` de tension d'alimentation.
+Broches ordonnées : `in+`, `in-`, `out`, `vcc`, `vss`. En orientation `R0`, `in+` et `vcc` sont en haut, `in-` et `vss` en bas. Le courant de sortie positif est orienté `out -> vss`, et la tension observée est `V(out)-V(vss)`. Le LM393 a une sortie collecteur ouvert : **le pull-up est externe et obligatoire** pour obtenir un niveau haut. Sans pull-up, un état relâché laisse le nœud de sortie flottant et la résolution DC peut être singulière. `vss` sert de référence à l'étage de sortie. Le comparateur est désactivé sous `1,8 V`, s'active progressivement entre `1,8 V` et `2,2 V`, puis fonctionne pleinement jusqu'à `36 V` de tension d'alimentation.
 
 | Paramètre | Défaut | Domaine / rôle |
 | --- | ---: | --- |
@@ -285,7 +288,8 @@ Modèle volontairement simplifié : entrée sans courant, courant d'alimentation
 v(out) = clamp(gain * (v(in+) - v(in-)), v_sat_neg, v_sat_pos)
 ```
 
-La sortie a une inconnue de courant `out -> masse`. `v+` et `v-` sont déclarées
+La sortie a une inconnue de courant `out -> masse`. En orientation `R0`, `in+`
+et `v+` sont en haut, `in-` et `v-` en bas. `v+` et `v-` sont déclarées
 pour le symbole mais ignorées : aucun courant d'alimentation, limite de courant,
 résistance de sortie, slew rate ni pôle. Une alimentation flottante peut rendre
 le système singulier. Newton utilise `gain` en régime actif et `0` en saturation ;

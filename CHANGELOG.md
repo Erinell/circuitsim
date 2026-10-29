@@ -83,6 +83,10 @@ sémantique.
 - Les textes secondaires passent à 11 px et les boutons bénéficient d'un peu plus
   d'espace pour améliorer leur lisibilité et leur confort de clic. Leur couleur
   est adaptée au thème et vérifiée à 4,5:1 dans les trois thèmes.
+- Les symboles **comparateur** et **opamp** placent désormais leurs broches
+  positives en haut (`in+`, `vcc`/`v+`) et négatives en bas (`in-`, `vss`/`v-`)
+  en orientation `R0`, conformément au pictogramme `+`/`−`. Les projets existants
+  doivent vérifier leur câblage après migration.
 - Le comparateur s'active progressivement entre **1,8 V et 2,2 V** de tension
   d'alimentation au lieu d'un seuil brutal à 2 V. Cela stabilise les démarrages
   lents sans modifier son comportement au-dessus de 2,2 V.
