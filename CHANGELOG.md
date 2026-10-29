@@ -83,6 +83,9 @@ sémantique.
 - Les textes secondaires passent à 11 px et les boutons bénéficient d'un peu plus
   d'espace pour améliorer leur lisibilité et leur confort de clic. Leur couleur
   est adaptée au thème et vérifiée à 4,5:1 dans les trois thèmes.
+- Le comparateur s'active progressivement entre **1,8 V et 2,2 V** de tension
+  d'alimentation au lieu d'un seuil brutal à 2 V. Cela stabilise les démarrages
+  lents sans modifier son comportement au-dessus de 2,2 V.
 - Le menu **Afficher** est renommé **Affichage**. La limite des fils/nets est
   déplacée dans la fenêtre **Préférences d’affichage**.
 - Les raccourcis à une lettre pour placer les composants sont retirés ; le
@@ -117,6 +120,11 @@ sémantique.
 
 ### Fixed
 
+- Le transitoire **subdivise automatiquement un pas nominal** qui échoue
+  (jusqu'à 8 niveaux) au lieu d'arrêter la simulation. Les échantillons et le pas
+  nominal restent inchangés ; l'audit d'énergie tient compte des sous-pas. Cela
+  corrige les échecs de convergence lors d'un démarrage lent ou d'une
+  commutation rapide.
 - Un clic sur un diagnostic ERC cadre maintenant l'objet sélectionné dans le
   canevas, comme pour les alertes de surintensité.
 

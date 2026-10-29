@@ -251,7 +251,7 @@ Modèle volontairement simplifié : commande instantanée sans pôle ni compensa
 
 ## 7. Comparateur à collecteur ouvert LM393
 
-Broches ordonnées : `in+`, `in-`, `out`, `vcc`, `vss`. Le courant de sortie positif est orienté `out -> vss`, et la tension observée est `V(out)-V(vss)`. Le LM393 a une sortie collecteur ouvert : **le pull-up est externe et obligatoire** pour obtenir un niveau haut. Sans pull-up, un état relâché laisse le nœud de sortie flottant et la résolution DC peut être singulière. `vss` sert de référence à l'étage de sortie ; `vcc` autorise la comparaison si `2 V <= V(vcc)-V(vss) <= 36 V`.
+Broches ordonnées : `in+`, `in-`, `out`, `vcc`, `vss`. Le courant de sortie positif est orienté `out -> vss`, et la tension observée est `V(out)-V(vss)`. Le LM393 a une sortie collecteur ouvert : **le pull-up est externe et obligatoire** pour obtenir un niveau haut. Sans pull-up, un état relâché laisse le nœud de sortie flottant et la résolution DC peut être singulière. `vss` sert de référence à l'étage de sortie. Le comparateur est désactivé sous `1,8 V`, s'active progressivement entre `1,8 V` et `2,2 V`, puis fonctionne pleinement jusqu'à `36 V` de tension d'alimentation.
 
 | Paramètre | Défaut | Domaine / rôle |
 | --- | ---: | --- |
@@ -261,16 +261,17 @@ Broches ordonnées : `in+`, `in-`, `out`, `vcc`, `vss`. Le courant de sortie pos
 
 ```text
 e = V(in+) - V(in-) - v_offset
-si V(vcc)-V(vss) hors [2 V, 36 V] : collecteur relâché
-sinon si e < 0 : Iout = min((V(out)-V(vss))/r_sink, imax)
+f = smoothstep(clamp((V(vcc)-V(vss) - 1.8) / 0.4, 0, 1))
+si V(vcc)-V(vss) < 1.8 V ou > 36 V : collecteur relâché
+sinon si e < 0 : Iout = f * min((V(out)-V(vss))/r_sink, imax)
 sinon    : Iout = 0  (collecteur relâché)
 ```
 
-Le courant `Iout` positif va de `out` à `vss`. Dans la plage normale `V(out) >= V(vss)`, l'état conducteur se comporte comme `r_sink` jusqu'au plafond `imax`. En dehors de cette plage, la résistance est prolongée algébriquement pour aider Newton ; le modèle ne représente pas la protection contre une tension de sortie négative. Un pull-up résistif donne, en état bas non saturé, `Vout-VSS ≈ r_sink * Iout`.
+Le courant `Iout` positif va de `out` à `vss`. L'activation progressive `f` évite un saut de courant lorsqu'une alimentation lente traverse le seuil minimal : c'est une régularisation numérique du démarrage, pas une caractéristique physique du LM393. Dans la plage normale `V(out) >= V(vss)`, l'état conducteur se comporte comme `r_sink` jusqu'au plafond `imax`. En dehors de cette plage, la résistance est prolongée algébriquement pour aider Newton ; le modèle ne représente pas la protection contre une tension de sortie négative. Un pull-up résistif donne, en état bas non saturé, `Vout-VSS ≈ r_sink * Iout`.
 
 Le défaut `v_offset = 2 mV` reprend l'ordre de grandeur typique de la fiche LM393 ; ±5 mV est la limite spécifiée. `r_sink = 20 Ω` approxime le point typique `VOL ≈ 80 mV` à `IOL = 4 mA` de la courbe de sortie. `imax = 20 mA` correspond à la valeur absolue maximale de courant de sortie, pas à un courant de fonctionnement recommandé. Source : [Texas Instruments, fiche LM393/LM393B](https://www.ti.com/lit/ds/symlink/lm393.pdf), sections 5.1, 5.8 et 5.12, et [fiche produit LM393](https://www.ti.com/product/LM393).
 
-Modèle volontairement simplifié : entrée sans courant, courant d'alimentation nul, limites de mode commun non modélisées, commutation instantanée, sans délai ni hystérésis. L'AC fige l'état logique au point DC et linéarise seulement la résistance de sink active ; le gain de comparaison petit-signal est nul. La résistance de pull-up et sa source restent des composants externes.
+Modèle volontairement simplifié : entrée sans courant, courant d'alimentation nul, limites de mode commun non modélisées, commutation instantanée en entrée, sans délai ni hystérésis. L'activation d'alimentation est progressive entre 1,8 V et 2,2 V pour la robustesse numérique. L'AC fige l'état logique au point DC et linéarise seulement la résistance de sink active ; le gain de comparaison petit-signal est nul. La résistance de pull-up et sa source restent des composants externes.
 
 ## 8. Amplificateur opérationnel
 

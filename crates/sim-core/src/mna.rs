@@ -1018,7 +1018,11 @@ impl NonlinearDevice {
             Self::Comparator(device) => {
                 let input_error = state.first().copied().unwrap_or(0.0);
                 let output_voltage = device.output_voltage_at(solution);
-                let (current, slope) = device.current_and_conductance(input_error, output_voltage);
+                let (current, slope) = device.current_and_conductance(
+                    input_error,
+                    output_voltage,
+                    device.supply_factor(solution),
+                );
                 stamp_conductance(conductance, device.output, device.negative_supply, slope);
                 stamp_current_source(
                     sources,
@@ -1070,7 +1074,11 @@ impl NonlinearDevice {
                 let input_error = device.input_error_at(solution);
                 let output_voltage = device.output_voltage_at(solution);
                 let slope = device
-                    .current_and_conductance(input_error, output_voltage)
+                    .current_and_conductance(
+                        input_error,
+                        output_voltage,
+                        device.supply_factor(solution),
+                    )
                     .1;
                 stamp_complex_conductance(
                     conductance,
@@ -1107,6 +1115,7 @@ impl NonlinearDevice {
                     .current_and_conductance(
                         device.input_error_at(solution),
                         device.output_voltage_at(solution),
+                        device.supply_factor(solution),
                     )
                     .0
             }
@@ -1228,11 +1237,18 @@ struct ComparatorDevice {
     maximum_current: f64,
 }
 
+/// Below this supply the comparator is fully disabled.
+const COMPARATOR_MIN_SUPPLY: f64 = 1.8;
+/// Supply where the comparator reaches full sink strength.
+const COMPARATOR_FULL_SUPPLY: f64 = 2.2;
+/// Maximum modeled supply voltage.
+const COMPARATOR_MAX_SUPPLY: f64 = 36.0;
+
 impl ComparatorDevice {
     fn input_error_at(&self, solution: &DVector<f64>) -> f64 {
         let supply_voltage = node_voltage(solution, self.positive_supply)
             - node_voltage(solution, self.negative_supply);
-        if !(2.0..=36.0).contains(&supply_voltage) {
+        if !(COMPARATOR_MIN_SUPPLY..=COMPARATOR_MAX_SUPPLY).contains(&supply_voltage) {
             1.0
         } else {
             node_voltage(solution, self.input_plus)
@@ -1241,19 +1257,43 @@ impl ComparatorDevice {
         }
     }
 
+    /// Smooth enable factor used while the supply ramps through its minimum.
+    ///
+    /// A hard threshold would step the sink current when a slowly charging
+    /// supply crosses it, which fixed-step Newton cannot follow reliably.
+    fn supply_factor(&self, solution: &DVector<f64>) -> f64 {
+        let supply_voltage = node_voltage(solution, self.positive_supply)
+            - node_voltage(solution, self.negative_supply);
+        if !(COMPARATOR_MIN_SUPPLY..=COMPARATOR_MAX_SUPPLY).contains(&supply_voltage) {
+            0.0
+        } else {
+            let span = COMPARATOR_FULL_SUPPLY - COMPARATOR_MIN_SUPPLY;
+            let normalized = ((supply_voltage - COMPARATOR_MIN_SUPPLY) / span).clamp(0.0, 1.0);
+            normalized * normalized * (3.0 - 2.0 * normalized)
+        }
+    }
+
     fn output_voltage_at(&self, solution: &DVector<f64>) -> f64 {
         node_voltage(solution, self.output) - node_voltage(solution, self.negative_supply)
     }
 
-    fn current_and_conductance(&self, input_error: f64, output_voltage: f64) -> (f64, f64) {
-        if input_error >= 0.0 {
+    fn current_and_conductance(
+        &self,
+        input_error: f64,
+        output_voltage: f64,
+        supply_factor: f64,
+    ) -> (f64, f64) {
+        if input_error >= 0.0 || supply_factor <= 0.0 {
             return (0.0, 0.0);
         }
         let raw_current = output_voltage / self.sink_resistance;
         if raw_current >= self.maximum_current {
-            (self.maximum_current, 0.0)
+            (self.maximum_current * supply_factor, 0.0)
         } else {
-            (raw_current, 1.0 / self.sink_resistance)
+            (
+                raw_current * supply_factor,
+                supply_factor / self.sink_resistance,
+            )
         }
     }
 }

@@ -140,11 +140,11 @@ Le MOSFET reste un exemple d'extension (`examples/custom_mosfet.rs`) ; les types
 | G6 ergonomie du scope | terminé |
 | G7 onboarding et accessibilité | terminé |
 | G8 finalisation `v0.2.0` | terminé |
-| Refonte ergonomique v0.5 (U1–U7), surintensités et diagnostics | terminé |
+| Refonte ergonomique v0.5 (U1–U7), surintensités, diagnostics et convergence transitoire | terminé |
 
 ## Limites finales
 
 - Worker et session temps réel dans le fil de l'interface ; Web Worker/SAB à brancher.
-- Pas adaptatif ; excitations continues par événements ; AC sans capacité de jonction, opamp sans alimentation/pôle.
+- Pas de pas adaptatif global ; subdivision de secours d'un pas en échec, excitations continues par événements ; AC sans capacité de jonction, opamp sans alimentation/pôle.
 - FFT plafonnée, sans fenêtres alternatives ; export CSV seul, sans persistance/PNG ; panneaux non dockables, préférences de session.
 - Budgets de performance documentés, non bloquants.
