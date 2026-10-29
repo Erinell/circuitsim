@@ -34,16 +34,16 @@ l'installe séparément.
 
 ## 3. Suite et couverture
 
-Au 28 octobre 2026, `cargo test --workspace` exécute **357 tests** :
+Au 29 octobre 2026, `cargo test --workspace` exécute **359 tests** :
 
 | Groupe | Tests | Points clés |
 | --- | ---: | --- |
 | `sim-core` unités | 19 | SI, parsing, formatage, netlist, erreurs |
 | `sim-core` DC | 26 | diviseur, sources, R/C/L, résistance série de bobine, switch, diodes, Schottky, LED Vf/If, opamp, erreurs |
-| `sim-core` transitoire | 23 | RC/RL, condensateurs initialement déchargés, événements, diode, opamp, énergie, session incrémentale, mise à jour à chaud |
+| `sim-core` transitoire | 24 | RC/RL, condensateurs initialement déchargés, événements, diode, opamp, énergie, subdivision interne d'un pas en échec, session incrémentale, mise à jour à chaud |
 | `sim-core` AC | 17 | RC/RL/RLC, phase, diode, opamp, balayages, erreurs |
 | `sim-core` MOSFET | 13 | cutoff, triode/saturation analytiques, continuité au seuil, miroir N/P, `swap_ds`, diode de corps, `gm`/`gds` et capacités AC, échelons de grille 10 µs et 1 µs, ouverture à chaud d'un interrupteur de grille avec drain flottant |
-| `editor-core` | 59 | grille, symboles, schéma, historique, ERC, extraction, masses communes, paramètres LED/bobine/MOSFET, JSON, séries E, snap/routage |
+| `editor-core` | 60 | grille, symboles, schéma, historique, ERC, extraction, masses communes, paramètres LED/bobine/MOSFET, polarité des broches comparateur/opamp, JSON, séries E, snap/routage |
 | `circuitsim-app` | 173 | document, projet JSON, vue, navigation, mini-carte, UI, petits textes à 10 px, inspecteur avec sélecteur de diode et de canal, historique, presse-papiers, simulation continue, mise à jour à chaud, calques, palettes, survol avec tension, intensité de fil et limite, interrupteur ouvert sans fuite affichée, surintensités et diagnostics cliquables, placement aligné sur broche, câblage direct, raccourcis, aide générée, contrastes, panneau unifié et portées, tensions de condensateurs et courants de nets/composants dérivés, ajout de portée depuis les contrôles, valeurs à droite, fenêtre réglable 0,5–30 s, 10 s par défaut et décimation, réordonnancement et recentrage, sondes intégrées, FFT et curseurs A/B, curseurs de réglage, exemples dont le RC de démonstration, diviseur, MOSFET, RLC et polarité, préférences persistées et migration, À propos, onboarding, accessibilité, ohmmètre, instruments, worker, FFT, Bode, CSV |
 | `worker-protocol` | 12 | trames, version v4, netlist MOSFET, erreurs, transports |
 | `worker` | 13 | coalescence, cadence, révisions, DC/transitoire/AC |
@@ -54,7 +54,8 @@ chevauchement), atomicité des commandes, noms déterministes, broches hors gril
 fusion de plusieurs symboles de masse en un nœud `0`,
 JSON v1 historique et futur/malformé, accroche et routage orthogonal, sauts
 d’historique nommé, séries E12/E24/E96 ; conventions de signe, composants non
-linéaires, saturation, singularités, non-convergence, événements alignés ou non,
+linéaires, saturation, singularités, non-convergence, activation progressive du
+comparateur, subdivision interne d'un pas transitoire en échec, événements alignés ou non,
 continuité condensateur/inductance, condensateurs initialement déchargés,
 diode standard/Schottky, LED Vf/If, résistance série de bobine, énergie ; réponses analytiques RC/RL/RLC,
 phases, conductance dynamique, balayages ; MOSFET niveau 1 en cutoff, triode et

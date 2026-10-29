@@ -1061,6 +1061,15 @@ fn lm393_comparator_sinks_or_releases_its_open_collector_output() {
         with_comparator(1.0, 2.0, comparator_params(), Some(1_000.0), 1.5);
     let undervoltage = solve_dc(&undervoltage_netlist, DcOptions::default()).unwrap();
     assert!((1.49..=1.5).contains(&undervoltage.node_voltage(undervoltage_output).unwrap()));
+
+    let (soft_netlist, soft_output) =
+        with_comparator(1.0, 2.0, comparator_params(), Some(1_000.0), 1.9);
+    let soft = solve_dc(&soft_netlist, DcOptions::default()).unwrap();
+    let soft_voltage = soft.node_voltage(soft_output).unwrap();
+    assert!(
+        (0.15..0.25).contains(&soft_voltage),
+        "soft-start output was {soft_voltage}"
+    );
 }
 
 #[test]

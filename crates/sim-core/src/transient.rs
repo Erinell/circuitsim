@@ -201,24 +201,23 @@ pub fn simulate_transient(
             junction_voltages = circuit.junction_voltages(&previous);
         }
 
-        let step = next_time - time;
-        let mode = AssemblyMode::Transient {
-            previous: &previous,
-            step,
-        };
-        let outcome = solve_step(
+        let mut interval_iterations = 0;
+        let outcome = integrate_interval(
             &circuit,
             &options.solver,
-            mode,
+            time,
+            next_time,
             &previous,
             &junction_voltages,
-            next_time,
+            0,
+            &mut interval_iterations,
+            &mut |solution, substep| {
+                accumulate_interval(&working, &circuit, solution, substep, &mut absorbed);
+            },
         )?;
-        iterations += outcome.iterations;
-        accumulate_interval(&working, &circuit, &outcome.solution, step, &mut absorbed);
-
+        iterations += interval_iterations;
         previous = outcome.solution;
-        junction_voltages = circuit.junction_voltages(&previous);
+        junction_voltages = outcome.junction_voltages;
         samples.push(build_sample(&working, &circuit, &previous, next_time));
         steps += 1;
     }
@@ -341,29 +340,29 @@ impl TransientSession {
             self.junction_voltages = self.circuit.junction_voltages(&self.previous);
         }
 
-        let step = next_time - time;
-        let mode = AssemblyMode::Transient {
-            previous: &self.previous,
-            step,
-        };
-        let outcome = solve_step(
+        let mut interval_iterations = 0;
+        let outcome = integrate_interval(
             &self.circuit,
             &self.solver,
-            mode,
+            time,
+            next_time,
             &self.previous,
             &self.junction_voltages,
-            next_time,
+            0,
+            &mut interval_iterations,
+            &mut |solution, substep| {
+                accumulate_interval(
+                    &self.working,
+                    &self.circuit,
+                    solution,
+                    substep,
+                    &mut self.absorbed,
+                );
+            },
         )?;
-        self.iterations += outcome.iterations;
-        accumulate_interval(
-            &self.working,
-            &self.circuit,
-            &outcome.solution,
-            step,
-            &mut self.absorbed,
-        );
+        self.iterations += interval_iterations;
         self.previous = outcome.solution;
-        self.junction_voltages = self.circuit.junction_voltages(&self.previous);
+        self.junction_voltages = outcome.junction_voltages;
         self.time = next_time;
         self.steps += 1;
         Ok(())
@@ -751,6 +750,84 @@ fn solve_step(
             source: map_newton_error(source),
         }
     })
+}
+
+/// Maximum recursive subdivisions of one nominal transient interval.
+const MAX_SUBSTEP_DEPTH: u32 = 8;
+
+/// State at the end of one successfully integrated nominal interval.
+struct IntervalState {
+    solution: DVector<f64>,
+    junction_voltages: Vec<f64>,
+}
+
+/// Integrates one interval, subdividing it recursively when Newton fails.
+///
+/// The nominal output step is preserved by the caller; subdivisions are an
+/// internal fallback that recomputes Newton from a closer initial state.
+#[allow(clippy::too_many_arguments)]
+fn integrate_interval<F>(
+    circuit: &MnaCircuit,
+    solver: &DcOptions,
+    start: f64,
+    end: f64,
+    previous: &DVector<f64>,
+    junction_voltages: &[f64],
+    depth: u32,
+    iterations: &mut usize,
+    on_step: &mut F,
+) -> Result<IntervalState, TransientError>
+where
+    F: FnMut(&DVector<f64>, f64),
+{
+    let step = end - start;
+    let mode = AssemblyMode::Transient { previous, step };
+    match solve_step(circuit, solver, mode, previous, junction_voltages, end) {
+        Ok(outcome) => {
+            *iterations += outcome.iterations;
+            on_step(&outcome.solution, step);
+            Ok(IntervalState {
+                junction_voltages: circuit.junction_voltages(&outcome.solution),
+                solution: outcome.solution,
+            })
+        }
+        Err(error) => {
+            let retryable = matches!(
+                &error,
+                TransientError::Step {
+                    source: DcError::NoConvergence { .. } | DcError::NonFiniteSolution { .. },
+                    ..
+                }
+            );
+            let minimum = f64::EPSILON * end.abs().max(1.0);
+            if !retryable || depth >= MAX_SUBSTEP_DEPTH || step <= minimum {
+                return Err(error);
+            }
+            let midpoint = start + step * 0.5;
+            let left = integrate_interval(
+                circuit,
+                solver,
+                start,
+                midpoint,
+                previous,
+                junction_voltages,
+                depth + 1,
+                iterations,
+                on_step,
+            )?;
+            integrate_interval(
+                circuit,
+                solver,
+                midpoint,
+                end,
+                &left.solution,
+                &left.junction_voltages,
+                depth + 1,
+                iterations,
+                on_step,
+            )
+        }
+    }
 }
 
 fn build_sample(

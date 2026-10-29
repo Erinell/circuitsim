@@ -400,11 +400,11 @@ fn builtin_defs() -> Vec<SymbolDef> {
         SymbolDef::new(
             SymbolKind::OpAmp,
             vec![
-                PinDef::new("in+", GridPos::new(-2, 1)),
-                PinDef::new("in-", GridPos::new(-2, -1)),
+                PinDef::new("in+", GridPos::new(-2, -1)),
+                PinDef::new("in-", GridPos::new(-2, 1)),
                 PinDef::new("out", GridPos::new(2, 0)),
-                PinDef::new("v+", GridPos::new(0, 2)),
-                PinDef::new("v-", GridPos::new(0, -2)),
+                PinDef::new("v+", GridPos::new(0, -2)),
+                PinDef::new("v-", GridPos::new(0, 2)),
             ],
             numeric_params(&[("gain", 1e5), ("v_sat_pos", 15.0), ("v_sat_neg", -15.0)]),
         )
@@ -471,11 +471,11 @@ fn comparator_def() -> SymbolDef {
     SymbolDef::new(
         SymbolKind::Comparator,
         vec![
-            PinDef::new("in+", GridPos::new(-2, 1)),
-            PinDef::new("in-", GridPos::new(-2, -1)),
+            PinDef::new("in+", GridPos::new(-2, -1)),
+            PinDef::new("in-", GridPos::new(-2, 1)),
             PinDef::new("out", GridPos::new(2, 0)),
-            PinDef::new("vcc", GridPos::new(0, 2)),
-            PinDef::new("vss", GridPos::new(0, -2)),
+            PinDef::new("vcc", GridPos::new(0, -2)),
+            PinDef::new("vss", GridPos::new(0, 2)),
         ],
         numeric_params(&[("v_offset", 2e-3), ("r_sink", 20.0), ("imax", 0.02)]),
     )
@@ -792,6 +792,31 @@ mod tests {
             SymbolKind::from_key("shunt_reference"),
             Some(SymbolKind::ShuntReference)
         );
+    }
+
+    #[test]
+    fn comparator_and_opamp_put_positive_pins_above_negative_pins() {
+        let registry = SymbolRegistry::builtin();
+        for (kind, positive_supply, negative_supply) in [
+            (SymbolKind::Comparator, "vcc", "vss"),
+            (SymbolKind::OpAmp, "v+", "v-"),
+        ] {
+            let definition = registry.get(&kind).unwrap();
+            let y = |name: &str| {
+                definition
+                    .pins
+                    .iter()
+                    .find(|pin| pin.name == name)
+                    .unwrap()
+                    .at
+                    .y
+            };
+            assert!(y("in+") < y("in-"), "{kind:?} input pins");
+            assert!(
+                y(positive_supply) < y(negative_supply),
+                "{kind:?} supply pins"
+            );
+        }
     }
 
     #[test]

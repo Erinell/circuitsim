@@ -120,6 +120,13 @@ transitoire, l'état initial est la solution précédente. À chaque itération 
 6. réduire éventuellement le pas par recherche linéaire ;
 7. comparer mise à jour et résidu aux tolérances.
 
+Si un pas transitoire nominal échoue, il est redivisé en deux et chaque moitié
+est résolue depuis la solution précédente, jusqu'à huit niveaux. Cette reprise
+interne recalcule le Jacobien à un point plus proche et évite les échecs lors
+d'un démarrage lent ou d'une commutation rapide ; le pas nominal et les
+échantillons restent inchangés. Un échec qui persiste au niveau minimal est
+retourné tel quel.
+
 Limitation logarithmique :
 
 ```text
@@ -250,7 +257,7 @@ Cette loi est un modèle comportemental statique, pas un sous-circuit transistor
 
 ## 11. Comparateur à collecteur ouvert
 
-Le comparateur choisit l'état sink si `e = V(in+)-V(in-)-v_offset < 0` et si `2 V <= V(vcc)-V(vss) <= 36 V`. Dans cet état, `Iout = min(V(out,vss)/r_sink, imax)` orienté de OUT vers VSS ; sinon `Iout = 0`. L'assemblage est équivalent à une conductance `1/r_sink` entre OUT et VSS tant que le courant est inférieur à `imax`, sinon à une source de courant plafonnée. Le Jacobien ne comporte pas de dérivée par rapport aux entrées : le comparateur est un commutateur algébrique, pas un gain analogique élevé.
+Le comparateur choisit l'état sink si `e = V(in+)-V(in-)-v_offset < 0`. Son alimentation est désactivée sous `1.8 V`, activée progressivement entre `1.8 V` et `2.2 V` par `f = smoothstep(clamp((V(vcc)-V(vss)-1.8)/0.4,0,1))`, puis pleinement active jusqu'à `36 V`. Dans cet état, `Iout = f * min(V(out,vss)/r_sink, imax)` orienté de OUT vers VSS ; sinon `Iout = 0`. L'assemblage est équivalent à une conductance `f/r_sink` entre OUT et VSS tant que le courant est inférieur à `imax`, sinon à une source de courant plafonnée. Le Jacobien ne comporte pas de dérivée par rapport aux entrées : le comparateur est un commutateur algébrique, pas un gain analogique élevé.
 
 En AC, l'état du comparateur est figé par le point DC ; seule la pente de sortie active participe à la matrice complexe. La source de pull-up est un composant externe et conserve son excitation AC. Le modèle ne représente ni délai/hystérésis, ni courant d'entrée, ni limites de mode commun, ni courant d'alimentation VCC. Pour éviter les oscillations de Newton, la résistance active est extrapolée sous VSS pendant les itérations ; cette extrapolation n'est pas une caractéristique physique de la puce.
 

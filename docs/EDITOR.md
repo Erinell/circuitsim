@@ -219,7 +219,7 @@ Le symbole `ShuntReference` conserve l'ordre `REF`, `K`, `A` lors de l'extractio
 
 ## Broches du comparateur LM393
 
-Le symbole `Comparator` conserve l'ordre `in+`, `in-`, `out`, `vcc`, `vss`. `out` est le collecteur ouvert ; `vss` est le retour du courant sink. Un pull-up externe est requis pour définir le niveau relâché. `vcc` active le modèle dans la plage 2–36 V ; son courant et les limites de mode commun ne sont pas modélisés.
+Le symbole `Comparator` conserve l'ordre `in+`, `in-`, `out`, `vcc`, `vss`. En orientation `R0`, `in+` et `vcc` sont en haut, `in-` et `vss` en bas. `out` est le collecteur ouvert ; `vss` est le retour du courant sink. Un pull-up externe est requis pour définir le niveau relâché. `vcc` active le modèle entre 1,8 V et 36 V, avec une activation progressive de 1,8 à 2,2 V ; son courant et les limites de mode commun ne sont pas modélisés.
 
 ## Broches du MOSFET
 
