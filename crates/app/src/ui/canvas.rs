@@ -761,13 +761,11 @@ impl CanvasState {
                         current,
                     } => {
                         let end = latest_point.unwrap_or(current);
-                        let delta = document.wire(wire).map_or(GridPos::default(), |segment| {
-                            if segment.is_horizontal() {
-                                GridPos::new(0, end.y.saturating_sub(start.y))
-                            } else {
-                                GridPos::new(end.x.saturating_sub(start.x), 0)
-                            }
-                        });
+                        let delta = if document.wire(wire).is_some() {
+                            drag_axis_delta(start, end)
+                        } else {
+                            GridPos::default()
+                        };
                         if delta != GridPos::default() {
                             match document.move_wire_segment(wire, delta) {
                                 Ok(()) => status.success("Segment déplacé."),
@@ -2418,11 +2416,7 @@ impl CanvasState {
                 current,
             }) => {
                 if let Some(segment) = document.wire(*wire) {
-                    let delta = if segment.is_horizontal() {
-                        GridPos::new(0, current.y.saturating_sub(start.y))
-                    } else {
-                        GridPos::new(current.x.saturating_sub(start.x), 0)
-                    };
+                    let delta = drag_axis_delta(*start, *current);
                     if delta != GridPos::default() {
                         if let (Some(a), Some(b)) =
                             (segment.a.checked_add(delta), segment.b.checked_add(delta))
@@ -2442,24 +2436,19 @@ impl CanvasState {
                 wire, end, current, ..
             }) => {
                 if let Some(segment) = document.wire(*wire) {
-                    let fixed = match end {
-                        WireEnd::A => segment.b,
-                        WireEnd::B => segment.a,
-                    };
-                    let target = if segment.is_horizontal() {
-                        GridPos::new(current.x, segment.a.y)
-                    } else {
-                        GridPos::new(segment.a.x, current.y)
-                    };
-                    painter.line_segment(
-                        [
-                            self.viewport.grid_to_screen(rect, fixed),
-                            self.viewport.grid_to_screen(rect, target),
-                        ],
-                        Stroke::new(3.2, palette.accent.gamma_multiply(0.55)),
-                    );
+                    let path = document.wire_endpoint_extension(segment, *end, *current);
+                    if path.len() >= 2 {
+                        let points = path
+                            .iter()
+                            .map(|point| self.viewport.grid_to_screen(rect, *point))
+                            .collect::<Vec<_>>();
+                        painter.line(
+                            points,
+                            Stroke::new(3.2, palette.accent.gamma_multiply(0.55)),
+                        );
+                    }
                     painter.circle_stroke(
-                        self.viewport.grid_to_screen(rect, target),
+                        self.viewport.grid_to_screen(rect, *current),
                         6.0,
                         Stroke::new(1.6, palette.accent),
                     );
@@ -3084,6 +3073,16 @@ impl CanvasState {
 impl Default for CanvasState {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+fn drag_axis_delta(start: GridPos, end: GridPos) -> GridPos {
+    let dx = end.x.saturating_sub(start.x);
+    let dy = end.y.saturating_sub(start.y);
+    if dx.abs() >= dy.abs() {
+        GridPos::new(dx, 0)
+    } else {
+        GridPos::new(0, dy)
     }
 }
 
@@ -4190,5 +4189,86 @@ mod tests {
 
         assert!(canvas.has_dialog());
         assert!(document.schematic().labels().next().is_none());
+    }
+
+    #[test]
+    fn canvas_drag_moves_a_horizontal_wire_vertically() {
+        let context = egui::Context::default();
+        let mut canvas = CanvasState::new();
+        let mut document = Document::new();
+        let mut status = Status::new_info("");
+        let tool = crate::ui::Tool::Select;
+        let wire = document
+            .add_wire(GridPos::new(-4, 0), GridPos::new(4, 0))
+            .unwrap()[0];
+        frame(
+            &context,
+            &mut canvas,
+            &mut document,
+            &mut status,
+            &tool,
+            Vec::new(),
+        );
+        let start = GridPos::new(0, 0);
+        let target = GridPos::new(0, 3);
+        let start_screen = canvas.viewport().grid_to_screen(screen(), start);
+        let target_screen = canvas.viewport().grid_to_screen(screen(), target);
+        frame(
+            &context,
+            &mut canvas,
+            &mut document,
+            &mut status,
+            &tool,
+            vec![
+                Event::PointerMoved(start_screen),
+                Event::PointerButton {
+                    pos: start_screen,
+                    button: PointerButton::Primary,
+                    pressed: true,
+                    modifiers: Modifiers::default(),
+                },
+            ],
+        );
+        frame(
+            &context,
+            &mut canvas,
+            &mut document,
+            &mut status,
+            &tool,
+            vec![Event::PointerMoved(target_screen)],
+        );
+        frame(
+            &context,
+            &mut canvas,
+            &mut document,
+            &mut status,
+            &tool,
+            vec![Event::PointerButton {
+                pos: target_screen,
+                button: PointerButton::Primary,
+                pressed: false,
+                modifiers: Modifiers::default(),
+            }],
+        );
+
+        let moved = document.wire(wire).unwrap();
+        assert_eq!(moved.a, GridPos::new(-4, 3));
+        assert_eq!(moved.b, GridPos::new(4, 3));
+    }
+
+    #[test]
+    fn drag_axis_delta_follows_the_dominant_axis() {
+        assert_eq!(
+            drag_axis_delta(GridPos::new(0, 0), GridPos::new(6, 2)),
+            GridPos::new(6, 0)
+        );
+        assert_eq!(
+            drag_axis_delta(GridPos::new(0, 0), GridPos::new(1, 5)),
+            GridPos::new(0, 5)
+        );
+        assert_eq!(
+            drag_axis_delta(GridPos::new(2, 2), GridPos::new(2, 2)),
+            GridPos::default()
+        );
     }
 }

@@ -120,15 +120,22 @@ annulables en une action.
   l’insertion.
 - **Chemin de fil** : un chemin orthogonal peut contenir plusieurs segments. Les
   segments nuls ou déjà présents sont ignorés ; un chemin sans nouveau segment
-  est refusé.
-- **Déplacement de segment** : un segment se déplace perpendiculairement. La
-  commande ne remplace que ce fil : ses extrémités sont libérées et aucun
-  embout ni fil supplémentaire n'est créé. Les broches, labels, jonctions et
-  autres fils restent à leur place ; l'ERC signale les connexions perdues. Une
-  position déjà occupée par un fil identique est refusée.
+  est refusé. Un segment colinéaire ajouté au bout d’un fil existant fusionne
+  avec lui, sans créer de petit tronçon supplémentaire.
+- **Déplacement de segment** : un segment se déplace sur un seul axe, choisi
+  selon le glissement dominant : perpendiculairement ou le long de son propre
+  axe. La commande ne remplace que ce fil : ses extrémités sont libérées et
+  aucun embout ni fil supplémentaire n'est créé. Les broches, labels, jonctions
+  et autres fils restent à leur place ; l'ERC signale les connexions perdues.
+  Une position déjà occupée par un fil identique est refusée.
+- **Déplacement de composant** : les fils reliés aux broches d’un composant
+  déplacé suivent ses broches, y compris lorsqu’une broche se trouve à
+  l’intérieur d’un fil. Le chemin est reconstruit orthogonalement ; aucun
+  segment diagonal n’est créé.
 - **Extrémité libre** : une extrémité sans broche, label, jonction ou autre fil
-  peut être déplacée sur l’axe du fil. Une extrémité connectée est refusée
-  (`CannotResizeWire`).
+  peut être déplacée sur l’axe du fil ou perpendiculairement. Le déplacement
+  perpendiculaire conserve le fil d’origine et ajoute un prolongement avec
+  coude ; une extrémité connectée est refusée (`CannotResizeWire`).
 - **Sondes** : `Voltmeter`, `Ammeter` et `Ohmmeter` sont des symboles à une
   broche exclus de la netlist. Ils servent de repères de mesure et ne modifient
   ni les nœuds ni les composants simulés.

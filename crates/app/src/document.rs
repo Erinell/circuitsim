@@ -1,6 +1,6 @@
 //! Editable document state shared by the application panels.
 
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 
 use editor_core::{
     extract_netlist, nearest_snap, route_wire, Command, EditError, ErcReport, ExtractedNet,
@@ -51,8 +51,8 @@ pub enum ActionError {
     /// The target wire cannot receive an in-series component.
     #[error("le composant ne peut pas être inséré sur ce fil")]
     CannotInsertOnWire,
-    /// The wire topology does not allow a perpendicular segment move.
-    #[error("ce segment ne peut pas être déplacé sans casser la topologie")]
+    /// The wire move is diagonal or would duplicate another segment.
+    #[error("ce segment ne peut pas être déplacé à cette position")]
     CannotMoveWire,
     /// The requested alignment needs at least two objects.
     #[error("l'alignement exige au moins deux objets")]
@@ -1224,6 +1224,9 @@ impl Document {
     }
 
     /// Moves every selected object by a grid delta.
+    ///
+    /// Wires attached to moved symbols follow their pins and receive an
+    /// orthogonal bend when the pin leaves the original axis.
     pub fn move_selection(&mut self, delta: GridPos) -> Result<(), ActionError> {
         if self.selected.is_empty() {
             return Err(ActionError::EmptySelection);
@@ -1231,10 +1234,86 @@ impl Document {
         if delta == GridPos::default() {
             return Ok(());
         }
-        self.execute(Command::MoveObjects {
+        let moved_pins = self.moved_pin_map(delta);
+        let mut commands = vec![Command::MoveObjects {
             objects: self.selected.iter().copied().collect(),
             delta,
-        })
+        }];
+        if !moved_pins.is_empty() {
+            commands.extend(self.followed_wire_commands(&moved_pins)?);
+        }
+        self.execute(single_or_composite(commands))
+    }
+
+    fn moved_pin_map(&self, delta: GridPos) -> BTreeMap<GridPos, GridPos> {
+        let mut moved = BTreeMap::new();
+        for object in &self.selected {
+            let ObjectRef::Symbol(id) = object else {
+                continue;
+            };
+            let Some(symbol) = self.symbol(*id) else {
+                continue;
+            };
+            let Some(definition) = self.registry.get(&symbol.kind) else {
+                continue;
+            };
+            for pin in &definition.pins {
+                let Some(old) = symbol.pin_position_of(pin) else {
+                    continue;
+                };
+                if let Some(new) = old.checked_add(delta) {
+                    moved.insert(old, new);
+                }
+            }
+        }
+        moved
+    }
+
+    fn followed_wire_commands(
+        &self,
+        moved_pins: &BTreeMap<GridPos, GridPos>,
+    ) -> Result<Vec<Command>, ActionError> {
+        let selected_wires = self
+            .selected
+            .iter()
+            .filter_map(|object| match object {
+                ObjectRef::Wire(id) => Some(*id),
+                _ => None,
+            })
+            .collect::<BTreeSet<_>>();
+        let mut plans = Vec::new();
+        for wire in self.schematic.wires() {
+            if selected_wires.contains(&wire.id) {
+                continue;
+            }
+            let Some(points) = wire_anchor_points(wire, moved_pins) else {
+                continue;
+            };
+            let path = anchor_path(&points, wire.is_horizontal());
+            if path.len() >= 2 {
+                plans.push((wire.clone(), path));
+            }
+        }
+        if plans.is_empty() {
+            return Ok(Vec::new());
+        }
+
+        let mut working = self
+            .schematic
+            .wires()
+            .map(|wire| (wire.id, wire.clone()))
+            .collect::<BTreeMap<_, _>>();
+        for (wire, _) in &plans {
+            working.remove(&wire.id);
+        }
+        let mut allocator = self.schematic.clone();
+        for (wire, path) in &plans {
+            for (index, pair) in path.windows(2).enumerate() {
+                let preferred = (index == 0).then_some(wire.id);
+                insert_wire_segment(&mut working, &mut allocator, pair[0], pair[1], preferred)?;
+            }
+        }
+        Ok(wire_diff_commands(&self.schematic, &working))
     }
 
     /// Deletes every selected object as one atomic command.
@@ -1430,38 +1509,34 @@ impl Document {
     }
 
     /// Adds an orthogonal path as one atomic undoable command.
+    ///
+    /// Collinear segments that meet at an endpoint are merged so drawing in
+    /// several gestures does not leave a chain of tiny wires.
     pub fn add_wire_path(&mut self, points: &[GridPos]) -> Result<Vec<WireId>, ActionError> {
         if points.len() < 2 {
             return Err(ActionError::ZeroLengthWire);
         }
-        let existing = self
+        let mut working = self
             .schematic
             .wires()
-            .map(|wire| (wire.a, wire.b))
-            .collect::<BTreeSet<_>>();
+            .map(|wire| (wire.id, wire.clone()))
+            .collect::<BTreeMap<_, _>>();
         let mut allocator = self.schematic.clone();
-        let mut commands = Vec::new();
         let mut ids = Vec::new();
         for pair in points.windows(2) {
             if pair[0] == pair[1] {
                 continue;
             }
-            let mut wire = Wire::new(WireId(0), pair[0], pair[1])?;
-            if existing.contains(&(wire.a, wire.b)) {
-                continue;
+            let id = insert_wire_segment(&mut working, &mut allocator, pair[0], pair[1], None)?;
+            if !ids.contains(&id) {
+                ids.push(id);
             }
-            let id = WireId(
-                allocator
-                    .allocate_id()
-                    .map_err(|_| ActionError::IdSpaceExhausted)?,
-            );
-            wire.id = id;
-            ids.push(id);
-            commands.push(Command::AddWire(wire));
         }
+        let commands = wire_diff_commands(&self.schematic, &working);
         if commands.is_empty() {
             return Err(ActionError::Duplicate);
         }
+        ids.retain(|id| working.contains_key(id));
         self.execute(single_or_composite(commands))?;
         self.clear_selection();
         Ok(ids)
@@ -1562,7 +1637,9 @@ impl Document {
         Ok(symbol_id)
     }
 
-    /// Moves one wire segment perpendicularly and adjusts its orthogonal neighbours.
+    /// Moves one wire segment along one grid axis.
+    ///
+    /// A segment can move perpendicularly or translate along its own axis.
     pub fn move_wire_segment(
         &mut self,
         wire_id: WireId,
@@ -1572,10 +1649,7 @@ impl Document {
             .wire(wire_id)
             .ok_or(ActionError::MissingObject)?
             .clone();
-        let horizontal = old.is_horizontal();
-        if (horizontal && (delta.x != 0 || delta.y == 0))
-            || (!horizontal && (delta.y != 0 || delta.x == 0))
-        {
+        if (delta.x == 0) == (delta.y == 0) {
             return Err(ActionError::CannotMoveWire);
         }
         let new_a = old
@@ -1639,7 +1713,10 @@ impl Document {
         endpoints
     }
 
-    /// Moves one free wire endpoint along the wire axis.
+    /// Moves one free wire endpoint.
+    ///
+    /// Along the original axis the wire is resized. A perpendicular target
+    /// keeps the existing wire and appends an orthogonal extension.
     pub fn move_wire_endpoint(
         &mut self,
         wire_id: WireId,
@@ -1657,14 +1734,30 @@ impl Document {
         if !self.wire_endpoint_is_free(&old, point) {
             return Err(ActionError::CannotResizeWire);
         }
-        let target = if old.is_horizontal() {
-            GridPos::new(at.x, old.a.y)
+        if at == point {
+            return Ok(());
+        }
+        let on_axis = if old.is_horizontal() {
+            at.y == old.a.y
         } else {
-            GridPos::new(old.a.x, at.y)
+            at.x == old.a.x
         };
+        if !on_axis {
+            let path = self.wire_endpoint_extension(&old, end, at);
+            match self.add_wire_path(&path) {
+                Ok(ids) => {
+                    if let Some(id) = ids.last() {
+                        self.select_only(Some(ObjectRef::Wire(*id)));
+                    }
+                    return Ok(());
+                }
+                Err(ActionError::Duplicate) => return Ok(()),
+                Err(error) => return Err(error),
+            }
+        }
         let (a, b) = match end {
-            WireEnd::A => (target, old.b),
-            WireEnd::B => (old.a, target),
+            WireEnd::A => (at, old.b),
+            WireEnd::B => (old.a, at),
         };
         if a == b {
             return Err(ActionError::ZeroLengthWire);
@@ -1681,6 +1774,16 @@ impl Document {
             return Err(ActionError::Duplicate);
         }
         self.execute(Command::ReplaceWire { old, new: moved })
+    }
+
+    /// Returns the orthogonal path appended when a free endpoint is dragged to
+    /// a perpendicular position.
+    pub fn wire_endpoint_extension(&self, wire: &Wire, end: WireEnd, at: GridPos) -> Vec<GridPos> {
+        let moving = match end {
+            WireEnd::A => wire.a,
+            WireEnd::B => wire.b,
+        };
+        self.route_path(moving, at, !wire.is_horizontal())
     }
 
     fn wire_endpoint_is_free(&self, wire: &Wire, point: GridPos) -> bool {
@@ -2046,6 +2149,136 @@ fn single_or_composite(mut commands: Vec<Command>) -> Command {
 
 fn wire_contains(wire: &Wire, point: GridPos) -> bool {
     wire.contains(point)
+}
+
+fn wire_anchor_points(
+    wire: &Wire,
+    moved_pins: &BTreeMap<GridPos, GridPos>,
+) -> Option<Vec<GridPos>> {
+    let start = moved_pins.get(&wire.a).copied().unwrap_or(wire.a);
+    let end = moved_pins.get(&wire.b).copied().unwrap_or(wire.b);
+    let mut interior = moved_pins
+        .iter()
+        .filter(|(old, _)| strictly_between(**old, wire.a, wire.b))
+        .map(|(old, new)| (*old, *new))
+        .collect::<Vec<_>>();
+    if start == wire.a && end == wire.b && interior.is_empty() {
+        return None;
+    }
+    interior.sort_by_key(|(old, _)| if wire.is_horizontal() { old.x } else { old.y });
+
+    let mut points = Vec::with_capacity(interior.len() + 2);
+    points.push(start);
+    points.extend(interior.into_iter().map(|(_, new)| new));
+    points.push(end);
+    points.dedup();
+    (points.len() >= 2).then_some(points)
+}
+
+fn anchor_path(points: &[GridPos], prefer_horizontal: bool) -> Vec<GridPos> {
+    let Some(&first) = points.first() else {
+        return Vec::new();
+    };
+    let mut path = vec![first];
+    for &target in &points[1..] {
+        let last = path.last().copied().unwrap_or(first);
+        if last == target {
+            continue;
+        }
+        if last.x != target.x && last.y != target.y {
+            let corner = if prefer_horizontal {
+                GridPos::new(target.x, last.y)
+            } else {
+                GridPos::new(last.x, target.y)
+            };
+            if corner != last {
+                path.push(corner);
+            }
+        }
+        path.push(target);
+    }
+    path
+}
+
+fn insert_wire_segment(
+    working: &mut BTreeMap<WireId, Wire>,
+    allocator: &mut Schematic,
+    start: GridPos,
+    end: GridPos,
+    preferred: Option<WireId>,
+) -> Result<WireId, ActionError> {
+    if start == end {
+        return Err(ActionError::ZeroLengthWire);
+    }
+    let segment = Wire::new(WireId(0), start, end)?;
+    let mut current = segment;
+    let mut merged = BTreeSet::new();
+    loop {
+        let candidate = working
+            .iter()
+            .find(|(id, wire)| {
+                !merged.contains(*id)
+                    && wire.is_horizontal() == current.is_horizontal()
+                    && (wire.a == current.a
+                        || wire.a == current.b
+                        || wire.b == current.a
+                        || wire.b == current.b)
+            })
+            .map(|(id, wire)| (*id, wire.clone()));
+        let Some((id, other)) = candidate else {
+            break;
+        };
+        working.remove(&id);
+        merged.insert(id);
+        current = if current.is_horizontal() {
+            Wire::new(
+                current.id,
+                GridPos::new(current.a.x.min(other.a.x), current.a.y),
+                GridPos::new(current.b.x.max(other.b.x), current.b.y),
+            )?
+        } else {
+            Wire::new(
+                current.id,
+                GridPos::new(current.a.x, current.a.y.min(other.a.y)),
+                GridPos::new(current.b.x, current.b.y.max(other.b.y)),
+            )?
+        };
+    }
+
+    let survivor = if let Some(id) = preferred {
+        id
+    } else if let Some(id) = merged.iter().next().copied() {
+        id
+    } else {
+        WireId(
+            allocator
+                .allocate_id()
+                .map_err(|_| ActionError::IdSpaceExhausted)?,
+        )
+    };
+    current.id = survivor;
+    working.insert(survivor, current);
+    Ok(survivor)
+}
+
+fn wire_diff_commands(original: &Schematic, working: &BTreeMap<WireId, Wire>) -> Vec<Command> {
+    let mut commands = Vec::new();
+    for old in original.wires() {
+        match working.get(&old.id) {
+            None => commands.push(Command::RemoveWire(old.clone())),
+            Some(new) if new != old => commands.push(Command::ReplaceWire {
+                old: old.clone(),
+                new: new.clone(),
+            }),
+            Some(_) => {}
+        }
+    }
+    for (id, new) in working {
+        if original.wire(*id).is_none() {
+            commands.push(Command::AddWire(new.clone()));
+        }
+    }
+    commands
 }
 
 fn strictly_between(point: GridPos, low: GridPos, high: GridPos) -> bool {
@@ -2977,6 +3210,138 @@ mod tests {
     }
 
     #[test]
+    fn moves_a_segment_along_its_axis() {
+        let mut document = Document::new();
+        let wire = document
+            .add_wire(GridPos::new(0, 0), GridPos::new(4, 0))
+            .unwrap()[0];
+        document
+            .move_wire_segment(wire, GridPos::new(2, 0))
+            .unwrap();
+        let moved = document.wire(wire).unwrap();
+        assert_eq!(moved.a, GridPos::new(2, 0));
+        assert_eq!(moved.b, GridPos::new(6, 0));
+        assert!(matches!(
+            document.move_wire_segment(wire, GridPos::new(1, 1)),
+            Err(ActionError::CannotMoveWire)
+        ));
+    }
+
+    #[test]
+    fn appends_and_merges_collinear_wire_segments() {
+        let mut document = Document::new();
+        let first = document
+            .add_wire_path(&[GridPos::new(0, 0), GridPos::new(2, 0)])
+            .unwrap()[0];
+        let ids = document
+            .add_wire_path(&[GridPos::new(2, 0), GridPos::new(4, 0), GridPos::new(6, 0)])
+            .unwrap();
+        assert_eq!(ids, vec![first]);
+        assert_eq!(document.schematic().wires().count(), 1);
+        let wire = document.wire(first).unwrap();
+        assert_eq!(wire.a, GridPos::new(0, 0));
+        assert_eq!(wire.b, GridPos::new(6, 0));
+        document.undo().unwrap();
+        assert_eq!(document.schematic().wires().count(), 1);
+        assert_eq!(document.wire(first).unwrap().b, GridPos::new(2, 0));
+    }
+
+    #[test]
+    fn extends_a_horizontal_wire_perpendicularly() {
+        let mut document = Document::new();
+        let wire = document
+            .add_wire(GridPos::new(0, 0), GridPos::new(4, 0))
+            .unwrap()[0];
+        document
+            .move_wire_endpoint(wire, WireEnd::B, GridPos::new(8, 2))
+            .unwrap();
+        let original = document.wire(wire).unwrap();
+        assert_eq!(original.a, GridPos::new(0, 0));
+        assert_eq!(original.b, GridPos::new(4, 0));
+        assert!(document
+            .schematic()
+            .wires()
+            .any(|wire| wire.a == GridPos::new(4, 0) && wire.b == GridPos::new(4, 2)));
+        assert!(document
+            .schematic()
+            .wires()
+            .any(|wire| wire.a == GridPos::new(4, 2) && wire.b == GridPos::new(8, 2)));
+        assert_eq!(document.schematic().wires().count(), 3);
+        document.undo().unwrap();
+        assert_eq!(document.schematic().wires().count(), 1);
+        assert_eq!(document.wire(wire).unwrap().b, GridPos::new(4, 0));
+    }
+
+    #[test]
+    fn extends_a_vertical_wire_perpendicularly() {
+        let mut document = Document::new();
+        let wire = document
+            .add_wire(GridPos::new(0, 0), GridPos::new(0, 4))
+            .unwrap()[0];
+        document
+            .move_wire_endpoint(wire, WireEnd::B, GridPos::new(2, 8))
+            .unwrap();
+        let original = document.wire(wire).unwrap();
+        assert_eq!(original.a, GridPos::new(0, 0));
+        assert_eq!(original.b, GridPos::new(0, 4));
+        assert!(document
+            .schematic()
+            .wires()
+            .any(|wire| wire.a == GridPos::new(0, 4) && wire.b == GridPos::new(2, 4)));
+        assert!(document
+            .schematic()
+            .wires()
+            .any(|wire| wire.a == GridPos::new(2, 4) && wire.b == GridPos::new(2, 8)));
+        assert_eq!(document.schematic().wires().count(), 3);
+    }
+
+    #[test]
+    fn moving_a_symbol_keeps_its_attached_wire_connected() {
+        let mut document = Document::new();
+        let symbol = document
+            .add_symbol(SymbolKind::Resistor, GridPos::new(0, 0))
+            .unwrap();
+        let wire = document
+            .add_wire(GridPos::new(2, 0), GridPos::new(6, 0))
+            .unwrap()[0];
+        document.select_only(Some(ObjectRef::Symbol(symbol)));
+        document.move_selection(GridPos::new(0, 2)).unwrap();
+        assert_eq!(document.symbol(symbol).unwrap().at, GridPos::new(0, 2));
+        assert_eq!(
+            document.pin_at(GridPos::new(2, 2)).map(|pin| pin.symbol),
+            Some(symbol)
+        );
+        assert!(document
+            .schematic()
+            .wires()
+            .any(|wire| wire.a == GridPos::new(2, 2) || wire.b == GridPos::new(2, 2)));
+        assert!(document
+            .schematic()
+            .wires()
+            .any(|wire| wire.a == GridPos::new(6, 0) || wire.b == GridPos::new(6, 0)));
+        assert!(document.wire(wire).is_some());
+        assert_eq!(document.schematic().wires().count(), 2);
+    }
+
+    #[test]
+    fn moving_a_symbol_rebuilds_a_wire_crossing_its_pin() {
+        let mut document = Document::new();
+        let symbol = document
+            .add_symbol(SymbolKind::Resistor, GridPos::new(0, 0))
+            .unwrap();
+        let wire = document
+            .add_wire(GridPos::new(-2, 0), GridPos::new(6, 0))
+            .unwrap()[0];
+        document.select_only(Some(ObjectRef::Symbol(symbol)));
+        document.move_selection(GridPos::new(2, 0)).unwrap();
+        let moved = document.wire(wire).unwrap();
+        assert_eq!(moved.a, GridPos::new(0, 0));
+        assert_eq!(moved.b, GridPos::new(6, 0));
+        assert!(document.pin_at(GridPos::new(0, 0)).is_some());
+        assert!(document.pin_at(GridPos::new(4, 0)).is_some());
+    }
+
+    #[test]
     fn resizes_only_free_wire_endpoints() {
         let mut document = Document::new();
         let wire = document
@@ -2988,10 +3353,6 @@ mod tests {
             .any(|(id, end, point)| *id == wire
                 && *end == WireEnd::B
                 && *point == GridPos::new(4, 0)));
-        document
-            .move_wire_endpoint(wire, WireEnd::B, GridPos::new(8, 2))
-            .unwrap();
-        assert_eq!(document.wire(wire).unwrap().b, GridPos::new(8, 0));
         document
             .move_wire_endpoint(wire, WireEnd::B, GridPos::new(2, 0))
             .unwrap();

@@ -8,6 +8,12 @@ sémantique.
 
 ### Added
 
+- **Ergonomie du câblage** : les fils reliés à un composant déplacé suivent ses
+  broches, y compris lorsqu’une broche traverse un fil, avec un chemin
+  orthogonal. Une extrémité libre peut être prolongée perpendiculairement avec
+  un coude, les segments colinéaires ajoutés bout à bout fusionnent, et le
+  glissement d’un fil suit l’axe dominant du geste, y compris le long de son
+  propre axe.
 - **Transistor MOSFET** à enrichissement, trois broches `D`/`G`/`S`, bulk relié à
   la source : loi carrée niveau 1 (triode, saturation, `lambda`), résistances
   d'accès `rd`/`rs`, diode de corps, capacités `cgs`/`cgd`/`cds` et permutation

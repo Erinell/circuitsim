@@ -72,9 +72,10 @@ comme les sources de tension) ; les composants utilisent leur paramètre `imax`.
 Le survol affiche le courant exact, la limite, le pourcentage et la sévérité.
 Sans transitoire à jour, aucune alerte n'est dessinée.
 Une extrémité libre d'un fil peut être tirée le long de son axe pour l'allonger
-ou le raccourcir ; les extrémités connectées ne sont pas redimensionnables. La
-mini-carte du coin inférieur droit montre le contenu, la sélection et la fenêtre
-visible ; un clic y recentre la vue.
+ou le raccourcir, ou perpendiculairement pour créer un prolongement avec coude ;
+les extrémités connectées ne sont pas redimensionnables. La mini-carte du coin
+inférieur droit montre le contenu, la sélection et la fenêtre visible ; un clic
+y recentre la vue.
 
 Les valeurs sont affichées en préfixes SI à côté des symboles, avec une taille
 réglable et un placement qui évite les fils. Les références et les labels de
@@ -96,12 +97,16 @@ et applique la valeur à chaud en une seule étape annulable.
 - `Alt` + clic : sélectionne le net complet.
 - Rectangle gauche→droite : objets entièrement inclus ; droite→gauche : touchés.
 - Glisser un symbole/label/jonction : déplace la sélection d'un delta entier.
+  Les fils attachés aux broches d'un symbole déplacé le suivent et se replient
+  orthogonalement.
 - Glisser une broche : crée un fil orthogonal avec accroche et aperçu, sans
   changer d'outil. Le relâchement sur une broche, un fil ou le vide termine ou
   annule proprement.
-- Glisser un fil : déplace le segment perpendiculairement et coupe ses
-  extrémités ; aucun fil supplémentaire n'est créé.
-- Glisser une extrémité libre : allonge ou raccourcit le fil sur son axe.
+- Glisser un fil : déplace le segment selon l'axe dominant du geste,
+  perpendiculairement ou le long de son axe, et coupe ses extrémités ; aucun
+  fil supplémentaire n'est créé.
+- Glisser une extrémité libre : allonge ou raccourcit le fil sur son axe, ou
+  ajoute un prolongement perpendiculaire avec coude.
 - Survol : une bulle affiche le type, le nom, les paramètres, V aux broches, I
   et P. Elle reste lisible en pause et signale un résultat antérieur.
 - Clic droit : propriétés, rotation, miroir, duplication, suppression, mesures,
@@ -134,7 +139,8 @@ broche, une broche du composant est alignée sur la cible au lieu de centrer le
 symbole. Un composant à deux broches déposé au milieu d’un fil est inséré en
 série. L'outil Fil part d'une grille, d'une broche ou
 d'un point de fil ; le tracé est orthogonal, évite les symboles et `Maj` change
-le premier coude. Une extrémité identique ou un fil existant est refusé sans
+le premier coude. Les segments colinéaires ajoutés bout à bout fusionnent en un
+seul fil. Une extrémité identique ou un fil existant est refusé sans
 consommer d'identifiant. Jonction refuse les doublons ; Label propose les nets
 existants.
 
@@ -340,7 +346,8 @@ Tests : `cargo test -p circuitsim-app` couvre document, vue, navigation,
 mini-carte, édition, palette, propriétés, historique, presse-papiers, sélection
 rectangle, séries E, ERC, canevas headless, dispositions, curseurs, marqueur
 Bode, instruments, worker, FFT, Bode, CSV et export, ainsi que le déplacement de
-fil sans embout, les fils en erreur, le basculement d'interrupteur et le
+fil sans embout sur les deux axes, le prolongement perpendiculaire, la fusion
+de segments colinéaires, le suivi des broches, les fils en erreur, le basculement d'interrupteur et le
 propriétés par double-clic, le mapping tension→couleur, les calques et les
 palettes. Détails dans
 [TESTING.md](TESTING.md) ; recette web dans [DELIVERY.md](DELIVERY.md).

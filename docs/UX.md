@@ -58,8 +58,10 @@ lettres seules ne sont pas des raccourcis de placement.
 - `Ctrl+A` sélectionne tous les objets éditables.
 - `Alt` + clic sélectionne le net complet à partir d’une broche, d’un fil, d’une
   jonction ou d’un label.
-- Un glisser sur un symbole, label ou jonction déplace toute la sélection ; un
-  glisser sur un fil déplace le segment perpendiculairement.
+- Un glisser sur un symbole, label ou jonction déplace toute la sélection ; les
+  fils attachés aux broches d’un symbole déplacé le suivent. Un glisser sur un
+  fil déplace le segment selon l’axe dominant, perpendiculairement ou le long de
+  son axe.
 - Lors d’un placement au bout d’un fil ou sur une broche, une broche du nouveau
   composant est alignée sur la cible ; au milieu d’un fil, un composant à deux
   broches est inséré en série.
@@ -125,12 +127,16 @@ lettres seules ne sont pas des raccourcis de placement.
   premier coude (horizontal ou vertical).
 - `Échap` annule le fil courant. Un second clic sur la même position l’annule
   aussi.
-- Un fil sélectionné peut être glissé perpendiculairement. Le segment est
-  simplement remplacé à sa nouvelle position : ses anciennes extrémités sont
-  libérées, aucun embout ni fil supplémentaire n'est créé. Les objets qui
-  touchaient le segment restent à leur place et peuvent devenir non connectés.
+- Un fil sélectionné peut être glissé selon l’axe dominant du geste, soit
+  perpendiculairement, soit le long de son propre axe. Le segment est simplement
+  remplacé à sa nouvelle position : ses anciennes extrémités sont libérées,
+  aucun embout ni fil supplémentaire n'est créé. Les objets qui touchaient le
+  segment restent à leur place et peuvent devenir non connectés.
 - Une extrémité libre peut être tirée le long de l’axe pour allonger ou
-  raccourcir le fil. Une extrémité connectée est refusée avec un message.
+  raccourcir le fil, ou perpendiculairement pour ajouter un prolongement avec
+  coude. Une extrémité connectée est refusée avec un message.
+- Deux segments colinéaires ajoutés bout à bout fusionnent en un seul fil, sans
+  laisser de petit tronçon intermédiaire.
 - Les fils sont plus épais ; après simulation, des points jaunes à halo sombre
   suivent le sens réel du courant estimé, avec une densité et une vitesse
   proportionnelles au courant. `Vue → Courant animé` masque ce flux.
