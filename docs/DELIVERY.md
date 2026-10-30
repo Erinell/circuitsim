@@ -10,9 +10,13 @@
 | Bibliothèques | `cargo build --release` | crates du workspace |
 
 Sous Windows, le binaire de référence mesure environ 9,7 Mo. La distribution web
-contient `index.html`, un module JS d'environ 78 ko et un wasm d'environ 6,0 Mo
-après `wasm-opt`. `dist/` est ignoré par Git et publié par la CI sous l'artefact
+contient `index.html`, un module JS d’environ 78 ko et un wasm d’environ 6,0 Mo
+après `wasm-opt`. `dist/` est ignoré par Git et publié par la CI sous l’artefact
 `circuitsim-web`. Licence : `MIT OR Apache-2.0` à la racine.
+
+Le workflow `release.yml`, déclenché manuellement avec un tag, construit les
+archives Windows, Linux et web, puis crée la GitHub Release avec les sommes
+SHA-256.
 
 ## 2. Prérequis
 

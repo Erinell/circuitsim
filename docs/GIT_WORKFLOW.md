@@ -95,4 +95,7 @@ branche non fusionnée peut être supprimée avec `git branch -D` après accord.
 3. Mettre à jour `CHANGELOG.md` et la version du workspace.
 4. Fusionner la branche de release et vérifier `main`.
 5. Créer le tag annoté, sans push automatique.
-6. Publier l’artefact natif et `dist/` seulement après validation.
+6. Déclencher `.github/workflows/release.yml` avec le tag : le workflow construit
+   Windows, Linux et le web, puis publie la GitHub Release avec les archives et
+   les sommes SHA-256.
+7. Vérifier la page de release et les artefacts publiés.

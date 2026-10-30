@@ -1,0 +1,274 @@
+name: Release
+
+'on':
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Tag à publier (ex. v0.6.0)"
+        required: true
+        default: "v0.6.0"
+
+permissions:
+  contents: write
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  windows:
+    name: Windows x86_64
+    runs-on: windows-latest
+    timeout-minutes: 45
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.tag }}
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Cargo artifacts
+        uses: Swatinem/rust-cache@v2
+
+      - name: Build native release
+        run: cargo build --release -p circuitsim-app
+
+      - name: Package
+        shell: pwsh
+        run: |
+          $name = "CircuitSim-${{ inputs.tag }}-windows-x86_64"
+          $dir = "release-assets/$name"
+          New-Item -ItemType Directory -Force -Path $dir | Out-Null
+          Copy-Item "target/release/circuitsim.exe" "$dir/"
+          Copy-Item README.md,LICENSE-MIT,LICENSE-APACHE,THIRD_PARTY_LICENSES.md $dir
+          Compress-Archive -Path "$dir/*" -DestinationPath "release-assets/$name.zip"
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-asset
+          path: release-assets/*.zip
+          if-no-files-found: error
+          retention-days: 3
+
+  linux:
+    name: Linux x86_64
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.tag }}
+
+      - name: Install Linux desktop dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libwayland-dev libxkbcommon-dev libx11-dev libxi-dev \
+            libxcursor-dev libxrandr-dev libxinerama-dev \
+            libgl1-mesa-dev libegl1-mesa-dev
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Cargo artifacts
+        uses: Swatinem/rust-cache@v2
+
+      - name: Build native release
+        run: cargo build --release -p circuitsim-app
+
+      - name: Package
+        run: |
+          name="CircuitSim-${{ inputs.tag }}-linux-x86_64"
+          mkdir -p "release-assets/$name"
+          cp target/release/circuitsim "release-assets/$name/circuitsim"
+          cp README.md LICENSE-MIT LICENSE-APACHE THIRD_PARTY_LICENSES.md "release-assets/$name/"
+          chmod +x "release-assets/$name/circuitsim"
+          tar -czf "release-assets/$name.tar.gz" -C release-assets "$name"
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: linux-asset
+          path: release-assets/*.tar.gz
+          if-no-files-found: error
+          retention-days: 3
+
+  web:
+    name: WebAssembly
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.tag }}
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+
+      - name: Cache Cargo artifacts
+        uses: Swatinem/rust-cache@v2
+
+      - name: Install Trunk
+        uses: taiki-e/install-action@v2
+        with:
+          tool: trunk@0.21.14
+
+      - name: Build web distribution
+        run: trunk build --release --public-url ./
+
+      - name: Package
+        run: |
+          name="CircuitSim-${{ inputs.tag }}-web"
+          mkdir -p "release-assets/$name"
+          cp -r dist/* "release-assets/$name/"
+          cp README.md LICENSE-MIT LICENSE-APACHE THIRD_PARTY_LICENSES.md "release-assets/$name/"
+          (cd release-assets && zip -r "$name.zip" "$name")
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: web-asset
+          path: release-assets/*.zip
+          if-no-files-found: error
+          retention-days: 3
+
+  publish:
+    name: GitHub Release
+    needs: [windows, linux, web]
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: write
+    steps:
+      - name: Download artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: release
+          merge-multiple: true
+
+      - name: Publish release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ inputs.tag }}
+          RELEASE_BODY: |
+            # CircuitSim v0.6.0
+
+            **Simulateur analogique natif et web** · 30 octobre 2026
+
+            CircuitSim est un simulateur de circuits analogiques avec éditeur schématique,
+            extraction de netlist et solveurs DC, transitoire et AC. L’application existe en
+            version desktop native (Windows et Linux) et en version web WebAssembly. Elle
+            réunit le canevas, l’inspecteur, les instruments de mesure, les portées, le
+            spectre, le diagramme de Bode et l’export CSV.
+
+            ## Fonctionnalités actuelles
+
+            ### Éditeur schématique
+
+            - Placement, rotation, miroir, sélection multiple, annulation/rétablissement,
+              presse-papiers et projets JSON.
+            - Câblage orthogonal, fusion des segments colinéaires, prolongement
+              perpendiculaire et glissement d’un fil sur ses deux axes.
+            - Déplacement d’un composant avec suivi des fils, accrochage magnétique sur un
+              fil ou une broche et insertion en série d’un composant à deux broches.
+            - ERC, labels, jonctions et fusion des masses.
+            - Exemples intégrés : RC, diviseur, LED, interrupteur, RLC, RLC parallèle
+              commuté et MOSFET.
+
+            ### Simulation
+
+            - Analyses DC, transitoire et AC petits signaux.
+            - Temps réel avec budget de 5 ms par image, pas réglable de 1 µs à 10 ms et
+              fenêtre glissante de 10 s.
+            - Transitoire à pas fixe avec subdivision locale automatique en cas d’échec.
+            - Composants : résistances, condensateurs, bobines avec résistance série,
+              sources, interrupteurs, diodes, Schottky, LED, Zener, opamp, comparateur
+              LM393, référence TL431/LM431, MOSFET N/P, ohmmètre et masse.
+            - Gestion des non-linéarités, `gmin` de jonction et condensateurs initialement
+              déchargés.
+
+            ### Mesures et interface
+
+            - Tensions, courants de composants et de nets, résistance, puissance et
+              surintensités.
+            - Portées, spectre FFT, diagramme de Bode, curseurs A/B et export CSV.
+            - Thèmes, calques, tension colorée, aide, palette de commandes et navigation
+              clavier.
+            - Application desktop native et version web WebAssembly.
+
+            ## Téléchargements
+
+            | Plateforme | Archive | Lancement |
+            | --- | --- | --- |
+            | Windows x86_64 | `CircuitSim-v0.6.0-windows-x86_64.zip` | décompresser puis lancer `circuitsim.exe` |
+            | Linux x86_64 | `CircuitSim-v0.6.0-linux-x86_64.tar.gz` | `tar xf ... && ./circuitsim` |
+            | Web (WebAssembly) | `CircuitSim-v0.6.0-web.zip` | décompresser puis servir le dossier en HTTP |
+
+            Les archives desktop sont portables : aucun installateur Windows ni paquet
+            Linux (`.deb`, AppImage) n’est fourni.
+
+            ### Version web
+
+            Le build web doit être servi par un serveur HTTP. Exemple :
+
+            ```bash
+            unzip CircuitSim-v0.6.0-web.zip -d circuitsim-web
+            python -m http.server 8080 --directory circuitsim-web
+            ```
+
+            Puis ouvrir `http://127.0.0.1:8080`. Ouvrir `index.html` directement depuis le
+            système de fichiers ne permet pas de charger correctement le WASM.
+
+            ## Vérifications
+
+            - `cargo xtask check` : format, clippy strict et **380 tests**
+            - `cargo xtask wasm-check` : cible `wasm32-unknown-unknown`
+            - `cargo xtask web-build` : distribution `dist/`
+            - `cargo deny check licenses` : licences compatibles
+            - `cargo bench --workspace --no-run` : benchmarks compilés
+            - Build Windows x86_64 et build Linux x86_64 via CI Ubuntu
+
+            ## Limites connues
+
+            - Le worker et la session temps réel s’exécutent dans le fil de l’interface ;
+              le Web Worker et la mémoire partagée ne sont pas encore branchés.
+            - Pas de pas adaptatif global ; le transitoire subdivise localement un pas en
+              échec.
+            - AC sans capacité de jonction ; l’opamp n’a ni alimentation ni pôle.
+            - FFT plafonnée, sans fenêtres alternatives ; export CSV uniquement.
+            - Panneaux non dockables ; préférences de session.
+            - Les composants personnalisés sont pris en charge via l’exemple
+              `examples/custom_mosfet.rs`.
+
+            ## Licence
+
+            MIT OR Apache-2.0 — Cédric Debois, 2026.
+        run: |
+          set -euo pipefail
+          {
+            printf '%s\n' "$RELEASE_BODY"
+            printf '\n## Sommes de contrôle\n\n```text\n'
+            (cd release && sha256sum \
+              "CircuitSim-${TAG}-linux-x86_64.tar.gz" \
+              "CircuitSim-${TAG}-web.zip" \
+              "CircuitSim-${TAG}-windows-x86_64.zip")
+            printf '```\n'
+          } > release-notes.md
+
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            gh release edit "$TAG" \
+              --title "CircuitSim $TAG" \
+              --notes-file release-notes.md
+            gh release upload "$TAG" release/*.zip release/*.tar.gz --clobber
+          else
+            gh release create "$TAG" release/*.zip release/*.tar.gz \
+              --title "CircuitSim $TAG" \
+              --notes-file release-notes.md \
+              --verify-tag
+          fi
