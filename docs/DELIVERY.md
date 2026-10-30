@@ -4,7 +4,8 @@
 
 | Cible | Commande | Résultat |
 | --- | --- | --- |
-| Natif | `cargo build --release -p circuitsim-app` | `target/release/circuitsim[.exe]` |
+| Natif Windows | `cargo build --release -p circuitsim-app` | `target/release/circuitsim[.exe]` |
+| Natif Linux | CI Ubuntu, `cargo build --release -p circuitsim-app` | artéfact `circuitsim-linux-x86_64` |
 | Web | `cargo xtask web-build` | `dist/` |
 | Bibliothèques | `cargo build --release` | crates du workspace |
 
@@ -62,7 +63,7 @@ SVG intégrée et un thème sombre sans requête externe.
 
 | Contrôle | Résultat |
 | --- | --- |
-| `cargo xtask check` | format, clippy strict, 267 tests |
+| `cargo xtask check` | format, clippy strict, 380 tests |
 | `cargo deny check licenses` | licences compatibles |
 | `cargo xtask wasm-check` | bibliothèques, worker, app compilés pour WASM |
 | `cargo bench --workspace --no-run` | benchmarks compilés |

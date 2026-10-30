@@ -7,8 +7,8 @@ sont séparés, testables sans navigateur et compilables pour
 
 ## État
 
-Version **0.5.0**. Les dix étapes du projet et les lots G1 à G8 sont livrés :
-267 tests natifs, clippy strict, cible WASM, benchmarks, exemples, CI et
+Version **0.6.0**. Les dix étapes du projet et les lots G1 à G8 sont livrés :
+380 tests natifs, clippy strict, cible WASM, benchmarks, exemples, CI et
 distribution web.
 
 - **Cœur** : unités SI, netlist validée, MNA dense, DC, transitoire à pas fixe,

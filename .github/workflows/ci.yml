@@ -69,6 +69,14 @@ jobs:
       - name: Build native release
         run: cargo build --release -p circuitsim-app
 
+      - name: Upload Linux binary
+        uses: actions/upload-artifact@v4
+        with:
+          name: circuitsim-linux-x86_64
+          path: target/release/circuitsim
+          if-no-files-found: error
+          retention-days: 14
+
       - name: Build web distribution
         # Trunk downloads wasm-bindgen on demand; GitHub releases can answer 504.
         run: |
