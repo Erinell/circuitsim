@@ -1,6 +1,8 @@
 name: Release
 
 'on':
+  push:
+    tags: ["v*"]
   workflow_dispatch:
     inputs:
       tag:
@@ -10,9 +12,11 @@ name: Release
 
 permissions:
   contents: write
+  actions: read
 
 env:
   CARGO_TERM_COLOR: always
+  RELEASE_TAG: ${{ inputs.tag || github.ref_name }}
 
 jobs:
   windows:
@@ -23,7 +27,7 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
         with:
-          ref: ${{ inputs.tag }}
+          ref: ${{ inputs.tag || github.ref_name }}
 
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
@@ -37,7 +41,8 @@ jobs:
       - name: Package
         shell: pwsh
         run: |
-          $name = "CircuitSim-${{ inputs.tag }}-windows-x86_64"
+          $tag = $env:RELEASE_TAG
+          $name = "CircuitSim-$tag-windows-x86_64"
           $dir = "release-assets/$name"
           New-Item -ItemType Directory -Force -Path $dir | Out-Null
           Copy-Item "target/release/circuitsim.exe" "$dir/"
@@ -60,7 +65,7 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
         with:
-          ref: ${{ inputs.tag }}
+          ref: ${{ inputs.tag || github.ref_name }}
 
       - name: Install Linux desktop dependencies
         run: |
@@ -81,7 +86,7 @@ jobs:
 
       - name: Package
         run: |
-          name="CircuitSim-${{ inputs.tag }}-linux-x86_64"
+          name="CircuitSim-${RELEASE_TAG}-linux-x86_64"
           mkdir -p "release-assets/$name"
           cp target/release/circuitsim "release-assets/$name/circuitsim"
           cp README.md LICENSE-MIT LICENSE-APACHE THIRD_PARTY_LICENSES.md "release-assets/$name/"
@@ -104,7 +109,7 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
         with:
-          ref: ${{ inputs.tag }}
+          ref: ${{ inputs.tag || github.ref_name }}
 
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
@@ -124,7 +129,7 @@ jobs:
 
       - name: Package
         run: |
-          name="CircuitSim-${{ inputs.tag }}-web"
+          name="CircuitSim-${RELEASE_TAG}-web"
           mkdir -p "release-assets/$name"
           cp -r dist/* "release-assets/$name/"
           cp README.md LICENSE-MIT LICENSE-APACHE THIRD_PARTY_LICENSES.md "release-assets/$name/"
@@ -145,6 +150,7 @@ jobs:
     timeout-minutes: 15
     permissions:
       contents: write
+      actions: read
     steps:
       - name: Download artifacts
         uses: actions/download-artifact@v4
@@ -155,7 +161,7 @@ jobs:
       - name: Publish release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          TAG: ${{ inputs.tag }}
+          TAG: ${{ inputs.tag || github.ref_name }}
           RELEASE_BODY: |
             # CircuitSim v0.6.0
 
@@ -252,7 +258,7 @@ jobs:
         run: |
           set -euo pipefail
           {
-            printf '%s\n' "$RELEASE_BODY"
+            printf '%s\n' "${RELEASE_BODY//v0.6.0/$TAG}"
             printf '\n## Sommes de contrôle\n\n```text\n'
             (cd release && sha256sum \
               "CircuitSim-${TAG}-linux-x86_64.tar.gz" \
