@@ -6,6 +6,8 @@ sémantique.
 
 ## [Unreleased]
 
+## [0.6.0] - 2026-10-30
+
 ### Added
 
 - **Ergonomie du câblage** : les fils reliés à un composant déplacé suivent ses

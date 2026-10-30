@@ -393,7 +393,7 @@ dependencies = [
 
 [[package]]
 name = "circuitsim-app"
-version = "0.5.0"
+version = "0.6.0"
 dependencies = [
  "criterion",
  "editor-core",
@@ -415,7 +415,7 @@ dependencies = [
 
 [[package]]
 name = "circuitsim-harness"
-version = "0.5.0"
+version = "0.6.0"
 dependencies = [
  "editor-core",
  "proptest",
@@ -687,7 +687,7 @@ dependencies = [
 
 [[package]]
 name = "editor-core"
-version = "0.5.0"
+version = "0.6.0"
 dependencies = [
  "criterion",
  "proptest",
@@ -2651,7 +2651,7 @@ checksum = "f8fadd59c855ef2080decdef8ff161eb6661b86933c9d82e5ba29dc602a55aba"
 
 [[package]]
 name = "sim-core"
-version = "0.5.0"
+version = "0.6.0"
 dependencies = [
  "criterion",
  "nalgebra",
@@ -3683,7 +3683,7 @@ checksum = "1ebf944e87a7c253233ad6766e082e3cd714b5d03812acc24c318f549614536e"
 
 [[package]]
 name = "worker"
-version = "0.5.0"
+version = "0.6.0"
 dependencies = [
  "sim-core",
  "thiserror 2.0.21",
@@ -3693,7 +3693,7 @@ dependencies = [
 
 [[package]]
 name = "worker-protocol"
-version = "0.5.0"
+version = "0.6.0"
 dependencies = [
  "postcard",
  "serde",
@@ -3772,7 +3772,7 @@ checksum = "e450f9b2ed1dff33c94c12589a87338689467b9c4f5d8a5710bd09a847d2c8a7"
 
 [[package]]
 name = "xtask"
-version = "0.5.0"
+version = "0.6.0"
 
 [[package]]
 name = "yoke"
