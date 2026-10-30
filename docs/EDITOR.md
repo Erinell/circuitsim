@@ -137,6 +137,14 @@ annulables en une action.
   chevauchements colinéaires ; un croisement X sans jonction n’est pas une
   connexion. Si la chaîne n’est pas simple ou fiable, elle reste inchangée
   plutôt que de produire une géométrie supplémentaire.
+- **Accrochage au déplacement** : si une broche de la sélection arrive à deux
+  cases au plus d’un fil ou d’une broche qui ne fait pas partie de son net
+  d’origine, le déplacement est ajusté pour l’aligner exactement. Les fils qui
+  suivaient la sélection restent alors à leur place : le composant se
+  déconnecte de son ancien emplacement. Un composant à deux broches dont les
+  deux broches tombent sur le même fil, sans label ni jonction entre elles, y
+  est inséré en série, comme lors d’un placement. Un cercle montre la cible
+  pendant le glissement. Sans cible, le suivi de chaîne ci-dessus s’applique.
 - **Extrémité libre** : une extrémité sans broche, label, jonction ou autre fil
   peut être déplacée sur l’axe du fil ou perpendiculairement. Le déplacement
   perpendiculaire conserve le fil d’origine et ajoute un prolongement avec

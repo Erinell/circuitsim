@@ -744,13 +744,24 @@ impl CanvasState {
                 match drag {
                     DragState::Objects { start, current } => {
                         let end = latest_point.unwrap_or(current);
-                        let delta = GridPos::new(
+                        let raw_delta = GridPos::new(
                             end.x.saturating_sub(start.x),
                             end.y.saturating_sub(start.y),
                         );
-                        if delta != GridPos::default() {
-                            match document.move_selection(delta) {
-                                Ok(()) => status.success("Sélection déplacée."),
+                        let snap = document.selection_snap(raw_delta);
+                        let applied = snap.map_or(raw_delta, |snap| snap.delta);
+                        if applied != GridPos::default() {
+                            match document.move_selection_snapped(raw_delta) {
+                                Ok(Some(target)) => {
+                                    let geometry = match target.kind {
+                                        SnapKind::Pin(_) => "une broche",
+                                        SnapKind::Wire(_) => "un fil",
+                                    };
+                                    status.success(format!(
+                                        "Sélection déplacée et connectée à {geometry}."
+                                    ));
+                                }
+                                Ok(None) => status.success("Sélection déplacée."),
                                 Err(error) => status.error(error.user_message()),
                             }
                         }
@@ -2397,10 +2408,12 @@ impl CanvasState {
         let palette = self.settings.palette();
         match &self.drag {
             Some(DragState::Objects { start, current }) => {
-                let delta = GridPos::new(
+                let raw_delta = GridPos::new(
                     current.x.saturating_sub(start.x),
                     current.y.saturating_sub(start.y),
                 );
+                let snap = document.selection_snap(raw_delta);
+                let delta = snap.map_or(raw_delta, |snap| snap.delta);
                 if delta != GridPos::default() {
                     let mut ghost_painter = painter.clone();
                     ghost_painter.set_opacity(0.45);
@@ -2408,6 +2421,13 @@ impl CanvasState {
                         self.paint_ghost_object(&ghost_painter, rect, document, *object, delta);
                     }
                     self.paint_alignment_guides(painter, rect, document, delta);
+                }
+                if let Some(snap) = snap {
+                    painter.circle_stroke(
+                        self.viewport.grid_to_screen(rect, snap.target.at),
+                        7.0,
+                        Stroke::new(1.5, palette.hover),
+                    );
                 }
             }
             Some(DragState::Segment {
@@ -4015,6 +4035,79 @@ mod tests {
 
         assert_eq!(document.symbol(id).unwrap().at, target);
         assert!(document.selection().contains(&ObjectRef::Symbol(id)));
+    }
+
+    #[test]
+    fn canvas_drag_snaps_a_symbol_onto_a_wire() {
+        let context = egui::Context::default();
+        let mut canvas = CanvasState::new();
+        let mut document = Document::new();
+        let symbol = document
+            .add_symbol(editor_core::SymbolKind::Resistor, GridPos::new(0, 0))
+            .unwrap();
+        document
+            .add_wire(GridPos::new(6, 4), GridPos::new(6, 12))
+            .unwrap();
+        document.select_only(Some(ObjectRef::Symbol(symbol)));
+        let mut status = Status::new_info("");
+        let tool = crate::ui::Tool::Select;
+
+        frame(
+            &context,
+            &mut canvas,
+            &mut document,
+            &mut status,
+            &tool,
+            Vec::new(),
+        );
+        let start_screen = canvas
+            .viewport()
+            .grid_to_screen(screen(), GridPos::new(0, 0));
+        let target_screen = canvas
+            .viewport()
+            .grid_to_screen(screen(), GridPos::new(3, 5));
+
+        frame(
+            &context,
+            &mut canvas,
+            &mut document,
+            &mut status,
+            &tool,
+            vec![
+                Event::PointerMoved(start_screen),
+                Event::PointerButton {
+                    pos: start_screen,
+                    button: PointerButton::Primary,
+                    pressed: true,
+                    modifiers: Modifiers::default(),
+                },
+            ],
+        );
+        frame(
+            &context,
+            &mut canvas,
+            &mut document,
+            &mut status,
+            &tool,
+            vec![Event::PointerMoved(target_screen)],
+        );
+        frame(
+            &context,
+            &mut canvas,
+            &mut document,
+            &mut status,
+            &tool,
+            vec![Event::PointerButton {
+                pos: target_screen,
+                button: PointerButton::Primary,
+                pressed: false,
+                modifiers: Modifiers::default(),
+            }],
+        );
+
+        assert_eq!(document.symbol(symbol).unwrap().at, GridPos::new(4, 5));
+        assert!(document.pin_at(GridPos::new(6, 5)).is_some());
+        assert_eq!(document.schematic().wires().count(), 1);
     }
 
     #[test]

@@ -99,7 +99,12 @@ et applique la valeur à chaud en une seule étape annulable.
 - Glisser un symbole/label/jonction : déplace la sélection d'un delta entier.
   Les fils attachés aux broches d'un symbole déplacé sont regroupés en chaînes
   simples et reconstruits une seule fois ; les coudes existants sont absorbés
-  au lieu de s'empiler.
+  au lieu de s'empiler. Si une broche arrive au contact d'un fil ou d'une
+  broche hors du net du composant, elle s'y accroche magnétiquement : les fils
+  précédents restent alors en place et le composant s'en déconnecte. Un
+  composant à deux broches dont les broches tiennent sur un même fil y est
+  inséré en série. Un cercle indique la cible d'accrochage pendant le
+  glissement.
 - Glisser une broche : crée un fil orthogonal avec accroche et aperçu, sans
   changer d'outil. Le relâchement sur une broche, un fil ou le vide termine ou
   annule proprement.

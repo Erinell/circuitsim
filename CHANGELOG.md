@@ -12,10 +12,14 @@ sémantique.
   broches, y compris lorsqu’une broche traverse un fil, avec un chemin
   orthogonal. Le suivi regroupe les fils en chaînes simples et les reconstruit
   une seule fois : les coudes existants sont absorbés au lieu de s’empiler à
-  chaque déplacement. Une extrémité libre peut être prolongée
-  perpendiculairement avec un coude, les segments colinéaires ajoutés bout à
-  bout fusionnent, et le glissement d’un fil suit l’axe dominant du geste, y
-  compris le long de son propre axe.
+  chaque déplacement. Lorsqu’une broche approche un fil ou une broche qui ne
+  fait pas partie de son net, elle s’y accroche et les fils précédents restent
+  en place : le composant se déconnecte de son ancien emplacement. Un composant
+  à deux broches dont les broches tombent sur un même fil y est inséré en
+  série. Une extrémité libre peut être prolongée perpendiculairement avec un
+  coude, les segments colinéaires ajoutés bout à bout fusionnent, et le
+  glissement d’un fil suit l’axe dominant du geste, y compris le long de son
+  propre axe.
 - **Transistor MOSFET** à enrichissement, trois broches `D`/`G`/`S`, bulk relié à
   la source : loi carrée niveau 1 (triode, saturation, `lambda`), résistances
   d'accès `rd`/`rs`, diode de corps, capacités `cgs`/`cgd`/`cds` et permutation

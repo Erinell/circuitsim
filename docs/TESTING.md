@@ -34,7 +34,7 @@ l'installe séparément.
 
 ## 3. Suite et couverture
 
-Au 30 octobre 2026, `cargo test --workspace` exécute **374 tests** :
+Au 30 octobre 2026, `cargo test --workspace` exécute **380 tests** :
 
 | Groupe | Tests | Points clés |
 | --- | ---: | --- |
@@ -44,7 +44,7 @@ Au 30 octobre 2026, `cargo test --workspace` exécute **374 tests** :
 | `sim-core` AC | 17 | RC/RL/RLC, phase, diode, opamp, balayages, erreurs |
 | `sim-core` MOSFET | 13 | cutoff, triode/saturation analytiques, continuité au seuil, miroir N/P, `swap_ds`, diode de corps, `gm`/`gds` et capacités AC, échelons de grille 10 µs et 1 µs, ouverture à chaud d'un interrupteur de grille avec drain flottant |
 | `editor-core` | 60 | grille, symboles, schéma, historique, ERC, extraction, masses communes, paramètres LED/bobine/MOSFET, polarité des broches comparateur/opamp, JSON, séries E, snap/routage |
-| `circuitsim-app` | 188 | document, projet JSON, vue, navigation, mini-carte, UI, petits textes à 10 px, inspecteur avec sélecteur de diode et de canal, historique, presse-papiers, simulation continue, mise à jour à chaud, calques, palettes, survol avec tension, intensité de fil et limite, interrupteur ouvert sans fuite affichée, surintensités et diagnostics cliquables, placement aligné sur broche, câblage direct, raccourcis, aide générée, contrastes, panneau unifié et portées, tensions de condensateurs et courants de nets/composants dérivés, ajout de portée depuis les contrôles, valeurs à droite, fenêtre réglable 0,5–30 s, 10 s par défaut et décimation, réordonnancement et recentrage, sondes intégrées, FFT et curseurs A/B, curseurs de réglage, exemples dont le RC de démonstration, diviseur, MOSFET, RLC et polarité, préférences persistées et migration, À propos, onboarding, accessibilité, ohmmètre, instruments, worker, FFT, Bode, CSV, fusion de fils colinéaires, prolongement perpendiculaire, reroutage de chaîne sans accumulation, suivi des broches et glissement de fil sur les deux axes |
+| `circuitsim-app` | 194 | document, projet JSON, vue, navigation, mini-carte, UI, petits textes à 10 px, inspecteur avec sélecteur de diode et de canal, historique, presse-papiers, simulation continue, mise à jour à chaud, calques, palettes, survol avec tension, intensité de fil et limite, interrupteur ouvert sans fuite affichée, surintensités et diagnostics cliquables, placement aligné sur broche, câblage direct, raccourcis, aide générée, contrastes, panneau unifié et portées, tensions de condensateurs et courants de nets/composants dérivés, ajout de portée depuis les contrôles, valeurs à droite, fenêtre réglable 0,5–30 s, 10 s par défaut et décimation, réordonnancement et recentrage, sondes intégrées, FFT et curseurs A/B, curseurs de réglage, exemples dont le RC de démonstration, diviseur, MOSFET, RLC et polarité, préférences persistées et migration, À propos, onboarding, accessibilité, ohmmètre, instruments, worker, FFT, Bode, CSV, fusion de fils colinéaires, prolongement perpendiculaire, reroutage de chaîne sans accumulation, accrochage et insertion en série au déplacement avec déconnexion des fils précédents, suivi des broches et glissement de fil sur les deux axes |
 | `worker-protocol` | 12 | trames, version v4, netlist MOSFET, erreurs, transports |
 | `worker` | 13 | coalescence, cadence, révisions, DC/transitoire/AC |
 | `editor_invariants` | 2 | proptest undo/redo et extraction |
@@ -87,8 +87,10 @@ polarité positive des sources, préférences versionnées et
 À propos, sondes V/A/Ω, redimensionnement
 d’extrémités, prolongement perpendiculaire, fusion de segments colinéaires,
 reroutage de chaîne sans accumulation lors du déplacement répété d’un composant,
-suivi des broches sur un fil ponté, un label intérieur, une broche intérieure et
-une branche en T, déplacement de segment
+accrochage magnétique d’un composant déplacé sur un fil ou une broche avec
+déconnexion des fils précédents, insertion en série au déplacement, suivi des
+broches sur un fil ponté, un label intérieur, une broche intérieure et une
+branche en T, déplacement de segment
 sans embout sur les deux axes, fils en erreur ERC, basculement
 d’interrupteur, courant nul à l’ouverture, arrêt du flux à l’ouverture, propriétés par double-clic, debounce
 du rafraîchissement automatique, cible figée du menu contextuel, zone de clic
