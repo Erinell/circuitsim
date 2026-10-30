@@ -59,9 +59,10 @@ lettres seules ne sont pas des raccourcis de placement.
 - `Alt` + clic sélectionne le net complet à partir d’une broche, d’un fil, d’une
   jonction ou d’un label.
 - Un glisser sur un symbole, label ou jonction déplace toute la sélection ; les
-  fils attachés aux broches d’un symbole déplacé le suivent. Un glisser sur un
-  fil déplace le segment selon l’axe dominant, perpendiculairement ou le long de
-  son axe.
+  fils attachés aux broches d’un symbole déplacé le suivent. Chaque chaîne
+  simple est reconstruite une seule fois, ce qui absorbe les coudes précédents
+  au lieu d’empiler des fils. Un glisser sur un fil déplace le segment selon
+  l’axe dominant, perpendiculairement ou le long de son axe.
 - Lors d’un placement au bout d’un fil ou sur une broche, une broche du nouveau
   composant est alignée sur la cible ; au milieu d’un fil, un composant à deux
   broches est inséré en série.

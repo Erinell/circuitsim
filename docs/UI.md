@@ -97,8 +97,9 @@ et applique la valeur à chaud en une seule étape annulable.
 - `Alt` + clic : sélectionne le net complet.
 - Rectangle gauche→droite : objets entièrement inclus ; droite→gauche : touchés.
 - Glisser un symbole/label/jonction : déplace la sélection d'un delta entier.
-  Les fils attachés aux broches d'un symbole déplacé le suivent et se replient
-  orthogonalement.
+  Les fils attachés aux broches d'un symbole déplacé sont regroupés en chaînes
+  simples et reconstruits une seule fois ; les coudes existants sont absorbés
+  au lieu de s'empiler.
 - Glisser une broche : crée un fil orthogonal avec accroche et aperçu, sans
   changer d'outil. Le relâchement sur une broche, un fil ou le vide termine ou
   annule proprement.

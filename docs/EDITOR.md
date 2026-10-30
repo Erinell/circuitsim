@@ -128,10 +128,15 @@ annulables en une action.
   aucun embout ni fil supplémentaire n'est créé. Les broches, labels, jonctions
   et autres fils restent à leur place ; l'ERC signale les connexions perdues.
   Une position déjà occupée par un fil identique est refusée.
-- **Déplacement de composant** : les fils reliés aux broches d’un composant
-  déplacé suivent ses broches, y compris lorsqu’une broche se trouve à
-  l’intérieur d’un fil. Le chemin est reconstruit orthogonalement ; aucun
-  segment diagonal n’est créé.
+- **Déplacement de composant** : les fils reliés aux broches déplacées sont
+  regroupés en chaînes simples. Chaque chaîne est retirée puis reconstruite une
+  seule fois à travers ses ancres — broches fixes ou déplacées, labels,
+  jonctions, contacts en T, extrémités libres — avec un chemin orthogonal. Les
+  coudes créés par un déplacement précédent sont ainsi absorbés au lieu de
+  s’empiler. Le suivi s’arrête aux branches, aux fils sélectionnés et aux
+  chevauchements colinéaires ; un croisement X sans jonction n’est pas une
+  connexion. Si la chaîne n’est pas simple ou fiable, elle reste inchangée
+  plutôt que de produire une géométrie supplémentaire.
 - **Extrémité libre** : une extrémité sans broche, label, jonction ou autre fil
   peut être déplacée sur l’axe du fil ou perpendiculairement. Le déplacement
   perpendiculaire conserve le fil d’origine et ajoute un prolongement avec

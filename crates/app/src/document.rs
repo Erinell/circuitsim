@@ -2,11 +2,12 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
+use editor_core::grid::segment_relation;
 use editor_core::{
     extract_netlist, nearest_snap, route_wire, Command, EditError, ErcReport, ExtractedNet,
     Extraction, GridPos, GridRect, Junction, JunctionId, NetLabel, NetLabelId, ObjectRef,
-    Orientation, PinKey, Schematic, SnapTarget, Symbol, SymbolId, SymbolKind, SymbolRegistry,
-    UndoStack, Wire, WireGeometryError, WireId, DEFAULT_SNAP_RADIUS,
+    Orientation, PinKey, Schematic, SegmentRelation, SnapTarget, Symbol, SymbolId, SymbolKind,
+    SymbolRegistry, UndoStack, Wire, WireGeometryError, WireId, DEFAULT_SNAP_RADIUS,
 };
 use sim_core::netlist::{NameError, ParamValue};
 use sim_core::units::UnitParseError;
@@ -1281,17 +1282,22 @@ impl Document {
                 _ => None,
             })
             .collect::<BTreeSet<_>>();
+        let mut claimed = BTreeSet::new();
         let mut plans = Vec::new();
         for wire in self.schematic.wires() {
-            if selected_wires.contains(&wire.id) {
+            if selected_wires.contains(&wire.id) || claimed.contains(&wire.id) {
                 continue;
             }
-            let Some(points) = wire_anchor_points(wire, moved_pins) else {
+            if !moved_pins.keys().any(|point| wire.contains(*point)) {
+                continue;
+            }
+            let Some(chain) = self.trace_wire_chain(wire, &selected_wires, &claimed) else {
                 continue;
             };
-            let path = anchor_path(&points, wire.is_horizontal());
-            if path.len() >= 2 {
-                plans.push((wire.clone(), path));
+            claimed.extend(chain.wires.iter().copied());
+            let required = self.chain_required_points(&chain);
+            if let Some(path) = wire_chain_path(&chain, moved_pins, &required) {
+                plans.push((chain, path));
             }
         }
         if plans.is_empty() {
@@ -1303,17 +1309,230 @@ impl Document {
             .wires()
             .map(|wire| (wire.id, wire.clone()))
             .collect::<BTreeMap<_, _>>();
-        for (wire, _) in &plans {
-            working.remove(&wire.id);
+        for (chain, _) in &plans {
+            for id in &chain.wires {
+                working.remove(id);
+            }
         }
         let mut allocator = self.schematic.clone();
-        for (wire, path) in &plans {
+        for (chain, path) in &plans {
+            let preferred = chain.wires.iter().next().copied();
             for (index, pair) in path.windows(2).enumerate() {
-                let preferred = (index == 0).then_some(wire.id);
+                if pair[0] == pair[1] {
+                    continue;
+                }
+                let preferred = (index == 0).then_some(preferred).flatten();
                 insert_wire_segment(&mut working, &mut allocator, pair[0], pair[1], preferred)?;
             }
         }
         Ok(wire_diff_commands(&self.schematic, &working))
+    }
+
+    fn trace_wire_chain(
+        &self,
+        seed: &Wire,
+        selected_wires: &BTreeSet<WireId>,
+        claimed: &BTreeSet<WireId>,
+    ) -> Option<WireChain> {
+        let mut blocked = selected_wires.clone();
+        blocked.extend(claimed.iter().copied());
+
+        let mut points = self.chain_wire_points(seed, seed.a, seed.b)?;
+        let mut horizontal = vec![seed.is_horizontal(); points.len().saturating_sub(1)];
+        let mut wires = BTreeSet::from([seed.id]);
+
+        let mut left_wire = seed.clone();
+        let mut left_point = *points.first()?;
+        while let Some(next) = self.next_chain_wire(&left_wire, left_point, &blocked, &wires) {
+            let next_point = if next.a == left_point { next.b } else { next.a };
+            let Some(mut segment) = self.chain_wire_points(&next, left_point, next_point) else {
+                break;
+            };
+            let added = segment.len().saturating_sub(1);
+            segment.reverse();
+            segment.pop();
+            segment.extend(points);
+            points = segment;
+            let mut grown = vec![next.is_horizontal(); added];
+            grown.extend(horizontal);
+            horizontal = grown;
+            wires.insert(next.id);
+            left_wire = next;
+            left_point = next_point;
+        }
+
+        let mut right_wire = seed.clone();
+        let mut right_point = *points.last()?;
+        while let Some(next) = self.next_chain_wire(&right_wire, right_point, &blocked, &wires) {
+            let next_point = if next.a == right_point {
+                next.b
+            } else {
+                next.a
+            };
+            let Some(segment) = self.chain_wire_points(&next, right_point, next_point) else {
+                break;
+            };
+            let added = segment.len().saturating_sub(1);
+            points.extend(segment.into_iter().skip(1));
+            horizontal.extend(vec![next.is_horizontal(); added]);
+            wires.insert(next.id);
+            right_wire = next;
+            right_point = next_point;
+        }
+
+        Some(WireChain {
+            wires,
+            points,
+            horizontal,
+        })
+    }
+
+    fn next_chain_wire(
+        &self,
+        current: &Wire,
+        at: GridPos,
+        blocked: &BTreeSet<WireId>,
+        visited: &BTreeSet<WireId>,
+    ) -> Option<Wire> {
+        if at != current.a && at != current.b {
+            return None;
+        }
+        let mut endpoints = Vec::new();
+        let mut interior_contact = false;
+        for other in self.schematic.wires() {
+            if other.id == current.id {
+                continue;
+            }
+            if blocked.contains(&other.id) || visited.contains(&other.id) {
+                if other.contains(at) {
+                    return None;
+                }
+                continue;
+            }
+            match chain_connection(current, other, at) {
+                Some(ChainConnection::EndpointEnd { collinear }) => {
+                    endpoints.push((other.clone(), collinear));
+                }
+                Some(ChainConnection::EndpointInterior) => interior_contact = true,
+                None => {}
+            }
+        }
+        let collinear = endpoints
+            .iter()
+            .filter(|(_, collinear)| *collinear)
+            .collect::<Vec<_>>();
+        if collinear.len() == 1 {
+            return Some(collinear[0].0.clone());
+        }
+        if endpoints.len() == 1 && !interior_contact && collinear.is_empty() {
+            return Some(endpoints[0].0.clone());
+        }
+        None
+    }
+
+    fn chain_wire_points(&self, wire: &Wire, from: GridPos, to: GridPos) -> Option<Vec<GridPos>> {
+        let forward = from == wire.a && to == wire.b;
+        let backward = from == wire.b && to == wire.a;
+        if !forward && !backward {
+            return None;
+        }
+        for other in self.schematic.wires() {
+            if other.id == wire.id {
+                continue;
+            }
+            if matches!(
+                segment_relation(wire.a, wire.b, other.a, other.b),
+                SegmentRelation::CollinearOverlap { .. }
+            ) {
+                return None;
+            }
+        }
+
+        let mut anchors = BTreeSet::new();
+        for (_, position) in self.pin_positions() {
+            if strictly_between(position, wire.a, wire.b) {
+                anchors.insert(position);
+            }
+        }
+        for label in self.schematic.labels() {
+            if strictly_between(label.at, wire.a, wire.b) {
+                anchors.insert(label.at);
+            }
+        }
+        for junction in self.schematic.junctions() {
+            if strictly_between(junction.at, wire.a, wire.b) {
+                anchors.insert(junction.at);
+            }
+        }
+        for other in self.schematic.wires() {
+            if other.id == wire.id {
+                continue;
+            }
+            for point in [other.a, other.b] {
+                if strictly_between(point, wire.a, wire.b) {
+                    anchors.insert(point);
+                }
+            }
+        }
+
+        let mut anchors = anchors.into_iter().collect::<Vec<_>>();
+        if wire.is_horizontal() {
+            anchors.sort_by_key(|point| point.x);
+        } else {
+            anchors.sort_by_key(|point| point.y);
+        }
+        if backward {
+            anchors.reverse();
+        }
+        let mut points = Vec::with_capacity(anchors.len() + 2);
+        points.push(from);
+        points.extend(anchors);
+        points.push(to);
+        points.dedup();
+        Some(points)
+    }
+
+    fn chain_required_points(&self, chain: &WireChain) -> BTreeSet<GridPos> {
+        let mut required = BTreeSet::new();
+        if let Some(first) = chain.points.first() {
+            required.insert(*first);
+        }
+        if let Some(last) = chain.points.last() {
+            required.insert(*last);
+        }
+        let contains_point = |point: GridPos| {
+            chain
+                .wires
+                .iter()
+                .filter_map(|id| self.wire(*id))
+                .any(|wire| wire.contains(point))
+        };
+        for (_, position) in self.pin_positions() {
+            if contains_point(position) {
+                required.insert(position);
+            }
+        }
+        for label in self.schematic.labels() {
+            if contains_point(label.at) {
+                required.insert(label.at);
+            }
+        }
+        for junction in self.schematic.junctions() {
+            if contains_point(junction.at) {
+                required.insert(junction.at);
+            }
+        }
+        for other in self.schematic.wires() {
+            if chain.wires.contains(&other.id) {
+                continue;
+            }
+            for point in [other.a, other.b] {
+                if contains_point(point) {
+                    required.insert(point);
+                }
+            }
+        }
+        required
     }
 
     /// Deletes every selected object as one atomic command.
@@ -2151,53 +2370,197 @@ fn wire_contains(wire: &Wire, point: GridPos) -> bool {
     wire.contains(point)
 }
 
-fn wire_anchor_points(
-    wire: &Wire,
-    moved_pins: &BTreeMap<GridPos, GridPos>,
-) -> Option<Vec<GridPos>> {
-    let start = moved_pins.get(&wire.a).copied().unwrap_or(wire.a);
-    let end = moved_pins.get(&wire.b).copied().unwrap_or(wire.b);
-    let mut interior = moved_pins
-        .iter()
-        .filter(|(old, _)| strictly_between(**old, wire.a, wire.b))
-        .map(|(old, new)| (*old, *new))
-        .collect::<Vec<_>>();
-    if start == wire.a && end == wire.b && interior.is_empty() {
-        return None;
-    }
-    interior.sort_by_key(|(old, _)| if wire.is_horizontal() { old.x } else { old.y });
-
-    let mut points = Vec::with_capacity(interior.len() + 2);
-    points.push(start);
-    points.extend(interior.into_iter().map(|(_, new)| new));
-    points.push(end);
-    points.dedup();
-    (points.len() >= 2).then_some(points)
+#[derive(Clone, Debug)]
+struct WireChain {
+    wires: BTreeSet<WireId>,
+    /// Ordered vertices from one chain terminal to the other.
+    points: Vec<GridPos>,
+    /// Original orientation of each segment between consecutive points.
+    horizontal: Vec<bool>,
 }
 
-fn anchor_path(points: &[GridPos], prefer_horizontal: bool) -> Vec<GridPos> {
-    let Some(&first) = points.first() else {
-        return Vec::new();
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum ChainConnection {
+    EndpointEnd { collinear: bool },
+    EndpointInterior,
+}
+
+fn chain_connection(current: &Wire, other: &Wire, at: GridPos) -> Option<ChainConnection> {
+    match segment_relation(current.a, current.b, other.a, other.b) {
+        SegmentRelation::CollinearTouch(point) if point == at => {
+            Some(ChainConnection::EndpointEnd { collinear: true })
+        }
+        SegmentRelation::Perpendicular {
+            at: point,
+            endpoint_a,
+            endpoint_b,
+        } if point == at && endpoint_a => {
+            if endpoint_b {
+                Some(ChainConnection::EndpointEnd { collinear: false })
+            } else {
+                Some(ChainConnection::EndpointInterior)
+            }
+        }
+        _ => None,
+    }
+}
+
+fn wire_chain_path(
+    chain: &WireChain,
+    moved_pins: &BTreeMap<GridPos, GridPos>,
+    required: &BTreeSet<GridPos>,
+) -> Option<Vec<GridPos>> {
+    let Some(&first) = chain.points.first() else {
+        return Some(Vec::new());
     };
-    let mut path = vec![first];
-    for &target in &points[1..] {
-        let last = path.last().copied().unwrap_or(first);
-        if last == target {
+    let targets = chain
+        .points
+        .iter()
+        .map(|point| moved_pins.get(point).copied().unwrap_or(*point))
+        .collect::<Vec<_>>();
+    let mut required = required.clone();
+    for (old, target) in chain.points.iter().zip(&targets) {
+        if moved_pins.contains_key(old) {
+            required.insert(*target);
+        }
+    }
+    let mut path = vec![targets.first().copied().unwrap_or(first)];
+    for (index, &target) in targets.iter().enumerate().skip(1) {
+        let from = *path.last()?;
+        if from == target {
             continue;
         }
-        if last.x != target.x && last.y != target.y {
-            let corner = if prefer_horizontal {
-                GridPos::new(target.x, last.y)
-            } else {
-                GridPos::new(last.x, target.y)
-            };
-            if corner != last {
+        if from.x != target.x && from.y != target.y {
+            let horizontal_corner = GridPos::new(target.x, from.y);
+            let vertical_corner = GridPos::new(from.x, target.y);
+            let previous = (path.len() >= 2).then(|| path[path.len() - 2]);
+            let corner = choose_chain_corner(
+                from,
+                horizontal_corner,
+                vertical_corner,
+                chain.horizontal.get(index - 1).copied().unwrap_or(true),
+                previous,
+                moved_pins,
+            );
+            if corner != from && corner != target {
                 path.push(corner);
             }
         }
         path.push(target);
     }
-    path
+    let path = simplify_wire_path(path, &required);
+    (!wire_path_has_self_overlap(&path) && path.len() >= 2).then_some(path)
+}
+
+fn choose_chain_corner(
+    from: GridPos,
+    horizontal_corner: GridPos,
+    vertical_corner: GridPos,
+    prefer_horizontal: bool,
+    previous: Option<GridPos>,
+    moved_pins: &BTreeMap<GridPos, GridPos>,
+) -> GridPos {
+    let horizontal_blocked = moved_pins.contains_key(&horizontal_corner);
+    let vertical_blocked = moved_pins.contains_key(&vertical_corner);
+    if horizontal_blocked != vertical_blocked {
+        return if horizontal_blocked {
+            vertical_corner
+        } else {
+            horizontal_corner
+        };
+    }
+    if let Some(previous) = previous {
+        if previous.y == from.y && previous.x != from.x {
+            return horizontal_corner;
+        }
+        if previous.x == from.x && previous.y != from.y {
+            return vertical_corner;
+        }
+    }
+    if prefer_horizontal {
+        horizontal_corner
+    } else {
+        vertical_corner
+    }
+}
+
+fn simplify_wire_path(mut path: Vec<GridPos>, required: &BTreeSet<GridPos>) -> Vec<GridPos> {
+    path.dedup();
+    let mut simplified: Vec<GridPos> = Vec::with_capacity(path.len());
+    for point in path {
+        while simplified.len() >= 2 {
+            let before = simplified[simplified.len() - 2];
+            let middle = simplified[simplified.len() - 1];
+            if collinear_between(before, middle, point) {
+                simplified.pop();
+                continue;
+            }
+            if middle == before || middle == point {
+                simplified.pop();
+                continue;
+            }
+            if collinear_on_line(before, middle, point) && !required.contains(&middle) {
+                simplified.pop();
+                continue;
+            }
+            break;
+        }
+        simplified.push(point);
+    }
+    simplified.dedup();
+    simplified
+}
+
+fn collinear_on_line(before: GridPos, middle: GridPos, after: GridPos) -> bool {
+    (before.y == middle.y && middle.y == after.y) || (before.x == middle.x && middle.x == after.x)
+}
+
+fn collinear_between(before: GridPos, middle: GridPos, after: GridPos) -> bool {
+    if before.y == middle.y && middle.y == after.y {
+        let low = before.x.min(after.x);
+        let high = before.x.max(after.x);
+        middle.x > low && middle.x < high
+    } else if before.x == middle.x && middle.x == after.x {
+        let low = before.y.min(after.y);
+        let high = before.y.max(after.y);
+        middle.y > low && middle.y < high
+    } else {
+        false
+    }
+}
+
+fn wire_path_has_self_overlap(path: &[GridPos]) -> bool {
+    if path.len() < 3 {
+        return false;
+    }
+    for first in 0..path.len() - 1 {
+        for second in first + 1..path.len() - 1 {
+            let adjacent = second == first + 1;
+            match segment_relation(path[first], path[first + 1], path[second], path[second + 1]) {
+                SegmentRelation::Disjoint => {}
+                SegmentRelation::Perpendicular {
+                    endpoint_a,
+                    endpoint_b,
+                    ..
+                } => {
+                    if adjacent {
+                        if !endpoint_a || !endpoint_b {
+                            return true;
+                        }
+                    } else if endpoint_a || endpoint_b {
+                        return true;
+                    }
+                }
+                SegmentRelation::CollinearTouch(_) => {
+                    if !adjacent {
+                        return true;
+                    }
+                }
+                SegmentRelation::CollinearOverlap { .. } => return true,
+            }
+        }
+    }
+    false
 }
 
 fn insert_wire_segment(
@@ -3339,6 +3702,228 @@ mod tests {
         assert_eq!(moved.b, GridPos::new(6, 0));
         assert!(document.pin_at(GridPos::new(0, 0)).is_some());
         assert!(document.pin_at(GridPos::new(4, 0)).is_some());
+    }
+
+    #[test]
+    fn repeated_symbol_moves_do_not_accumulate_wires() {
+        let mut document = Document::new();
+        let symbol = document
+            .add_symbol(SymbolKind::Resistor, GridPos::new(0, 0))
+            .unwrap();
+        document
+            .add_wire(GridPos::new(2, 0), GridPos::new(6, 0))
+            .unwrap();
+        document.select_only(Some(ObjectRef::Symbol(symbol)));
+        for _ in 0..4 {
+            for delta in [
+                GridPos::new(0, 2),
+                GridPos::new(2, 0),
+                GridPos::new(0, -2),
+                GridPos::new(-2, 0),
+            ] {
+                document.move_selection(delta).unwrap();
+                let at = document.symbol(symbol).unwrap().at;
+                let pin = GridPos::new(at.x + 2, at.y);
+                assert!(
+                    document.schematic().wires().any(|wire| wire.contains(pin)),
+                    "pin {pin:?} is disconnected after {delta:?}"
+                );
+                assert!(document
+                    .schematic()
+                    .wires()
+                    .any(|wire| wire.contains(GridPos::new(6, 0))));
+                assert!(
+                    document.schematic().wires().count() <= 2,
+                    "wire count grew to {} after {delta:?}",
+                    document.schematic().wires().count()
+                );
+                let mut geometry = BTreeSet::new();
+                for wire in document.schematic().wires() {
+                    assert!(geometry.insert((wire.a, wire.b)), "duplicate wire {wire:?}");
+                }
+            }
+        }
+        assert_eq!(document.symbol(symbol).unwrap().at, GridPos::new(0, 0));
+        assert_eq!(document.schematic().wires().count(), 1);
+    }
+
+    #[test]
+    fn moving_a_symbol_keeps_the_far_pin_of_a_bridged_wire_connected() {
+        let mut document = Document::new();
+        let symbol = document
+            .add_symbol(SymbolKind::Resistor, GridPos::new(0, 0))
+            .unwrap();
+        document
+            .add_wire(GridPos::new(2, 0), GridPos::new(8, 0))
+            .unwrap();
+        let other = document
+            .add_symbol(SymbolKind::Resistor, GridPos::new(10, 0))
+            .unwrap();
+        document.select_only(Some(ObjectRef::Symbol(symbol)));
+        for _ in 0..3 {
+            document.move_selection(GridPos::new(0, 2)).unwrap();
+            let at = document.symbol(symbol).unwrap().at;
+            assert!(document
+                .schematic()
+                .wires()
+                .any(|wire| wire.contains(GridPos::new(at.x + 2, at.y))));
+            assert!(document
+                .schematic()
+                .wires()
+                .any(|wire| wire.contains(GridPos::new(8, 0))));
+            assert!(document.schematic().wires().count() <= 2);
+        }
+        assert_eq!(document.symbol(other).unwrap().at, GridPos::new(10, 0));
+        assert_eq!(document.schematic().wires().count(), 2);
+    }
+
+    #[test]
+    fn moving_a_symbol_follows_wires_on_both_pins_without_growth() {
+        let mut document = Document::new();
+        let symbol = document
+            .add_symbol(SymbolKind::Resistor, GridPos::new(0, 0))
+            .unwrap();
+        document
+            .add_wire(GridPos::new(-10, 0), GridPos::new(-2, 0))
+            .unwrap();
+        document
+            .add_wire(GridPos::new(2, 0), GridPos::new(10, 0))
+            .unwrap();
+        document.select_only(Some(ObjectRef::Symbol(symbol)));
+        for _ in 0..3 {
+            document.move_selection(GridPos::new(0, 2)).unwrap();
+            let at = document.symbol(symbol).unwrap().at;
+            for pin in [GridPos::new(at.x - 2, at.y), GridPos::new(at.x + 2, at.y)] {
+                assert!(document.schematic().wires().any(|wire| wire.contains(pin)));
+            }
+            for end in [GridPos::new(-10, 0), GridPos::new(10, 0)] {
+                assert!(document.schematic().wires().any(|wire| wire.contains(end)));
+            }
+            assert!(document.schematic().wires().count() <= 4);
+            let mut geometry = BTreeSet::new();
+            for wire in document.schematic().wires() {
+                assert!(geometry.insert((wire.a, wire.b)), "duplicate wire {wire:?}");
+            }
+        }
+        assert_eq!(document.schematic().wires().count(), 4);
+    }
+
+    #[test]
+    fn moving_a_symbol_preserves_a_branch_on_the_wire_chain() {
+        let mut document = Document::new();
+        let symbol = document
+            .add_symbol(SymbolKind::Resistor, GridPos::new(0, 0))
+            .unwrap();
+        document
+            .add_wire(GridPos::new(2, 0), GridPos::new(6, 0))
+            .unwrap();
+        document
+            .add_wire(GridPos::new(6, 0), GridPos::new(10, 0))
+            .unwrap();
+        document
+            .add_wire(GridPos::new(6, 0), GridPos::new(6, 4))
+            .unwrap();
+        document.select_only(Some(ObjectRef::Symbol(symbol)));
+        for _ in 0..3 {
+            document.move_selection(GridPos::new(0, 2)).unwrap();
+            let at = document.symbol(symbol).unwrap().at;
+            let pin = GridPos::new(at.x + 2, at.y);
+            assert!(document.schematic().wires().any(|wire| wire.contains(pin)));
+            assert!(document
+                .schematic()
+                .wires()
+                .any(|wire| wire.contains(GridPos::new(10, 0))));
+            assert!(document
+                .schematic()
+                .wires()
+                .any(|wire| wire.contains(GridPos::new(6, 4))));
+            assert_eq!(
+                document
+                    .schematic()
+                    .wires()
+                    .filter(|wire| wire.contains(GridPos::new(6, 0)))
+                    .count(),
+                2
+            );
+            assert!(document.schematic().wires().count() <= 4);
+        }
+    }
+
+    #[test]
+    fn moving_a_symbol_keeps_an_interior_label_on_the_wire_chain() {
+        let mut document = Document::new();
+        let symbol = document
+            .add_symbol(SymbolKind::Resistor, GridPos::new(0, 0))
+            .unwrap();
+        document
+            .add_wire(GridPos::new(2, 0), GridPos::new(10, 0))
+            .unwrap();
+        let label = document.add_label(GridPos::new(6, 0), "N1").unwrap();
+        document.select_only(Some(ObjectRef::Symbol(symbol)));
+        for _ in 0..3 {
+            document.move_selection(GridPos::new(0, 2)).unwrap();
+            let at = document.symbol(symbol).unwrap().at;
+            let pin = GridPos::new(at.x + 2, at.y);
+            assert!(document.schematic().wires().any(|wire| wire.contains(pin)));
+            let label = document.label(label).unwrap();
+            assert_eq!(label.at, GridPos::new(6, 0));
+            assert!(document
+                .schematic()
+                .wires()
+                .any(|wire| wire.contains(label.at)));
+            assert!(document
+                .schematic()
+                .wires()
+                .any(|wire| wire.contains(GridPos::new(10, 0))));
+            assert!(document.schematic().wires().count() <= 3);
+        }
+    }
+
+    #[test]
+    fn moving_a_symbol_with_pins_inside_a_wire_rebuilds_the_chain_once() {
+        let mut document = Document::new();
+        let symbol = document
+            .add_symbol(SymbolKind::Resistor, GridPos::new(0, 0))
+            .unwrap();
+        document
+            .add_wire(GridPos::new(-6, 0), GridPos::new(6, 0))
+            .unwrap();
+        document.select_only(Some(ObjectRef::Symbol(symbol)));
+        for _ in 0..3 {
+            document.move_selection(GridPos::new(0, 2)).unwrap();
+            let at = document.symbol(symbol).unwrap().at;
+            for pin in [GridPos::new(at.x - 2, at.y), GridPos::new(at.x + 2, at.y)] {
+                assert!(document.schematic().wires().any(|wire| wire.contains(pin)));
+            }
+            for end in [GridPos::new(-6, 0), GridPos::new(6, 0)] {
+                assert!(document.schematic().wires().any(|wire| wire.contains(end)));
+            }
+            assert!(document.schematic().wires().count() <= 3);
+        }
+        assert_eq!(document.schematic().wires().count(), 3);
+    }
+
+    #[test]
+    fn undoing_symbol_moves_restores_the_wire_chain() {
+        let mut document = Document::new();
+        let symbol = document
+            .add_symbol(SymbolKind::Resistor, GridPos::new(0, 0))
+            .unwrap();
+        document
+            .add_wire(GridPos::new(2, 0), GridPos::new(6, 0))
+            .unwrap();
+        document.select_only(Some(ObjectRef::Symbol(symbol)));
+        document.move_selection(GridPos::new(0, 2)).unwrap();
+        let after_first = document.schematic().wires().count();
+        document.move_selection(GridPos::new(2, 0)).unwrap();
+        document.undo().unwrap();
+        assert_eq!(document.schematic().wires().count(), after_first);
+        document.undo().unwrap();
+        assert_eq!(document.schematic().wires().count(), 1);
+        assert!(document
+            .schematic()
+            .wires()
+            .any(|wire| wire.a == GridPos::new(2, 0) && wire.b == GridPos::new(6, 0)));
     }
 
     #[test]
