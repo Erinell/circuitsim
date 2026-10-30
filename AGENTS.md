@@ -141,6 +141,7 @@ Le MOSFET reste un exemple d'extension (`examples/custom_mosfet.rs`) ; les types
 | G7 onboarding et accessibilité | terminé |
 | G8 finalisation `v0.2.0` | terminé |
 | Refonte ergonomique v0.5 (U1–U7), surintensités, diagnostics et convergence transitoire | terminé |
+| Ergonomie du câblage (extensions perpendiculaires, fusion colinéaire, reroutage de chaîne sans accumulation, accrochage et insertion en série au déplacement, glissement sur deux axes) | terminé |
 
 ## Limites finales
 

@@ -120,15 +120,35 @@ annulables en une action.
   l’insertion.
 - **Chemin de fil** : un chemin orthogonal peut contenir plusieurs segments. Les
   segments nuls ou déjà présents sont ignorés ; un chemin sans nouveau segment
-  est refusé.
-- **Déplacement de segment** : un segment se déplace perpendiculairement. La
-  commande ne remplace que ce fil : ses extrémités sont libérées et aucun
-  embout ni fil supplémentaire n'est créé. Les broches, labels, jonctions et
-  autres fils restent à leur place ; l'ERC signale les connexions perdues. Une
-  position déjà occupée par un fil identique est refusée.
+  est refusé. Un segment colinéaire ajouté au bout d’un fil existant fusionne
+  avec lui, sans créer de petit tronçon supplémentaire.
+- **Déplacement de segment** : un segment se déplace sur un seul axe, choisi
+  selon le glissement dominant : perpendiculairement ou le long de son propre
+  axe. La commande ne remplace que ce fil : ses extrémités sont libérées et
+  aucun embout ni fil supplémentaire n'est créé. Les broches, labels, jonctions
+  et autres fils restent à leur place ; l'ERC signale les connexions perdues.
+  Une position déjà occupée par un fil identique est refusée.
+- **Déplacement de composant** : les fils reliés aux broches déplacées sont
+  regroupés en chaînes simples. Chaque chaîne est retirée puis reconstruite une
+  seule fois à travers ses ancres — broches fixes ou déplacées, labels,
+  jonctions, contacts en T, extrémités libres — avec un chemin orthogonal. Les
+  coudes créés par un déplacement précédent sont ainsi absorbés au lieu de
+  s’empiler. Le suivi s’arrête aux branches, aux fils sélectionnés et aux
+  chevauchements colinéaires ; un croisement X sans jonction n’est pas une
+  connexion. Si la chaîne n’est pas simple ou fiable, elle reste inchangée
+  plutôt que de produire une géométrie supplémentaire.
+- **Accrochage au déplacement** : si une broche de la sélection arrive à deux
+  cases au plus d’un fil ou d’une broche qui ne fait pas partie de son net
+  d’origine, le déplacement est ajusté pour l’aligner exactement. Les fils qui
+  suivaient la sélection restent alors à leur place : le composant se
+  déconnecte de son ancien emplacement. Un composant à deux broches dont les
+  deux broches tombent sur le même fil, sans label ni jonction entre elles, y
+  est inséré en série, comme lors d’un placement. Un cercle montre la cible
+  pendant le glissement. Sans cible, le suivi de chaîne ci-dessus s’applique.
 - **Extrémité libre** : une extrémité sans broche, label, jonction ou autre fil
-  peut être déplacée sur l’axe du fil. Une extrémité connectée est refusée
-  (`CannotResizeWire`).
+  peut être déplacée sur l’axe du fil ou perpendiculairement. Le déplacement
+  perpendiculaire conserve le fil d’origine et ajoute un prolongement avec
+  coude ; une extrémité connectée est refusée (`CannotResizeWire`).
 - **Sondes** : `Voltmeter`, `Ammeter` et `Ohmmeter` sont des symboles à une
   broche exclus de la netlist. Ils servent de repères de mesure et ne modifient
   ni les nœuds ni les composants simulés.
