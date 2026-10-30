@@ -86,12 +86,12 @@ jobs:
 
       - name: Package
         run: |
-          name="CircuitSim-${RELEASE_TAG}-linux-x86_64"
-          mkdir -p "release-assets/$name"
-          cp target/release/circuitsim "release-assets/$name/circuitsim"
-          cp README.md LICENSE-MIT LICENSE-APACHE THIRD_PARTY_LICENSES.md "release-assets/$name/"
-          chmod +x "release-assets/$name/circuitsim"
-          tar -czf "release-assets/$name.tar.gz" -C release-assets "$name"
+          stem="CircuitSim-${RELEASE_TAG}-linux-x86_64"
+          mkdir -p release-assets/linux
+          cp target/release/circuitsim release-assets/linux/circuitsim
+          cp README.md LICENSE-MIT LICENSE-APACHE THIRD_PARTY_LICENSES.md release-assets/linux/
+          chmod +x release-assets/linux/circuitsim
+          tar -czf "release-assets/$stem.tar.gz" -C release-assets/linux .
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
@@ -129,11 +129,11 @@ jobs:
 
       - name: Package
         run: |
-          name="CircuitSim-${RELEASE_TAG}-web"
-          mkdir -p "release-assets/$name"
-          cp -r dist/* "release-assets/$name/"
-          cp README.md LICENSE-MIT LICENSE-APACHE THIRD_PARTY_LICENSES.md "release-assets/$name/"
-          (cd release-assets && zip -r "$name.zip" "$name")
+          stem="CircuitSim-${RELEASE_TAG}-web"
+          mkdir -p release-assets/web
+          cp -r dist/* release-assets/web/
+          cp README.md LICENSE-MIT LICENSE-APACHE THIRD_PARTY_LICENSES.md release-assets/web/
+          (cd release-assets/web && zip -r "../$stem.zip" .)
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
